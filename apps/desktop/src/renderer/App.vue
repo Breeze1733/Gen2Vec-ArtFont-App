@@ -25,147 +25,24 @@
       </div>
     </header>
 
-    <section class="mode-switch" aria-label="任务类型">
-      <button
-        v-for="item in modes"
-        :key="item.value"
-        type="button"
-        :class="['mode-button', { active: mode === item.value }]"
-        @click="mode = item.value"
-      >
-        {{ item.label }}
-      </button>
-      <span>支持图形界面与命令行入口</span>
-    </section>
+    <ModeSwitcher v-model:modelValue="mode" :modes="modes" />
 
     <main class="workspace">
-      <section class="panel main-panel">
-        <div class="panel-header">
-          <div>
-            <p class="section-kicker">Generation</p>
-            <h2>生成配置</h2>
-          </div>
-          <div class="status">
-            <span class="status-dot"></span>
-            <span>{{ running ? 'Running' : 'Idle' }}</span>
-          </div>
-        </div>
+      <div>
+        <GenerationForm
+          :mode="mode"
+          :payload="payload"
+          :running="running"
+          :error="error"
+          @file-change="handleFileChange"
+          @submit="startGeneration"
+          @reset="resetForm"
+        />
 
-        <div class="panel-body">
-          <div v-if="mode === 'single'" class="form-grid">
-            <label class="field">
-              <span>文字内容</span>
-              <input v-model="payload.text" type="text" placeholder="例如：霓虹之风" />
-            </label>
-            <label class="field">
-              <span>风格提示词</span>
-              <input v-model="payload.prompt" type="text" placeholder="例如：霓虹渐变、金属质感" />
-            </label>
-          </div>
+        <ResultPanel :result="result" @download="downloadOutput" />
+      </div>
 
-          <div v-else-if="mode === 'batch'" class="form-grid">
-            <label class="field">
-              <span>批量提示词</span>
-              <textarea
-                v-model="payload.batch"
-                rows="5"
-                placeholder="每行一条：&#10;晨曦之城 | 透明玻璃风&#10;深海波纹 | 水纹渐变"
-              ></textarea>
-            </label>
-          </div>
-
-          <div v-else class="form-grid">
-            <label class="field">
-              <span>选择图片</span>
-              <input type="file" accept="image/png,image/jpeg,image/jpg" />
-              <small>支持 PNG / JPG，后续可自动生成透明 PNG 与 SVG。</small>
-            </label>
-          </div>
-
-          <div class="form-grid two-columns">
-            <label class="field">
-              <span>负面提示词</span>
-              <input v-model="payload.negative" type="text" placeholder="例如：模糊、锯齿、断裂" />
-            </label>
-            <label class="field">
-              <span>分辨率</span>
-              <select v-model="payload.resolution">
-                <option>1024 x 1024</option>
-                <option>1024 x 768</option>
-                <option>2048 x 2048</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>输出格式</span>
-              <select v-model="payload.format">
-                <option>PNG + SVG</option>
-                <option>SVG Only</option>
-                <option>PNG + JSON</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>随机种子</span>
-              <input v-model.number="payload.seed" type="number" placeholder="0 表示随机" />
-            </label>
-          </div>
-
-          <div class="vector-settings">
-            <label>
-              <span>平滑度</span>
-              <input v-model.number="payload.vector.smooth" type="range" min="1" max="10" />
-            </label>
-            <label>
-              <span>阈值</span>
-              <input v-model.number="payload.vector.threshold" type="range" min="1" max="100" />
-            </label>
-            <label class="compact-number">
-              <span>颜色数</span>
-              <input v-model.number="payload.vector.colors" type="number" min="2" max="32" />
-            </label>
-          </div>
-
-          <div class="actions">
-            <button class="primary-button" type="button" @click="simulateRun">开始生成</button>
-            <button class="secondary-button" type="button" @click="resetForm">重置</button>
-          </div>
-        </div>
-      </section>
-
-      <aside class="panel side-panel">
-        <div class="panel-header">
-          <div>
-            <p class="section-kicker">History</p>
-            <h2>运行记录</h2>
-          </div>
-          <button class="secondary-button small" type="button">导出日志</button>
-        </div>
-
-        <div class="log-list">
-          <article v-for="item in logs" :key="item.id" class="log-item">
-            <div>
-              <h3>{{ item.title }}</h3>
-              <p>{{ item.time }} / {{ item.status }}</p>
-            </div>
-            <span>{{ item.mode }}</span>
-          </article>
-        </div>
-
-        <div class="meta-block">
-          <h3>输出文件</h3>
-          <ul>
-            <li>原始生成图</li>
-            <li>透明 PNG</li>
-            <li>SVG 矢量图</li>
-            <li>JSON 元数据</li>
-            <li>运行日志</li>
-          </ul>
-        </div>
-
-        <div class="meta-block">
-          <h3>记录字段</h3>
-          <p>生成过程、模型版本、工作流版本、关键参数、耗时、错误信息与输出路径。</p>
-        </div>
-      </aside>
+      <HistoryPanel :logs="logs" @export-history="exportHistory" />
     </main>
 
     <section class="panel command-panel">
@@ -181,6 +58,11 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
+import ModeSwitcher from './components/ModeSwitcher.vue'
+import GenerationForm from './components/GenerationForm.vue'
+import ResultPanel from './components/ResultPanel.vue'
+import HistoryPanel from './components/HistoryPanel.vue'
+import { generateArtText, saveFile } from './api'
 
 const modes = [
   { label: '单条提示词', value: 'single' },
@@ -188,8 +70,11 @@ const modes = [
   { label: '图片矢量化', value: 'vectorize' }
 ]
 
+const HISTORY_KEY = 'art-text-generator-history'
+
 const mode = ref('single')
 const running = ref(false)
+const error = ref('')
 
 const payload = reactive({
   text: '',
@@ -199,6 +84,7 @@ const payload = reactive({
   resolution: '1024 x 1024',
   format: 'PNG + SVG',
   seed: 0,
+  imageFile: null,
   vector: {
     smooth: 6,
     threshold: 42,
@@ -206,34 +92,178 @@ const payload = reactive({
   }
 })
 
-const logs = ref([
-  { id: 1, title: '霓虹之风', time: '11:12', status: '完成', mode: '单条' },
-  { id: 2, title: '批量：12 条提示词', time: '10:58', status: '完成', mode: '批量' },
-  { id: 3, title: '图片矢量化', time: '10:33', status: '失败', mode: '矢量化' }
-])
+const result = reactive({
+  image: '',
+  svg: '',
+  metadata: null
+})
 
-const simulateRun = () => {
+const logs = ref(loadHistory())
+
+function loadHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+function saveHistory() {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(logs.value.slice(0, 50)))
+}
+
+const validateForm = () => {
+  error.value = ''
+
+  if (mode.value === 'single') {
+    if (!payload.text.trim()) {
+      error.value = '请输入艺术字文字内容。'
+      return false
+    }
+    if (!payload.prompt.trim()) {
+      error.value = '请输入风格提示词。'
+      return false
+    }
+  }
+
+  if (mode.value === 'vectorize') {
+    if (!payload.imageFile) {
+      error.value = '请选择要矢量化的图片文件。'
+      return false
+    }
+  }
+
+  return true
+}
+
+const handleFileChange = (event) => {
+  const file = event.target.files?.[0]
+  payload.imageFile = file || null
+}
+
+const startGeneration = async () => {
+  if (!validateForm()) {
+    return
+  }
+
+  error.value = ''
   running.value = true
+  result.image = ''
+  result.svg = ''
+  result.metadata = null
 
-  const title =
-    mode.value === 'single'
-      ? payload.text || '未命名任务'
-      : mode.value === 'batch'
-        ? '批处理任务'
-        : '图片矢量化任务'
-
-  logs.value.unshift({
+  const taskTitle = mode.value === 'single' ? payload.text.trim() : mode.value === 'batch' ? '批量任务' : '图片矢量化'
+  const task = {
     id: Date.now(),
-    title,
-    time: '刚刚',
+    title: taskTitle,
+    time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
     status: '运行中',
     mode: mode.value === 'single' ? '单条' : mode.value === 'batch' ? '批量' : '矢量化'
-  })
+  }
 
-  window.setTimeout(() => {
+  logs.value.unshift(task)
+  saveHistory()
+
+  try {
+    const payloadForApi = {
+      mode: mode.value,
+      text: payload.text.trim(),
+      prompt: payload.prompt.trim(),
+      negative: payload.negative.trim(),
+      resolution: payload.resolution,
+      format: payload.format,
+      seed: payload.seed,
+      vector: { ...payload.vector }
+    }
+
+    const response = await generateArtText(payloadForApi)
+
+    result.image = response.png
+    result.svg = response.svg
+    result.metadata = response.metadata
+
+    task.status = '完成'
+    saveHistory()
+  } catch (err) {
+    error.value = err?.message || '生成失败，请稍后重试。'
+    task.status = '失败'
+    saveHistory()
+  } finally {
     running.value = false
-  }, 700)
+  }
 }
+
+const downloadFile = (filename, blob) => {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  URL.revokeObjectURL(url)
+}
+
+const saveWithElectron = async (data, filename, filters) => {
+  try {
+    const result = await saveFile(data, filename, filters)
+    if (result?.canceled) {
+      return false
+    }
+
+    return !!result?.filePath
+  } catch (err) {
+    console.warn('Electron save failed:', err)
+    return false
+  }
+}
+
+const downloadOutput = async (type) => {
+  const fileNameBase = safeName(payload.text || 'art-text')
+
+  if (type === 'png' && result.image) {
+    const defaultName = `${fileNameBase}.png`
+    if (window.artTextApp?.saveFile) {
+      const saved = await saveWithElectron(result.image, defaultName, [{ name: 'PNG', extensions: ['png'] }])
+      if (saved) return
+    }
+
+    const a = document.createElement('a')
+    a.href = result.image
+    a.download = defaultName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    return
+  }
+
+  if (type === 'svg' && result.svg) {
+    const defaultName = `${fileNameBase}.svg`
+    if (window.artTextApp?.saveFile) {
+      const saved = await saveWithElectron(result.svg, defaultName, [{ name: 'SVG', extensions: ['svg'] }])
+      if (saved) return
+    }
+
+    const blob = new Blob([result.svg], { type: 'image/svg+xml;charset=utf-8' })
+    downloadFile(defaultName, blob)
+    return
+  }
+
+  if (type === 'json' && result.metadata) {
+    const defaultName = `${fileNameBase}.json`
+    const jsonText = JSON.stringify(result.metadata, null, 2)
+    if (window.artTextApp?.saveFile) {
+      const saved = await saveWithElectron(jsonText, defaultName, [{ name: 'JSON', extensions: ['json'] }])
+      if (saved) return
+    }
+
+    const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' })
+    downloadFile(defaultName, blob)
+    return
+  }
+}
+
+const safeName = (name) => name.replace(/[<>:"/\\|?*]+/g, '-').trim() || 'art-text'
 
 const resetForm = () => {
   payload.text = ''
@@ -243,8 +273,19 @@ const resetForm = () => {
   payload.resolution = '1024 x 1024'
   payload.format = 'PNG + SVG'
   payload.seed = 0
+  payload.imageFile = null
   payload.vector.smooth = 6
   payload.vector.threshold = 42
   payload.vector.colors = 8
+  error.value = ''
+  result.image = ''
+  result.svg = ''
+  result.metadata = null
+}
+
+const exportHistory = () => {
+  const data = JSON.stringify(logs.value, null, 2)
+  const blob = new Blob([data], { type: 'application/json;charset=utf-8' })
+  downloadFile('art-text-history.json', blob)
 }
 </script>

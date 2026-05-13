@@ -1,5 +1,6 @@
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, net } = require('electron')
 const path = require('path')
+const fs = require('fs/promises')
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -23,6 +24,86 @@ function createWindow() {
 
   win.loadFile(path.join(__dirname, '../dist/index.html'))
 }
+
+function parseDataUrl(dataUrl) {
+  const match = /^data:(.+?)(;base64)?,(.*)$/s.exec(dataUrl)
+  if (!match) {
+    return Buffer.from(dataUrl, 'utf8')
+  }
+
+  const isBase64 = !!match[2]
+  const data = match[3]
+  return isBase64 ? Buffer.from(data, 'base64') : Buffer.from(decodeURIComponent(data), 'utf8')
+}
+
+async function requestBackend(apiUrl, payload) {
+  return new Promise((resolve, reject) => {
+    try {
+      const requestUrl = new URL(apiUrl)
+      const request = net.request({
+        method: 'POST',
+        protocol: requestUrl.protocol,
+        hostname: requestUrl.hostname,
+        port: requestUrl.port,
+        path: `${requestUrl.pathname}${requestUrl.search}`
+      })
+
+      request.setHeader('Content-Type', 'application/json')
+
+      let body = ''
+      request.on('response', (response) => {
+        response.on('data', (chunk) => {
+          body += chunk.toString()
+        })
+        response.on('end', () => {
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            try {
+              resolve(JSON.parse(body))
+            } catch (err) {
+              reject(err)
+            }
+          } else {
+            reject(new Error(`后端服务返回 ${response.statusCode}`))
+          }
+        })
+      })
+
+      request.on('error', reject)
+      request.write(JSON.stringify(payload))
+      request.end()
+    } catch (err) {
+      reject(err)
+    }
+  })
+}
+
+ipcMain.handle('art-text/generate', async (event, payload) => {
+  const apiUrl = process.env.ART_TEXT_BACKEND_URL
+  if (!apiUrl) {
+    throw new Error('后端接口未配置，请设置 ART_TEXT_BACKEND_URL 环境变量。')
+  }
+
+  return requestBackend(apiUrl, payload)
+})
+
+ipcMain.handle('art-text/save-file', async (event, options) => {
+  const win = BrowserWindow.getFocusedWindow()
+  const { data, defaultName = 'output', filters = [] } = options || {}
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: '保存文件',
+    defaultPath: defaultName,
+    filters
+  })
+
+  if (canceled || !filePath) {
+    return { canceled: true }
+  }
+
+  const buffer = parseDataUrl(data)
+  await fs.writeFile(filePath, buffer)
+
+  return { canceled: false, filePath }
+})
 
 app.whenReady().then(() => {
   createWindow()
