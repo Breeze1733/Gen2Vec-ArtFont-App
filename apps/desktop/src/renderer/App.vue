@@ -62,7 +62,7 @@ import ModeSwitcher from './components/ModeSwitcher.vue'
 import GenerationForm from './components/GenerationForm.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
-import { generateArtText, saveFile } from './api'
+import { generateArtBitmap, saveFile, vectorizeArtImage } from './api'
 
 const modes = [
   { label: '单条提示词', value: 'single' },
@@ -186,7 +186,7 @@ const startGeneration = async () => {
       image_name: imageName
     }
 
-    const response = await generateArtText(payloadForApi)
+    const response = mode.value === 'vectorize' ? await vectorizeArtImage(payloadForApi) : await generateArtBitmap(payloadForApi)
 
     result.image = response.png
     result.svg = response.svg

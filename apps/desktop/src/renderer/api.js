@@ -59,7 +59,7 @@ function renderSvgToPng(svg, width, height) {
       ctx.drawImage(img, 0, 0, width, height)
       resolve(canvas.toDataURL('image/png'))
     }
-    img.onerror = (event) => {
+    img.onerror = () => {
       reject(new Error('SVG 转 PNG 失败'))
     }
     img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
@@ -85,31 +85,20 @@ async function generateMockResult(payload) {
   const { width, height } = parseResolution(payload.resolution)
   const png = await renderSvgToPng(svg, width, height)
   const metadata = createMetadata(payload, svg)
-
-  return {
-    png,
-    svg,
-    metadata
-  }
+  return { png, svg, metadata }
 }
 
-export async function generateArtText(payload) {
-  if (window.artTextApp?.generate) {
-    try {
-      return await window.artTextApp.generate(payload)
-    } catch (err) {
-      console.warn('Electron backend generate failed:', err)
-      if (payload?.mode === 'vectorize') {
-        throw err
-      }
-      return generateMockResult(payload)
-    }
-  }
-
-  if (payload?.mode === 'vectorize') {
+export async function vectorizeArtImage(payload) {
+  if (!window.artTextApp?.vectorize) {
     throw new Error('矢量化模式需要 Electron 后端和 FastAPI 服务，请使用桌面端联调。')
   }
+  return window.artTextApp.vectorize(payload)
+}
 
+export async function generateArtBitmap(payload) {
+  if (window.artTextApp?.generate) {
+    return window.artTextApp.generate(payload)
+  }
   return generateMockResult(payload)
 }
 
@@ -117,6 +106,5 @@ export async function saveFile(data, defaultName, filters = []) {
   if (window.artTextApp?.saveFile) {
     return window.artTextApp.saveFile({ data, defaultName, filters })
   }
-
   throw new Error('Electron 保存接口不可用')
 }

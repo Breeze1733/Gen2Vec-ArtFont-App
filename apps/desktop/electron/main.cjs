@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, net } = require('electron')
 const path = require('path')
 const fs = require('fs/promises')
 
-const DEFAULT_BACKEND_URL = 'http://127.0.0.1:8000/api/v1/generate'
+const DEFAULT_BACKEND_BASE_URL = 'http://127.0.0.1:8000/api/v1'
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -36,6 +36,21 @@ function parseDataUrl(dataUrl) {
   const isBase64 = !!match[2]
   const data = match[3]
   return isBase64 ? Buffer.from(data, 'base64') : Buffer.from(decodeURIComponent(data), 'utf8')
+}
+
+function getBackendBaseUrl() {
+  const envUrl = process.env.ART_TEXT_BACKEND_URL
+  if (!envUrl) {
+    return DEFAULT_BACKEND_BASE_URL
+  }
+  const normalized = envUrl.replace(/\/+$/, '')
+  if (normalized.endsWith('/generate')) {
+    return normalized.slice(0, -'/generate'.length)
+  }
+  if (normalized.endsWith('/vectorize')) {
+    return normalized.slice(0, -'/vectorize'.length)
+  }
+  return normalized
 }
 
 async function requestBackend(apiUrl, payload) {
@@ -88,9 +103,13 @@ async function requestBackend(apiUrl, payload) {
   })
 }
 
-ipcMain.handle('art-text/generate', async (event, payload) => {
-  const apiUrl = process.env.ART_TEXT_BACKEND_URL || DEFAULT_BACKEND_URL
+ipcMain.handle('art-text/vectorize', async (event, payload) => {
+  const apiUrl = `${getBackendBaseUrl()}/vectorize`
   return requestBackend(apiUrl, payload)
+})
+
+ipcMain.handle('art-text/generate', async () => {
+  throw new Error('普通艺术字位图生成接口暂未实现。')
 })
 
 ipcMain.handle('art-text/save-file', async (event, options) => {
@@ -108,7 +127,6 @@ ipcMain.handle('art-text/save-file', async (event, options) => {
 
   const buffer = parseDataUrl(data)
   await fs.writeFile(filePath, buffer)
-
   return { canceled: false, filePath }
 })
 

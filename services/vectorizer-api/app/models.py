@@ -6,19 +6,21 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class VectorConfig(BaseModel):
+    # Frontend vectorization controls.
     smooth: int = Field(default=6, ge=1, le=10)
     threshold: int = Field(default=42, ge=1, le=100)
     colors: int = Field(default=8, ge=2, le=32)
 
 
 class GeneratedImageRef(BaseModel):
+    # Generated-image source (reserved for pipeline handoff).
     artifact_id: Optional[str] = None
     image_base64: Optional[str] = None
     file_path: Optional[str] = None
 
 
-class GenerateRequest(BaseModel):
-    mode: Literal["single", "batch", "vectorize"]
+class VectorizeRequest(BaseModel):
+    # "upload": user-provided bitmap; "generated": pipeline-produced bitmap.
     source_type: Literal["upload", "generated"] = "upload"
     text: str = ""
     prompt: str = ""
@@ -34,6 +36,7 @@ class GenerateRequest(BaseModel):
     @field_validator("resolution")
     @classmethod
     def validate_resolution(cls, value: str) -> str:
+        # Normalize resolution like "1024 x 1024" -> "1024x1024".
         value = value.strip().lower().replace(" ", "")
         parts = value.split("x")
         if len(parts) != 2:
@@ -46,7 +49,8 @@ class GenerateRequest(BaseModel):
         return value
 
 
-class GenerateResponse(BaseModel):
+class VectorizeResponse(BaseModel):
+    # PNG preview (data URL), SVG text and structured metadata.
     png: str
     svg: str
     metadata: dict
