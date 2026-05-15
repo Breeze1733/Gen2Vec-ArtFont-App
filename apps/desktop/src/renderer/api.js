@@ -99,8 +99,15 @@ export async function generateArtText(payload) {
       return await window.artTextApp.generate(payload)
     } catch (err) {
       console.warn('Electron backend generate failed:', err)
+      if (payload?.mode === 'vectorize') {
+        throw err
+      }
       return generateMockResult(payload)
     }
+  }
+
+  if (payload?.mode === 'vectorize') {
+    throw new Error('矢量化模式需要 Electron 后端和 FastAPI 服务，请使用桌面端联调。')
   }
 
   return generateMockResult(payload)

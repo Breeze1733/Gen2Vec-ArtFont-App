@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, dialog, net } = require('electron')
 const path = require('path')
 const fs = require('fs/promises')
 
+const DEFAULT_BACKEND_URL = 'http://127.0.0.1:8000/api/v1/generate'
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1080,
@@ -63,7 +65,16 @@ async function requestBackend(apiUrl, payload) {
               reject(err)
             }
           } else {
-            reject(new Error(`后端服务返回 ${response.statusCode}`))
+            let detail = ''
+            try {
+              const parsed = JSON.parse(body)
+              if (parsed && typeof parsed.detail === 'string') {
+                detail = `: ${parsed.detail}`
+              }
+            } catch (err) {
+              // Non-JSON body is still a valid backend error.
+            }
+            reject(new Error(`后端服务返回 ${response.statusCode}${detail}`))
           }
         })
       })
@@ -78,11 +89,7 @@ async function requestBackend(apiUrl, payload) {
 }
 
 ipcMain.handle('art-text/generate', async (event, payload) => {
-  const apiUrl = process.env.ART_TEXT_BACKEND_URL
-  if (!apiUrl) {
-    throw new Error('后端接口未配置，请设置 ART_TEXT_BACKEND_URL 环境变量。')
-  }
-
+  const apiUrl = process.env.ART_TEXT_BACKEND_URL || DEFAULT_BACKEND_URL
   return requestBackend(apiUrl, payload)
 })
 

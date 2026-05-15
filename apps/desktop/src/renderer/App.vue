@@ -165,15 +165,25 @@ const startGeneration = async () => {
   saveHistory()
 
   try {
+    let imageBase64 = null
+    let imageName = null
+    if (mode.value === 'vectorize' && payload.imageFile) {
+      imageBase64 = await fileToDataUrl(payload.imageFile)
+      imageName = payload.imageFile.name
+    }
+
     const payloadForApi = {
       mode: mode.value,
+      source_type: mode.value === 'vectorize' ? 'upload' : undefined,
       text: payload.text.trim(),
       prompt: payload.prompt.trim(),
       negative: payload.negative.trim(),
       resolution: payload.resolution,
       format: payload.format,
       seed: payload.seed,
-      vector: { ...payload.vector }
+      vector: { ...payload.vector },
+      image_base64: imageBase64,
+      image_name: imageName
     }
 
     const response = await generateArtText(payloadForApi)
@@ -192,6 +202,14 @@ const startGeneration = async () => {
     running.value = false
   }
 }
+
+const fileToDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('图片读取失败，请重试'))
+    reader.readAsDataURL(file)
+  })
 
 const downloadFile = (filename, blob) => {
   const url = URL.createObjectURL(blob)
