@@ -14,7 +14,10 @@
           <h3>{{ item.title }}</h3>
           <p>{{ item.time }} / {{ item.status }}</p>
         </div>
-        <span>{{ item.mode }}</span>
+        <div class="log-actions">
+          <span>{{ item.mode }}</span>
+          <button class="secondary-button tiny" type="button" @click="$emit('delete-history', item.id)">删除</button>
+        </div>
       </article>
       <p v-if="logs.length === 0" class="empty-log">暂无运行记录</p>
     </div>
@@ -40,5 +43,5 @@
 <script setup>
 const props = defineProps({ logs: Array })
 
-const emit = defineEmits(['export-history'])
+const emit = defineEmits(['export-history', 'delete-history'])
 </script>

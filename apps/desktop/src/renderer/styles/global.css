@@ -416,6 +416,12 @@ button:disabled {
   font-size: 12px;
 }
 
+.log-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .log-item > span {
   flex: 0 0 auto;
   border-radius: 8px;
@@ -424,6 +430,12 @@ button:disabled {
   padding: 5px 8px;
   font-size: 12px;
   font-weight: 700;
+}
+
+.secondary-button.tiny {
+  min-height: 28px;
+  padding: 6px 10px;
+  font-size: 13px;
 }
 
 .meta-block {

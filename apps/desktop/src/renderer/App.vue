@@ -42,7 +42,7 @@
         <ResultPanel :result="result" @download="downloadOutput" />
       </div>
 
-      <HistoryPanel :logs="logs" @export-history="exportHistory" />
+      <HistoryPanel :logs="logs" @export-history="exportHistory" @delete-history="deleteHistoryItem" />
     </main>
 
     <section class="panel command-panel">
@@ -305,5 +305,10 @@ const exportHistory = () => {
   const data = JSON.stringify(logs.value, null, 2)
   const blob = new Blob([data], { type: 'application/json;charset=utf-8' })
   downloadFile('art-text-history.json', blob)
+}
+
+const deleteHistoryItem = (id) => {
+  logs.value = logs.value.filter((item) => item.id !== id)
+  saveHistory()
 }
 </script>
