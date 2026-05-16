@@ -47,7 +47,16 @@ Development-Training/
 
 ## 快速启动联调
 
-启动后端监听端口
+所有命令在**项目根目录**下执行。
+
+### word2pic 文生图后端（端口 9001）
+
+```powershell
+cd services/word2pic
+uv run word2pic-api
+```
+
+### 矢量化后端（端口 8000）
 
 ```powershell
 cd services/vectorizer-api
@@ -55,17 +64,19 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-启动桌面版前端
+### 桌面端
 
 ```powershell
 cd apps/desktop
-npm install
 npm run electron:dev
 ```
 
-说明：
-- 桌面端默认直连 `http://127.0.0.1:8000/api/v1/generate`
-- 如需切换后端地址，可再设置 `ART_TEXT_BACKEND_URL` 覆盖默认值
+桌面端默认连接 `http://127.0.0.1:8000/api/v1`（矢量化）。如需对接 word2pic：
+
+```powershell
+$env:ART_TEXT_BACKEND_URL="http://127.0.0.1:9001/api/v1"
+npm run electron:dev
+```
 
 ## 当前状态
 
