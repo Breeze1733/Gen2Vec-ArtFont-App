@@ -1,0 +1,28 @@
+[project]
+name = "word2pic"
+version = "0.1.0"
+description = "Text-to-image generation backend for the Development-Training workspace"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115.12",
+    "httpx>=0.28.1",
+    "pillow>=11.1.0",
+    "torch>=2.11.0",
+    "uvicorn[standard]>=0.34.0",
+]
+
+[project.scripts]
+word2pic-api = "app.main:run"
+
+[build-system]
+requires = ["hatchling>=1.26.3"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/app"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

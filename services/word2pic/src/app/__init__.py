@@ -1,0 +1,1 @@
+"""word2pic backend application package."""
