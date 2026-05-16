@@ -9,6 +9,7 @@
         <button class="secondary-button" type="button" :disabled="!result.image" @click="$emit('download', 'png')">下载 PNG</button>
         <button class="secondary-button" type="button" :disabled="!result.svg" @click="$emit('download', 'svg')">下载 SVG</button>
         <button class="secondary-button" type="button" :disabled="!result.metadata" @click="$emit('download', 'json')">下载 JSON</button>
+        <button class="secondary-button" type="button" :disabled="!result.image && !result.svg && !result.metadata" @click="$emit('save-all')">保存全部</button>
       </div>
     </div>
 
@@ -34,5 +35,5 @@ const props = defineProps({
   result: Object
 })
 
-const emit = defineEmits(['download'])
+const emit = defineEmits(['download', 'save-all'])
 </script>

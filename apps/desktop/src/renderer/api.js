@@ -55,3 +55,11 @@ export async function saveFile(data, defaultName, filters = []) {
   }
   throw new Error('Electron 保存接口不可用')
 }
+
+export async function saveResults(results, fileBase) {
+  if (window.artTextApp?.saveResults) {
+    return window.artTextApp.saveResults({ results, fileBase })
+  }
+
+  throw new Error('Electron 保存接口不可用')
+}

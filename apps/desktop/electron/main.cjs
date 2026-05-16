@@ -130,6 +130,44 @@ ipcMain.handle('art-text/save-file', async (event, options) => {
   return { canceled: false, filePath }
 })
 
+ipcMain.handle('art-text/save-results', async (event, options) => {
+  const win = BrowserWindow.getFocusedWindow()
+  const { results = {}, fileBase = 'art-text' } = options || {}
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: '选择保存目录',
+    properties: ['openDirectory', 'createDirectory']
+  })
+
+  if (canceled || !filePaths || filePaths.length === 0) {
+    return { canceled: true }
+  }
+
+  const folder = filePaths[0]
+  const savedFiles = []
+
+  const items = [
+    { key: 'png', ext: 'png', data: results.png, type: 'image/png' },
+    { key: 'svg', ext: 'svg', data: results.svg, type: 'image/svg+xml;charset=utf-8' },
+    { key: 'metadata', ext: 'json', data: JSON.stringify(results.metadata || {}, null, 2), type: 'application/json;charset=utf-8' }
+  ]
+
+  for (const item of items) {
+    if (!item.data) {
+      continue
+    }
+
+    const filePath = path.join(folder, `${fileBase}.${item.ext}`)
+    const buffer = item.key === 'svg' || item.key === 'metadata'
+      ? Buffer.from(item.data, 'utf8')
+      : parseDataUrl(item.data)
+
+    await fs.writeFile(filePath, buffer)
+    savedFiles.push(filePath)
+  }
+
+  return { canceled: false, filePaths: savedFiles }
+})
+
 app.whenReady().then(() => {
   createWindow()
 

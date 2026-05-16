@@ -39,7 +39,7 @@
           @reset="resetForm"
         />
 
-        <ResultPanel :result="result" @download="downloadOutput" />
+        <ResultPanel :result="result" @download="downloadOutput" @save-all="saveAllResults" />
       </div>
 
       <HistoryPanel :logs="logs" @export-history="exportHistory" @delete-history="deleteHistoryItem" />
@@ -62,7 +62,7 @@ import ModeSwitcher from './components/ModeSwitcher.vue'
 import GenerationForm from './components/GenerationForm.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
-import { generateArtBitmap, saveFile, vectorizeArtImage } from './api'
+import { generateArtBitmap, saveFile, saveResults, vectorizeArtImage } from './api'
 
 const modes = [
   { label: '单条提示词', value: 'single' },
@@ -236,8 +236,19 @@ const saveWithElectron = async (data, filename, filters) => {
   }
 }
 
+const getFileNameBase = () => {
+  if (mode.value === 'vectorize' && payload.imageFile?.name) {
+    return `${stripExtension(payload.imageFile.name)}-vectorized`
+  }
+  return safeName(payload.text || 'art-text')
+}
+
+const stripExtension = (name) => {
+  return name.replace(/\.[^.]+$/, '')
+}
+
 const downloadOutput = async (type) => {
-  const fileNameBase = safeName(payload.text || 'art-text')
+  const fileNameBase = getFileNameBase()
 
   if (type === 'png' && result.image) {
     const defaultName = `${fileNameBase}.png`
@@ -305,6 +316,40 @@ const exportHistory = () => {
   const data = JSON.stringify(logs.value, null, 2)
   const blob = new Blob([data], { type: 'application/json;charset=utf-8' })
   downloadFile('art-text-history.json', blob)
+}
+
+const saveAllResults = async () => {
+  const fileBase = getFileNameBase()
+
+  try {
+    if (window.artTextApp?.saveResults) {
+      const saveResult = await saveResults({ png: result.image, svg: result.svg, metadata: result.metadata }, fileBase)
+      if (!saveResult?.canceled) {
+        return
+      }
+    }
+  } catch (err) {
+    console.warn('保存结果失败：', err)
+  }
+
+  if (result.image) {
+    const a = document.createElement('a')
+    a.href = result.image
+    a.download = `${fileBase}.png`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
+  if (result.svg) {
+    const blob = new Blob([result.svg], { type: 'image/svg+xml;charset=utf-8' })
+    downloadFile(`${fileBase}.svg`, blob)
+  }
+
+  if (result.metadata) {
+    const blob = new Blob([JSON.stringify(result.metadata, null, 2)], { type: 'application/json;charset=utf-8' })
+    downloadFile(`${fileBase}.json`, blob)
+  }
 }
 
 const deleteHistoryItem = (id) => {
