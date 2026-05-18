@@ -75,11 +75,25 @@
       <div class="vector-settings">
         <label>
           <span>平滑度</span>
-          <input v-model.number="payload.vector.smooth" type="range" min="1" max="10" />
+          <small>控制矢量轮廓的平滑程度，数值越大线条越圆润。</small>
+          <input
+            v-model.number="payload.vector.smooth"
+            type="number"
+            min="1"
+            max="10"
+            step="1"
+          />
         </label>
         <label>
           <span>阈值</span>
-          <input v-model.number="payload.vector.threshold" type="range" min="1" max="100" />
+          <small>控制边缘识别灵敏度，数值越高保留越多细节。</small>
+          <input
+            v-model.number="payload.vector.threshold"
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+          />
         </label>
         <label class="compact-number">
           <span>颜色数</span>
@@ -104,4 +118,5 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['file-change', 'submit', 'reset'])
+
 </script>
