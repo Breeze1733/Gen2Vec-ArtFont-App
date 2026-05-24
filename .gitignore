@@ -15,6 +15,7 @@ build/
 # Vectorizer backend package outputs
 services/vectorizer-api/dist/
 services/vectorizer-api/build/
+services/vectorizer-api/models/rembg/isnet-general-use.onnx
 
 # Logs
 logs/

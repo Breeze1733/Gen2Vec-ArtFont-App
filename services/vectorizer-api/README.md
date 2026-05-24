@@ -1,4 +1,4 @@
-# Vectorizer API
+﻿# Vectorizer API
 
 该服务仅负责“位图 -> SVG 矢量图”转换，普通艺术字位图生成接口仅预留。
 
@@ -24,9 +24,33 @@
 - `corner_threshold`
 - `length_threshold`
 - `layer_difference`
-- `scale`: 输入图上采样倍率
+- `scale`：输入图上采样倍率
 
-说明：当传入 `preset` 时，默认采用预设参数；前端若同时传上述 6 参数，则按传入值覆盖对应预设项。
+说明：当传入 `preset` 时，默认采用预设参数；前端若同时传上这 6 参数，则按传入值覆盖对应预设项。
+
+背景透明处理参数（默认开启）：
+
+- `remove_edge_white_background`：是否使用本地 `rembg` 模型移除背景（默认 `true`）
+- `white_value_threshold`：前端兼容保留字段，当前不参与 `rembg` 背景移除
+- `white_saturation_threshold`：前端兼容保留字段，当前不参与 `rembg` 背景移除
+
+## rembg 离线模型
+
+后端强制使用 `isnet-general-use` 模型，并只从本地加载，不会在运行时下载模型。
+
+开发运行时请放置：
+
+- `services/vectorizer-api/models/rembg/isnet-general-use.onnx`
+
+打包运行时请放置：
+
+- `dist/models/rembg/isnet-general-use.onnx`
+
+模型 MD5 必须是：
+
+- `fc16ebd8b0c10d971d3513d564d01e29`
+
+CPU/GPU 由 `onnxruntime` provider 自动选择：安装 `rembg[cpu]` 时使用 CPU，安装 `rembg[gpu]` 且环境可用时优先 GPU 并回退 CPU。
 
 ## `POST /api/v1/vectorize` 示例
 
@@ -43,7 +67,10 @@
     "length_threshold": 5,
     "layer_difference": 10,
     "scale": 2,
-    "evaluate_quality": true
+    "evaluate_quality": true,
+    "remove_edge_white_background": true,
+    "white_value_threshold": 245,
+    "white_saturation_threshold": 20
   },
   "image_base64": "data:image/png;base64,....",
   "image_name": "input.png"
@@ -63,7 +90,10 @@
     "length_threshold": 3,
     "layer_difference": 4,
     "scale": 3,
-    "evaluate_quality": true
+    "evaluate_quality": true,
+    "remove_edge_white_background": true,
+    "white_value_threshold": 245,
+    "white_saturation_threshold": 20
   },
   "generated_image": {
     "image_base64": "data:image/png;base64,...."
@@ -75,7 +105,9 @@
 
 - `png`：SVG 回渲染 PNG 预览（data URL）
 - `svg`：标准 SVG 文本
-- `metadata`：参数、耗时、文件大小、质量评估（SSIM/PSNR/MSE/score）
+- `metadata`：参数、耗时、文件大小等运行信息
+
+说明：`evaluate_quality` 字段当前仅保留前端兼容，不参与后端评分计算。
 
 ## 本地运行
 

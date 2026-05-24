@@ -179,17 +179,17 @@ const onBatchFileChange = async (event) => {
     r.readAsText(file)
   })
   // 简单解析：每行一条，分隔符可为 | 或 ,
-  payload.batch = text
+  props.payload.batch = text
   emit('batch-file', { name: file.name, content: text })
 }
 
 const onImageFileChange = async (event) => {
   const file = event.target.files?.[0]
   if (!file) return
-  payload.imageFile = file
+  props.payload.imageFile = file
+  emit('file-change', file)
   const url = await fileToDataUrl(file)
   previewThumb.value = url
-  emit('file-change', event)
 }
 
 const fileToDataUrl = (file) => new Promise((resolve, reject) => {

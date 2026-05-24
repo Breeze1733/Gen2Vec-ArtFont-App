@@ -7,7 +7,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .models import VectorizeRequest, VectorizeResponse
-from .vectorizer import decode_base64_image, vectorize_art_text
+from .image_processing import decode_base64_image, preprocess_image
+from .vectorization import vectorize_image
 
 app = FastAPI(
     title="Vectorizer API",
@@ -34,9 +35,22 @@ def _resolve_vectorize_image(payload: VectorizeRequest) -> tuple[bytes, str | No
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid image_base64: {exc}") from exc
 
+    if payload.image_base64:
+        try:
+            return (
+                decode_base64_image(payload.image_base64),
+                payload.image_name,
+                "generated:image_base64",
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid image_base64: {exc}") from exc
+
     generated = payload.generated_image
     if not generated:
-        raise HTTPException(status_code=400, detail="source_type=generated requires generated_image object.")
+        raise HTTPException(
+            status_code=400,
+            detail="source_type=generated requires image_base64 or generated_image object.",
+        )
 
     if generated.image_base64:
         try:
@@ -80,11 +94,12 @@ def healthz() -> dict:
 
 @app.post("/api/v1/vectorize", response_model=VectorizeResponse)
 def vectorize(payload: VectorizeRequest) -> VectorizeResponse:
-    # Main FR3 endpoint: bitmap -> vector SVG + preview PNG.
+    # Main FR3 endpoint: preprocess -> transparent PNG -> SVG -> preview PNG.
     image_bytes, source_image_name, source_channel = _resolve_vectorize_image(payload)
 
     try:
-        output = vectorize_art_text(image_bytes=image_bytes, vector=payload.vector.model_dump())
+        processed = preprocess_image(image_bytes=image_bytes, vector=payload.vector.model_dump())
+        output = vectorize_image(transparent_image=processed["transparent_image"], vector=payload.vector.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -97,10 +112,20 @@ def vectorize(payload: VectorizeRequest) -> VectorizeResponse:
             "source_type": payload.source_type,
             "source_channel": source_channel,
             "source_image_name": source_image_name,
+            "preprocess": {
+                "transparent_size": processed["size"],
+            },
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     )
-    return VectorizeResponse(**output)
+    response_payload = {
+        "transparent_png": processed["transparent_png"],
+        "preview_png": output["preview_png"],
+        "png": output["preview_png"],
+        "svg": output["svg"],
+        "metadata": output["metadata"],
+    }
+    return VectorizeResponse(**response_payload)
 
 
 @app.post("/api/v1/generate")

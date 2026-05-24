@@ -185,8 +185,7 @@ const validateForm = () => {
   return true
 }
 
-const handleFileChange = (event) => {
-  const file = event.target.files?.[0]
+const handleFileChange = (file) => {
   payload.imageFile = file || null
 }
 

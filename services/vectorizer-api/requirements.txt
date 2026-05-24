@@ -1,9 +1,10 @@
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
-numpy==2.2.5
+numpy==2.4.6
 opencv-python-headless==4.11.0.86
-scikit-image==0.25.2
+scikit-image==0.26.0
 svgwrite==1.4.3
 vtracer==0.6.15
 pydantic==2.11.4
 cairosvg==2.7.1
+rembg[cpu]==2.0.75

@@ -15,6 +15,9 @@ class VectorConfig(BaseModel):
     layer_difference: int | None = Field(default=None, ge=1, le=64)
     scale: int | None = Field(default=None, ge=1, le=4, description="upscale factor")
     evaluate_quality: bool = True
+    remove_edge_white_background: bool = True
+    white_value_threshold: int = Field(default=245, ge=200, le=255)
+    white_saturation_threshold: int = Field(default=20, ge=0, le=80)
 
 
 class GeneratedImageRef(BaseModel):
@@ -55,7 +58,9 @@ class VectorizeRequest(BaseModel):
 
 
 class VectorizeResponse(BaseModel):
-    # PNG preview (data URL), SVG text and structured metadata.
+    # Transparent PNG, re-rendered preview PNG, SVG text and structured metadata.
+    transparent_png: str
+    preview_png: str
     png: str
     svg: str
     metadata: dict

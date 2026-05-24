@@ -29,6 +29,8 @@ Write-Host "[3/4] Building backend.exe with PyInstaller..."
   --collect-all cssselect2 `
   --collect-all tinycss2 `
   --collect-all cv2 `
+  --collect-all rembg `
+  --collect-all onnxruntime `
   --collect-all vtracer `
   --hidden-import uvicorn.logging `
   --hidden-import uvicorn.loops.auto `
@@ -37,6 +39,9 @@ Write-Host "[3/4] Building backend.exe with PyInstaller..."
   --hidden-import uvicorn.lifespan.on `
   backend_entry.py
 
+if (Test-Path "models") {
+  Copy-Item -LiteralPath "models" -Destination "dist\models" -Recurse -Force
+}
+
 Write-Host "[4/4] Done."
 Write-Host "EXE output: $root\\dist\\vectorizer-backend.exe"
-
