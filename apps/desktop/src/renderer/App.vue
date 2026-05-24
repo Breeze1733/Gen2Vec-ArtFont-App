@@ -294,9 +294,11 @@ const downloadOutput = async (type) => {
 
   if (type === 'png' && result.image) {
     const defaultName = `${fileNameBase}.png`
-    if (window.artTextApp?.saveFile) {
+    try {
       const saved = await saveWithElectron(result.image, defaultName, [{ name: 'PNG', extensions: ['png'] }])
       if (saved) return
+    } catch (err) {
+      console.warn('Electron 保存 PNG 失败：', err)
     }
 
     const a = document.createElement('a')
@@ -310,9 +312,11 @@ const downloadOutput = async (type) => {
 
   if (type === 'svg' && result.svg) {
     const defaultName = `${fileNameBase}.svg`
-    if (window.artTextApp?.saveFile) {
+    try {
       const saved = await saveWithElectron(result.svg, defaultName, [{ name: 'SVG', extensions: ['svg'] }])
       if (saved) return
+    } catch (err) {
+      console.warn('Electron 保存 SVG 失败：', err)
     }
 
     const blob = new Blob([result.svg], { type: 'image/svg+xml;charset=utf-8' })
@@ -323,9 +327,11 @@ const downloadOutput = async (type) => {
   if (type === 'json' && result.metadata) {
     const defaultName = `${fileNameBase}.json`
     const jsonText = JSON.stringify(result.metadata, null, 2)
-    if (window.artTextApp?.saveFile) {
+    try {
       const saved = await saveWithElectron(jsonText, defaultName, [{ name: 'JSON', extensions: ['json'] }])
       if (saved) return
+    } catch (err) {
+      console.warn('Electron 保存 JSON 失败：', err)
     }
 
     const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' })
@@ -362,11 +368,9 @@ const saveAllResults = async () => {
   const fileBase = getFileNameBase()
 
   try {
-    if (window.artTextApp?.saveResults) {
-      const saveResult = await saveResults({ png: result.image, svg: result.svg, metadata: result.metadata }, fileBase)
-      if (!saveResult?.canceled) {
-        return
-      }
+    const saveResult = await saveResults({ png: result.image, svg: result.svg, metadata: result.metadata }, fileBase)
+    if (!saveResult?.canceled) {
+      return
     }
   } catch (err) {
     console.warn('保存结果失败：', err)

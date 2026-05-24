@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, net } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, net, shell, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs/promises')
 
@@ -103,13 +103,39 @@ async function requestBackend(apiUrl, payload) {
   })
 }
 
+ipcMain.handle('art-text/get-app-version', async () => {
+  return app.getVersion()
+})
+
+ipcMain.handle('art-text/is-dev', async () => {
+  return !app.isPackaged || process.env.NODE_ENV !== 'production'
+})
+
+ipcMain.handle('art-text/notify', async (event, options) => {
+  const { title = '通知', body = '', silent = false } = options || {}
+  if (Notification.isSupported()) {
+    new Notification({ title, body, silent }).show()
+    return { ok: true }
+  }
+  throw new Error('系统通知不受支持。')
+})
+
+ipcMain.handle('art-text/open-external', async (event, url) => {
+  if (!url || typeof url !== 'string') {
+    throw new Error('Invalid URL')
+  }
+  await shell.openExternal(url)
+  return { ok: true }
+})
+
 ipcMain.handle('art-text/vectorize', async (event, payload) => {
   const apiUrl = `${getBackendBaseUrl()}/vectorize`
   return requestBackend(apiUrl, payload)
 })
 
-ipcMain.handle('art-text/generate', async () => {
-  throw new Error('普通艺术字位图生成接口暂未实现。')
+ipcMain.handle('art-text/generate', async (event, payload) => {
+  const apiUrl = `${getBackendBaseUrl()}/generate`
+  return requestBackend(apiUrl, payload)
 })
 
 ipcMain.handle('art-text/save-file', async (event, options) => {
