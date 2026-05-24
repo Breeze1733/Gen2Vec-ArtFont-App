@@ -114,6 +114,7 @@ def vectorize(payload: VectorizeRequest) -> VectorizeResponse:
             "source_image_name": source_image_name,
             "preprocess": {
                 "transparent_size": processed["size"],
+                "png_transparency": processed.get("png_transparency"),
             },
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

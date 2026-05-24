@@ -255,6 +255,14 @@ def quantize_colors(img: Image.Image, color_count: int) -> Image.Image:
     return out
 
 
+def calculate_png_transparency(img: Image.Image) -> float:
+    rgba = img.convert("RGBA")
+    alpha = np.array(rgba.getchannel("A"), dtype=np.uint8)
+    if alpha.size == 0:
+        return 0.0
+    return round((1.0 - (float(np.mean(alpha)) / 255.0)) * 100.0, 1)
+
+
 def preprocess_image(image_bytes: bytes, vector: dict[str, Any]) -> dict[str, Any]:
     img = image_bytes_to_pil(image_bytes)
 
@@ -270,9 +278,11 @@ def preprocess_image(image_bytes: bytes, vector: dict[str, Any]) -> dict[str, An
     img = preserve_antialias_edges(img)
     img = crop_to_subject(img)
     img = quantize_colors(img, color_precision)
+    png_transparency = calculate_png_transparency(img)
 
     return {
         "transparent_image": img,
         "transparent_png": pil_to_data_url(img, fmt="PNG"),
         "size": {"width": img.width, "height": img.height},
+        "png_transparency": png_transparency,
     }

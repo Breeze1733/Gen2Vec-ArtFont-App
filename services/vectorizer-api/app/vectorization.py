@@ -7,6 +7,7 @@ import time
 from typing import Any
 from xml.dom import minidom
 
+import numpy as np
 from PIL import Image
 
 try:
@@ -80,6 +81,25 @@ def _pretty_svg_text(svg_text: str) -> str:
         return svg_text
 
 
+def _calculate_svg_fidelity(source_img: Image.Image, preview_png_bytes: bytes) -> float | None:
+    try:
+        from io import BytesIO
+
+        source = source_img.convert("RGBA")
+        preview = Image.open(BytesIO(preview_png_bytes)).convert("RGBA")
+        if preview.size != source.size:
+            preview = preview.resize(source.size, Image.Resampling.LANCZOS)
+
+        src = np.array(source, dtype=np.float32)
+        out = np.array(preview, dtype=np.float32)
+
+        diff = src - out
+        rgba_rmse = float(np.sqrt(np.mean(np.square(diff))))
+        return round(max(0.0, 1.0 - (rgba_rmse / 255.0)) * 100.0, 1)
+    except Exception:
+        return None
+
+
 def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> dict[str, Any]:
     if vtracer is None:
         raise RuntimeError("vtracer is not installed. Please install dependencies first.")
@@ -145,6 +165,7 @@ def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> d
         svg_size_kb = round(os.path.getsize(output_svg_path) / 1024.0, 3)
         preview_png_bytes = _svg_to_png_bytes(svg_text, width=original_width)
         formatted_svg_text = _pretty_svg_text(svg_text)
+        svg_fidelity = _calculate_svg_fidelity(transparent_image, preview_png_bytes)
 
     preview_data_url = _png_bytes_to_data_url(preview_png_bytes)
     elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
@@ -169,6 +190,9 @@ def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> d
             "elapsed_ms": elapsed_ms,
             "svg_size_kb": svg_size_kb,
             "preview_png_size_kb": round(len(preview_png_bytes) / 1024.0, 3),
+        },
+        "quality": {
+            "svg_fidelity": svg_fidelity,
         },
     }
 
