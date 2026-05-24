@@ -1,29 +1,57 @@
-# Claude Code（仅我使用）
+# Local assistant/tooling
 .claude/
 
 # Dependencies
 node_modules/
 
-# Build outputs
+# JavaScript/Electron build outputs
 dist/
 release/
 dist-ssr/
 build/
+**/dist/
+**/release/
+**/dist-ssr/
+**/build/
 *.spec
 *.exe
+*.blockmap
+builder-debug.yml
+builder-effective-config.yaml
 
-# Vectorizer backend package outputs
-services/vectorizer-api/dist/
-services/vectorizer-api/build/
-services/vectorizer-api/models/rembg/isnet-general-use.onnx
+# Python environments/caches
+.venv/
+venv/
+services/txt2img-api/.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+**/.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.pyc
+*.pyo
+*.pyd
 
-# Logs
+# Model/checkpoint weights
+*.onnx
+*.ckpt
+*.safetensors
+*.pt
+*.pth
+*.bin
+!services/vectorizer-api/models/rembg/*.bat
+
+# Runtime outputs
 logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-pnpm-debug.log*
-lerna-debug.log*
+services/txt2img-api/input/
+services/txt2img-api/output/
+services/txt2img-api/temp/
+
+# ComfyUI portable/runtime bundles
+services/txt2img-api/ComfyUI_windows_portable_nvidia/
+services/txt2img-api/ComfyUI_windows_portable/
 
 # Local environment
 *.local
@@ -42,25 +70,13 @@ Thumbs.db
 *.sln
 *.sw?
 
-# Python venv
-services/txt2img-api/.venv/
-.venv/
-venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-services/vectorizer-api/app/app.py
-
-# ComfyUI（便携包整体忽略，含 Python 运行时和模型）
-services/txt2img-api/ComfyUI_windows_portable_nvidia/
-services/txt2img-api/ComfyUI_windows_portable/
-services/word2pic/
-
 # Jupyter
 .ipynb_checkpoints/
 
-# 其他临时文件
+# Temporary files
 *.bak
 *.tmp
 *.swp
+
+# Legacy/local scratch files
+services/vectorizer-api/app/app.py
