@@ -171,22 +171,43 @@ ipcMain.handle('art-text/save-results', async (event, options) => {
   const folder = filePaths[0]
   const savedFiles = []
 
-  const items = [
-    { key: 'png', ext: 'png', data: results.png, type: 'image/png' },
-    { key: 'svg', ext: 'svg', data: results.svg, type: 'image/svg+xml;charset=utf-8' },
-    { key: 'metadata', ext: 'json', data: JSON.stringify(results.metadata || {}, null, 2), type: 'application/json;charset=utf-8' }
-  ]
+  // 支持任意键的 results，按命名或内容推断文件类型
+  for (const [key, data] of Object.entries(results || {})) {
+    if (!data) continue
 
-  for (const item of items) {
-    if (!item.data) {
+    let ext = 'bin'
+    let buffer = null
+
+    try {
+      const str = String(data)
+      const trimmed = str.trim()
+      if (key === 'svg' || trimmed.startsWith('<svg')) {
+        ext = 'svg'
+        buffer = Buffer.from(str, 'utf8')
+      } else if (key === 'metadata' || key.toLowerCase().includes('meta') || (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+        ext = 'json'
+        buffer = Buffer.from(typeof data === 'string' ? data : JSON.stringify(data, null, 2), 'utf8')
+      } else if (trimmed.startsWith('data:image/') || key.toLowerCase().includes('png') || key.toLowerCase().includes('image') || key.toLowerCase().includes('original') || key.toLowerCase().includes('preview') || key.toLowerCase().includes('transparent')) {
+        ext = 'png'
+        buffer = parseDataUrl(data)
+      } else {
+        // fallback: try to parse as data URL else write as utf8
+        if (typeof data === 'string' && data.startsWith('data:')) {
+          ext = 'bin'
+          buffer = parseDataUrl(data)
+        } else if (typeof data === 'string') {
+          ext = 'txt'
+          buffer = Buffer.from(data, 'utf8')
+        } else {
+          ext = 'bin'
+          buffer = Buffer.from(JSON.stringify(data), 'utf8')
+        }
+      }
+    } catch (err) {
       continue
     }
 
-    const filePath = path.join(folder, `${fileBase}.${item.ext}`)
-    const buffer = item.key === 'svg' || item.key === 'metadata'
-      ? Buffer.from(item.data, 'utf8')
-      : parseDataUrl(item.data)
-
+    const filePath = path.join(folder, `${fileBase}.${ext}`)
     await fs.writeFile(filePath, buffer)
     savedFiles.push(filePath)
   }

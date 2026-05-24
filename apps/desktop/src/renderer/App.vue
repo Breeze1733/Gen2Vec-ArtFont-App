@@ -36,15 +36,17 @@
           :error="error"
           :vector-presets="vectorPresets"
           @file-change="handleFileChange"
+          @update:mode="(v) => (mode.value = v)"
+          @batch-file="(info) => { payload.batch = info.content }"
           @submit="startGeneration"
           @reset="resetForm"
           @preset-change="applyVectorPreset"
         />
 
-        <ResultPanel :result="result" @download="downloadOutput" @save-all="saveAllResults" />
+        <ResultPanel :result="result" @download="downloadOutput" @save-all="saveAllResults" @open-svg="handleOpenSvg" />
       </div>
 
-      <HistoryPanel :logs="logs" @export-history="exportHistory" @delete-history="deleteHistoryItem" />
+      <HistoryPanel :logs="logs" :current-files="currentFiles" @export-history="exportHistory" @delete-history="deleteHistoryItem" />
     </main>
 
     <section class="panel command-panel">
@@ -123,7 +125,7 @@ const payload = reactive({
   negative: '',
   batch: '',
   resolution: '1024 x 1024',
-  format: 'PNG + SVG',
+  format: 'PNG',
   seed: 0,
   imageFile: null,
   vector: { ...vectorPresets.balanced }
@@ -137,8 +139,13 @@ const applyVectorPreset = (presetName) => {
 const result = reactive({
   image: '',
   svg: '',
-  metadata: null
+  metadata: null,
+  original: '',
+  preview: '',
+  transparent: ''
 })
+
+const currentFiles = ref([])
 
 const logs = ref(loadHistory())
 
@@ -207,32 +214,128 @@ const startGeneration = async () => {
   saveHistory()
 
   try {
+    error.value = ''
     let imageBase64 = null
     let imageName = null
+    let stage1Duration = 0
+    let stage2Duration = 0
+
+    // 准备上传图片（仅在 vectorize 模式）
     if (mode.value === 'vectorize' && payload.imageFile) {
       imageBase64 = await fileToDataUrl(payload.imageFile)
       imageName = payload.imageFile.name
+      result.original = imageBase64
     }
 
-    const payloadForApi = {
-      mode: mode.value,
-      source_type: mode.value === 'vectorize' ? 'upload' : undefined,
-      text: payload.text.trim(),
-      prompt: payload.prompt.trim(),
-      negative: payload.negative.trim(),
-      resolution: payload.resolution,
-      format: payload.format,
-      seed: payload.seed,
-      vector: { ...payload.vector },
-      image_base64: imageBase64,
-      image_name: imageName
+    if (mode.value === 'single') {
+      // Stage 1: 生成位图（后端 A）
+      const payloadA = {
+        text: payload.text.trim(),
+        prompt: payload.prompt.trim(),
+        negative: payload.negative.trim(),
+        resolution: payload.resolution,
+        format: payload.format,
+        seed: payload.seed
+      }
+      const t1 = Date.now()
+      const respA = await generateArtBitmap(payloadA)
+      stage1Duration = Date.now() - t1
+
+      imageBase64 = respA.png || ''
+      imageName = respA.image_name || `${safeName(payload.text || 'art')}-orig.png`
+      result.original = imageBase64
+
+      // Stage 2: 矢量化（后端 B）
+      const payloadB = {
+        source_type: 'generated',
+        text: payload.text.trim(),
+        prompt: payload.prompt.trim(),
+        negative: payload.negative.trim(),
+        resolution: payload.resolution,
+        format: payload.format,
+        seed: payload.seed,
+        vector: { ...payload.vector },
+        image_base64: imageBase64,
+        image_name: imageName
+      }
+      const t2 = Date.now()
+      const respB = await vectorizeArtImage(payloadB)
+      stage2Duration = Date.now() - t2
+
+      result.transparent = respB.transparent_png || respB.png || ''
+      result.preview = respB.png || ''
+      result.svg = respB.svg || ''
+      result.metadata = respB.metadata || null
+
+      // 构建文件列表
+      const base = getFileNameBase()
+      const files = []
+      if (imageBase64) files.push({ key: 'original', name: `${base}_original.png`, data: imageBase64, isText: false })
+      if (result.transparent) files.push({ key: 'transparent', name: `${base}_transparent.png`, data: result.transparent, isText: false })
+      if (result.preview) files.push({ key: 'preview', name: `${base}_preview.png`, data: result.preview, isText: false })
+      if (result.svg) files.push({ key: 'svg', name: `${base}_vector.svg`, data: result.svg, isText: true })
+      if (result.metadata) files.push({ key: 'metadata', name: `${base}_metadata.json`, data: JSON.stringify(result.metadata, null, 2), isText: true })
+      const logText = `task_id=${task.id}\nmode=single\ntext=${payload.text}\nseed=${payload.seed}\nstage1_ms=${stage1Duration}\nstage2_ms=${stage2Duration}\nstatus=success`
+      files.push({ key: 'log', name: `${base}_log.log`, data: logText, isText: true })
+      currentFiles.value = files
+
+    } else if (mode.value === 'vectorize') {
+      // 直接调用后端 B
+      const payloadB = {
+        source_type: 'upload',
+        resolution: payload.resolution,
+        format: payload.format,
+        seed: payload.seed,
+        vector: { ...payload.vector },
+        image_base64: imageBase64,
+        image_name: imageName
+      }
+      const t2 = Date.now()
+      const respB = await vectorizeArtImage(payloadB)
+      stage2Duration = Date.now() - t2
+
+      result.transparent = respB.transparent_png || respB.png || ''
+      result.preview = respB.png || ''
+      result.svg = respB.svg || ''
+      result.metadata = respB.metadata || null
+
+      const base = getFileNameBase()
+      const files = []
+      if (result.original) files.push({ key: 'original', name: `${base}_original.png`, data: result.original, isText: false })
+      if (result.transparent) files.push({ key: 'transparent', name: `${base}_transparent.png`, data: result.transparent, isText: false })
+      if (result.preview) files.push({ key: 'preview', name: `${base}_preview.png`, data: result.preview, isText: false })
+      if (result.svg) files.push({ key: 'svg', name: `${base}_vector.svg`, data: result.svg, isText: true })
+      if (result.metadata) files.push({ key: 'metadata', name: `${base}_metadata.json`, data: JSON.stringify(result.metadata, null, 2), isText: true })
+      const logText = `task_id=${task.id}\nmode=vectorize\nseed=${payload.seed}\nstage2_ms=${stage2Duration}\nstatus=success`
+      files.push({ key: 'log', name: `${base}_log.log`, data: logText, isText: true })
+      currentFiles.value = files
+
+    } else if (mode.value === 'batch') {
+      // 简单批处理：每行一个任务，顺序执行
+      const lines = String(payload.batch || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+      for (const line of lines) {
+        const parts = line.split('|').map(p => p.trim())
+        const text = parts[0] || ''
+        const prompt = parts[1] || ''
+        const payloadA = { text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed }
+        const respA = await generateArtBitmap(payloadA)
+        const payloadB = { source_type: 'generated', text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed, vector: { ...payload.vector }, image_base64: respA.png, image_name: respA.image_name || `${safeName(text || 'batch')}-orig.png` }
+        const respB = await vectorizeArtImage(payloadB)
+        result.original = respA.png
+        result.preview = respB.png || ''
+        result.svg = respB.svg || ''
+        result.metadata = respB.metadata || null
+      }
+      const base = getFileNameBase()
+      const files = []
+      if (result.original) files.push({ key: 'original', name: `${base}_original.png`, data: result.original, isText: false })
+      if (result.preview) files.push({ key: 'preview', name: `${base}_preview.png`, data: result.preview, isText: false })
+      if (result.svg) files.push({ key: 'svg', name: `${base}_vector.svg`, data: result.svg, isText: true })
+      if (result.metadata) files.push({ key: 'metadata', name: `${base}_metadata.json`, data: JSON.stringify(result.metadata, null, 2), isText: true })
+      const logText = `task_id=${task.id}\nmode=batch\nitems=${lines.length}\nstatus=completed`
+      files.push({ key: 'log', name: `${base}_log.log`, data: logText, isText: true })
+      currentFiles.value = files
     }
-
-    const response = mode.value === 'vectorize' ? await vectorizeArtImage(payloadForApi) : await generateArtBitmap(payloadForApi)
-
-    result.image = response.png
-    result.svg = response.svg
-    result.metadata = response.metadata
 
     task.status = '完成'
     saveHistory()
@@ -262,6 +365,15 @@ const downloadFile = (filename, blob) => {
   anchor.click()
   document.body.removeChild(anchor)
   URL.revokeObjectURL(url)
+}
+
+const handleOpenSvg = (type) => {
+  if (!result.svg) return
+  const svgText = result.svg
+  const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  window.open(url, '_blank')
+  // 不立即 revoke，以便用户查看；浏览器在标签页关闭后释放
 }
 
 const saveWithElectron = async (data, filename, filters) => {
@@ -356,6 +468,7 @@ const resetForm = () => {
   result.image = ''
   result.svg = ''
   result.metadata = null
+  result.original = ''
 }
 
 const exportHistory = () => {
@@ -368,9 +481,19 @@ const saveAllResults = async () => {
   const fileBase = getFileNameBase()
 
   try {
-    const saveResult = await saveResults({ png: result.image, svg: result.svg, metadata: result.metadata }, fileBase)
-    if (!saveResult?.canceled) {
-      return
+    // 如果 currentFiles 有内容，优先按文件列表保存
+    if (currentFiles.value && currentFiles.value.length) {
+      const payload = {}
+      currentFiles.value.forEach(f => { payload[f.key] = f.data })
+      const saveResult = await saveResults(payload, fileBase)
+      if (!saveResult?.canceled) {
+        return
+      }
+    } else {
+      const saveResult = await saveResults({ png: result.image, svg: result.svg, metadata: result.metadata }, fileBase)
+      if (!saveResult?.canceled) {
+        return
+      }
     }
   } catch (err) {
     console.warn('保存结果失败：', err)

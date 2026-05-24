@@ -15,136 +15,130 @@
       <div v-if="error" class="status-banner error">{{ error }}</div>
       <div v-else-if="running" class="status-banner info">正在生成，请稍候…</div>
 
-      <div v-if="mode === 'single'" class="form-grid">
-        <label class="field">
-          <span>文字内容</span>
-          <input v-model="payload.text" type="text" placeholder="例如：霓虹之风" />
-        </label>
-        <label class="field">
-          <span>风格提示词</span>
-          <input v-model="payload.prompt" type="text" placeholder="例如：霓虹渐变、金属质感" />
-        </label>
+      <!-- 模式切换由顶部 ModeSwitcher 控制（局部切换面板已移除） -->
+
+      <!-- 生成参数面板 -->
+      <div class="panel-section generation-params">
+        <h3>生成参数</h3>
+
+        <div v-if="mode === 'single'" class="gen-single">
+          <label class="field">
+            <span>文字内容</span>
+            <input v-model="payload.text" type="text" placeholder="支持 2-8 个字符，示例：霓虹之风" />
+          </label>
+          <label class="field">
+            <span>风格提示词</span>
+            <textarea v-model="payload.prompt" rows="4" placeholder="例如：霓虹渐变、金属质感"></textarea>
+          </label>
+          <label class="field">
+            <span>负面提示词</span>
+            <textarea v-model="payload.negative" rows="3" placeholder="缺字，错字，笔画断裂，杂乱背景，低清晰度"></textarea>
+          </label>
+          <label class="field two-col">
+            <div>
+              <span>分辨率</span>
+              <select v-model="payload.resolution">
+                <option>1024 x 1024</option>
+                <option>1280 x 720</option>
+                <option>1920 x 1080</option>
+                <option value="custom">自定义</option>
+              </select>
+            </div>
+            <div v-if="payload.resolution === 'custom'">
+              <input v-model="customRes" placeholder="例如 1400x800" />
+            </div>
+          </label>
+          <!-- 输出格式已移除，默认由后台或全局配置决定 -->
+          <label class="field seed-field">
+            <span>随机种子</span>
+            <input v-model.number="payload.seed" type="number" />
+          </label>
+        </div>
+
+        <div v-else-if="mode === 'batch'" class="gen-batch">
+          <label class="field">
+            <span>批量提示词（或上传文件 CSV/TXT/JSON）</span>
+            <textarea v-model="payload.batch" rows="5" placeholder="每行一条：文本 | 风格"></textarea>
+            <div class="batch-upload">
+              <input type="file" accept=".txt,.csv,.json" @change="onBatchFileChange" />
+            </div>
+          </label>
+          <label class="field">
+            <span>全局负面提示词</span>
+            <textarea v-model="payload.negative" rows="3" placeholder="应用于所有批量任务"></textarea>
+          </label>
+          <label class="field">
+            <span>全局分辨率</span>
+            <select v-model="payload.resolution">
+              <option>1024 x 1024</option>
+              <option>1280 x 720</option>
+              <option>1920 x 1080</option>
+            </select>
+          </label>
+          <!-- 全局输出格式已移除 -->
+          <label class="field seed-field">
+            <span>全局随机种子</span>
+            <input v-model.number="payload.seed" type="number" />
+          </label>
+        </div>
+
+        <div v-else class="gen-image">
+          <label class="field">
+            <span>选择图片（PNG/JPG）</span>
+            <input type="file" accept="image/png,image/jpeg" @change="onImageFileChange" />
+            <div v-if="previewThumb" class="thumb"><img :src="previewThumb" alt="thumb" /></div>
+            <small>支持拖拽上传（开发版请使用桌面端以便保存结果）</small>
+          </label>
+        </div>
       </div>
 
-      <div v-else-if="mode === 'batch'" class="form-grid">
-        <label class="field">
-          <span>批量提示词</span>
-          <textarea
-            v-model="payload.batch"
-            rows="5"
-            placeholder="每行一条：&#10;晨曦之城 | 透明玻璃风&#10;深海波纹 | 水纹渐变"
-          ></textarea>
-        </label>
-      </div>
-
-      <div v-else class="form-grid">
-        <label class="field">
-          <span>选择图片</span>
-          <input type="file" accept="image/png,image/jpeg,image/jpg" @change="$emit('file-change', $event)" />
-          <small>支持 PNG / JPG，后续可自动生成透明 PNG 与 SVG。</small>
-        </label>
-      </div>
-
-      <div class="form-grid two-columns">
-        <label class="field">
-          <span>负面提示词</span>
-          <input v-model="payload.negative" type="text" placeholder="例如：模糊、锯齿、断裂" />
-        </label>
-        <label class="field">
-          <span>分辨率</span>
-          <select v-model="payload.resolution">
-            <option>1024 x 1024</option>
-            <option>1024 x 768</option>
-            <option>2048 x 2048</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>输出格式</span>
-          <select v-model="payload.format">
-            <option>PNG + SVG</option>
-            <option>SVG Only</option>
-            <option>PNG + JSON</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>随机种子</span>
-          <input v-model.number="payload.seed" type="number" placeholder="0 表示随机" />
-        </label>
-      </div>
-
-      <div v-if="mode === 'vectorize'" class="vector-settings">
-        <label>
-          <span>矢量化预设</span>
-          <small>选择一个内置预设来快速设置参数。</small>
-          <select v-model="payload.vector.preset" @change="$emit('preset-change', payload.vector.preset)">
-            <option v-for="(value, key) in vectorPresets" :key="key" :value="key">{{ presetLabels[key] || key }}</option>
-          </select>
-        </label>
-        <label>
-          <span>颜色精度</span>
-          <small>控制色彩分层数量，数值越大细节越丰富。</small>
-          <input
-            v-model.number="payload.vector.color_precision"
-            type="number"
-            min="1"
-            max="8"
-            step="1"
-          />
-        </label>
-        <label>
-          <span>斑点过滤</span>
-          <small>过滤小噪点与斑点，数值越大清晰越干净。</small>
-          <input
-            v-model.number="payload.vector.filter_speckle"
-            type="number"
-            min="1"
-            max="20"
-            step="1"
-          />
-        </label>
-        <label>
-          <span>拐角阈值</span>
-          <small>控制拐角保留和折线优化，数值越小保留越多细节。</small>
-          <input
-            v-model.number="payload.vector.corner_threshold"
-            type="number"
-            min="1"
-            max="120"
-            step="1"
-          />
-        </label>
-        <label>
-          <span>长度阈值</span>
-          <small>控制短路径过滤，数值越大删除越多短路径。</small>
-          <input
-            v-model.number="payload.vector.length_threshold"
-            type="number"
-            min="1"
-            max="20"
-            step="1"
-          />
-        </label>
-        <label>
-          <span>图层差异</span>
-          <small>控制相邻图层合并差异，数值越小保留越多图层。</small>
-          <input
-            v-model.number="payload.vector.layer_difference"
-            type="number"
-            min="1"
-            max="30"
-            step="1"
-          />
-        </label>
-        <label class="compact-number">
-          <span>放大倍数</span>
-          <small>预处理放大输入图像以提升细节保留。</small>
-          <input v-model.number="payload.vector.scale" type="number" min="1" max="4" />
-        </label>
+      <!-- 矢量化参数面板（通用） -->
+      <div class="panel-section vector-panel">
+        <h3>矢量化参数</h3>
+        <div class="presets">
+          <label v-for="(p, key) in vectorPresets" :key="key" class="preset">
+            <input type="radio" name="preset" :value="key" v-model="payload.vector.preset" @change="$emit('preset-change', payload.vector.preset)" />
+            <span>{{ presetLabels[key] }}</span>
+          </label>
+        </div>
+        <div class="vector-grid">
+          <label>
+            <span>颜色精度 (color_precision)</span>
+            <input v-model.number="payload.vector.color_precision" type="number" min="1" max="16" />
+            <small>（1-16）</small>
+          </label>
+          <label>
+            <span>斑点过滤 (filter_speckle)</span>
+            <input v-model.number="payload.vector.filter_speckle" type="number" min="1" max="50" />
+            <small>（1-50）</small>
+          </label>
+          <label>
+            <span>拐角阈值 (corner_threshold)</span>
+            <input v-model.number="payload.vector.corner_threshold" type="number" min="1" max="100" />
+            <small>（1-100）</small>
+          </label>
+          <label>
+            <span>长度阈值 (length_threshold)</span>
+            <input v-model.number="payload.vector.length_threshold" type="number" min="1" max="50" />
+            <small>（1-50）</small>
+          </label>
+          <label>
+            <span>图层差异 (layer_difference)</span>
+            <input v-model.number="payload.vector.layer_difference" type="number" min="1" max="50" />
+            <small>（1-50）</small>
+          </label>
+          <label>
+            <span>放大倍数 (scale)</span>
+            <input v-model.number="payload.vector.scale" type="number" min="1" max="4" />
+            <small>（1-4）</small>
+          </label>
+        </div>
       </div>
 
       <div class="actions">
         <button class="primary-button" type="button" :disabled="running" @click="$emit('submit')">开始生成</button>
         <button class="secondary-button" type="button" :disabled="running" @click="$emit('reset')">重置</button>
+        <button class="secondary-button" type="button" @click="$emit('preset-change', 'balanced')">恢复默认预设</button>
       </div>
     </div>
   </section>
@@ -160,12 +154,49 @@ const props = defineProps({
 })
 
 const presetLabels = {
-  clean: 'clean（清爽）',
-  balanced: 'balanced（平衡）',
-  detailed: 'detailed（精细）',
-  ultra: 'ultra（超清）'
+  clean: '清爽',
+  balanced: '平衡',
+  detailed: '精细',
+  ultra: '超清'
 }
 
-const emit = defineEmits(['file-change', 'submit', 'reset', 'preset-change'])
+const emit = defineEmits(['file-change', 'submit', 'reset', 'preset-change', 'update:mode', 'batch-file'])
+
+import { ref } from 'vue'
+
+const customRes = ref('')
+const previewThumb = ref('')
+
+// 随机种子功能已移除
+
+const onBatchFileChange = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+  const text = await new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result || ''))
+    r.onerror = () => rej(new Error('文件读取失败'))
+    r.readAsText(file)
+  })
+  // 简单解析：每行一条，分隔符可为 | 或 ,
+  payload.batch = text
+  emit('batch-file', { name: file.name, content: text })
+}
+
+const onImageFileChange = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+  payload.imageFile = file
+  const url = await fileToDataUrl(file)
+  previewThumb.value = url
+  emit('file-change', event)
+}
+
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader()
+  r.onload = () => resolve(String(r.result || ''))
+  r.onerror = () => reject(new Error('读取失败'))
+  r.readAsDataURL(file)
+})
 
 </script>
