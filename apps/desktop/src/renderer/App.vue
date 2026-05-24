@@ -34,9 +34,11 @@
           :payload="payload"
           :running="running"
           :error="error"
+          :vector-presets="vectorPresets"
           @file-change="handleFileChange"
           @submit="startGeneration"
           @reset="resetForm"
+          @preset-change="applyVectorPreset"
         />
 
         <ResultPanel :result="result" @download="downloadOutput" @save-all="saveAllResults" />
@@ -70,6 +72,45 @@ const modes = [
   { label: '图片矢量化', value: 'vectorize' }
 ]
 
+const vectorPresets = {
+  clean: {
+    preset: 'clean',
+    color_precision: 3,
+    filter_speckle: 15,
+    corner_threshold: 60,
+    length_threshold: 12,
+    layer_difference: 20,
+    scale: 2
+  },
+  balanced: {
+    preset: 'balanced',
+    color_precision: 5,
+    filter_speckle: 6,
+    corner_threshold: 45,
+    length_threshold: 5,
+    layer_difference: 10,
+    scale: 2
+  },
+  detailed: {
+    preset: 'detailed',
+    color_precision: 6,
+    filter_speckle: 2,
+    corner_threshold: 30,
+    length_threshold: 3,
+    layer_difference: 4,
+    scale: 3
+  },
+  ultra: {
+    preset: 'ultra',
+    color_precision: 8,
+    filter_speckle: 1,
+    corner_threshold: 20,
+    length_threshold: 2,
+    layer_difference: 2,
+    scale: 3
+  }
+}
+
 const HISTORY_KEY = 'art-text-generator-history'
 
 const mode = ref('single')
@@ -85,12 +126,13 @@ const payload = reactive({
   format: 'PNG + SVG',
   seed: 0,
   imageFile: null,
-  vector: {
-    smooth: 6,
-    threshold: 42,
-    colors: 8
-  }
+  vector: { ...vectorPresets.balanced }
 })
+
+const applyVectorPreset = (presetName) => {
+  const preset = vectorPresets[presetName] || vectorPresets.balanced
+  Object.assign(payload.vector, preset)
+}
 
 const result = reactive({
   image: '',
@@ -303,9 +345,7 @@ const resetForm = () => {
   payload.format = 'PNG + SVG'
   payload.seed = 0
   payload.imageFile = null
-  payload.vector.smooth = 6
-  payload.vector.threshold = 42
-  payload.vector.colors = 8
+  applyVectorPreset('balanced')
   error.value = ''
   result.image = ''
   result.svg = ''

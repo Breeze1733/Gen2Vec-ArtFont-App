@@ -72,32 +72,73 @@
         </label>
       </div>
 
-      <div class="vector-settings">
+      <div v-if="mode === 'vectorize'" class="vector-settings">
         <label>
-          <span>平滑度</span>
-          <small>控制矢量轮廓的平滑程度，数值越大线条越圆润。</small>
+          <span>矢量化预设</span>
+          <small>选择一个内置预设来快速设置参数。</small>
+          <select v-model="payload.vector.preset" @change="$emit('preset-change', payload.vector.preset)">
+            <option v-for="(value, key) in vectorPresets" :key="key" :value="key">{{ presetLabels[key] || key }}</option>
+          </select>
+        </label>
+        <label>
+          <span>颜色精度</span>
+          <small>控制色彩分层数量，数值越大细节越丰富。</small>
           <input
-            v-model.number="payload.vector.smooth"
+            v-model.number="payload.vector.color_precision"
             type="number"
             min="1"
-            max="10"
+            max="8"
             step="1"
           />
         </label>
         <label>
-          <span>阈值</span>
-          <small>控制边缘识别灵敏度，数值越高保留越多细节。</small>
+          <span>斑点过滤</span>
+          <small>过滤小噪点与斑点，数值越大清晰越干净。</small>
           <input
-            v-model.number="payload.vector.threshold"
+            v-model.number="payload.vector.filter_speckle"
             type="number"
             min="1"
-            max="100"
+            max="20"
+            step="1"
+          />
+        </label>
+        <label>
+          <span>拐角阈值</span>
+          <small>控制拐角保留和折线优化，数值越小保留越多细节。</small>
+          <input
+            v-model.number="payload.vector.corner_threshold"
+            type="number"
+            min="1"
+            max="120"
+            step="1"
+          />
+        </label>
+        <label>
+          <span>长度阈值</span>
+          <small>控制短路径过滤，数值越大删除越多短路径。</small>
+          <input
+            v-model.number="payload.vector.length_threshold"
+            type="number"
+            min="1"
+            max="20"
+            step="1"
+          />
+        </label>
+        <label>
+          <span>图层差异</span>
+          <small>控制相邻图层合并差异，数值越小保留越多图层。</small>
+          <input
+            v-model.number="payload.vector.layer_difference"
+            type="number"
+            min="1"
+            max="30"
             step="1"
           />
         </label>
         <label class="compact-number">
-          <span>颜色数</span>
-          <input v-model.number="payload.vector.colors" type="number" min="2" max="32" />
+          <span>放大倍数</span>
+          <small>预处理放大输入图像以提升细节保留。</small>
+          <input v-model.number="payload.vector.scale" type="number" min="1" max="4" />
         </label>
       </div>
 
@@ -114,9 +155,17 @@ const props = defineProps({
   mode: String,
   payload: Object,
   running: Boolean,
-  error: String
+  error: String,
+  vectorPresets: Object
 })
 
-const emit = defineEmits(['file-change', 'submit', 'reset'])
+const presetLabels = {
+  clean: 'clean（清爽）',
+  balanced: 'balanced（平衡）',
+  detailed: 'detailed（精细）',
+  ultra: 'ultra（超清）'
+}
+
+const emit = defineEmits(['file-change', 'submit', 'reset', 'preset-change'])
 
 </script>
