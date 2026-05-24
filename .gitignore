@@ -42,6 +42,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+services/vectorizer-api/app/app.py
 
 # ComfyUI（便携包整体忽略，含 Python 运行时和模型）
 services/word2pic/ComfyUI_windows_portable_nvidia/

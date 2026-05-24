@@ -6,10 +6,15 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class VectorConfig(BaseModel):
-    # Frontend vectorization controls.
-    smooth: int = Field(default=6, ge=1, le=10)
-    threshold: int = Field(default=42, ge=1, le=100)
-    colors: int = Field(default=8, ge=2, le=32)
+    # Frontend vectorization controls (6 params + 4 presets).
+    preset: Literal["clean", "balanced", "detailed", "ultra"] = "balanced"
+    color_precision: int | None = Field(default=None, ge=1, le=8)
+    filter_speckle: int | None = Field(default=None, ge=0, le=64)
+    corner_threshold: int | None = Field(default=None, ge=1, le=180)
+    length_threshold: int | None = Field(default=None, ge=1, le=64)
+    layer_difference: int | None = Field(default=None, ge=1, le=64)
+    scale: int | None = Field(default=None, ge=1, le=4, description="upscale factor")
+    evaluate_quality: bool = True
 
 
 class GeneratedImageRef(BaseModel):
