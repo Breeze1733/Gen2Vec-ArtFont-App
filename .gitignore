@@ -8,6 +8,13 @@ node_modules/
 dist/
 release/
 dist-ssr/
+build/
+*.spec
+*.exe
+
+# Vectorizer backend package outputs
+services/vectorizer-api/dist/
+services/vectorizer-api/build/
 
 # Logs
 logs/

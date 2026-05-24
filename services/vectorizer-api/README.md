@@ -86,3 +86,35 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+## 打包为 EXE（Windows）
+
+在 `services/vectorizer-api` 目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-backend-exe.ps1
+```
+
+打包成功后产物在：
+
+- `services/vectorizer-api/dist/vectorizer-backend.exe`
+
+## 别人怎么用打包好的后端
+
+### 方式 1：命令行启动（推荐）
+
+```powershell
+.\vectorizer-backend.exe --host 127.0.0.1 --port 8000
+```
+
+### 方式 2：双击脚本启动
+
+双击：
+
+- `services/vectorizer-api/scripts/start-backend.bat`
+
+它会自动启动后端监听 `127.0.0.1:8000`。
+
+### 联调说明
+
+桌面端默认请求 `http://127.0.0.1:8000/api/v1`，因此只要 exe 运行中，前端矢量化功能即可直接调用。
