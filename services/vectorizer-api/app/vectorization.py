@@ -5,6 +5,7 @@ import os
 import tempfile
 import time
 from typing import Any
+from xml.dom import minidom
 
 from PIL import Image
 
@@ -67,6 +68,16 @@ def _svg_to_png_bytes(svg_text: str, width: int | None = None) -> bytes:
     if cairosvg is None:
         raise RuntimeError("cairosvg is not installed. Cannot generate preview PNG.")
     return cairosvg.svg2png(bytestring=svg_text.encode("utf-8"), output_width=width)
+
+
+def _pretty_svg_text(svg_text: str) -> str:
+    try:
+        parsed = minidom.parseString(svg_text.encode("utf-8"))
+        pretty = parsed.toprettyxml(indent="  ", encoding="utf-8").decode("utf-8")
+        lines = [line for line in pretty.splitlines() if line.strip()]
+        return "\n".join(lines) + "\n"
+    except Exception:
+        return svg_text
 
 
 def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> dict[str, Any]:
@@ -133,6 +144,7 @@ def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> d
             svg_text = f.read()
         svg_size_kb = round(os.path.getsize(output_svg_path) / 1024.0, 3)
         preview_png_bytes = _svg_to_png_bytes(svg_text, width=original_width)
+        formatted_svg_text = _pretty_svg_text(svg_text)
 
     preview_data_url = _png_bytes_to_data_url(preview_png_bytes)
     elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
@@ -161,7 +173,7 @@ def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> d
     }
 
     return {
-        "svg": svg_text,
+        "svg": formatted_svg_text,
         "preview_png": preview_data_url,
         "metadata": metadata,
     }

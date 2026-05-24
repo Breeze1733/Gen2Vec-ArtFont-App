@@ -261,8 +261,9 @@ const startGeneration = async () => {
       const respB = await vectorizeArtImage(payloadB)
       stage2Duration = Date.now() - t2
 
-      result.transparent = respB.transparent_png || respB.png || ''
-      result.preview = respB.png || ''
+      result.transparent = respB.transparent_png || ''
+      result.preview = respB.preview_png || respB.png || ''
+      result.image = result.preview
       result.svg = respB.svg || ''
       result.metadata = respB.metadata || null
 
@@ -293,8 +294,9 @@ const startGeneration = async () => {
       const respB = await vectorizeArtImage(payloadB)
       stage2Duration = Date.now() - t2
 
-      result.transparent = respB.transparent_png || respB.png || ''
-      result.preview = respB.png || ''
+      result.transparent = respB.transparent_png || ''
+      result.preview = respB.preview_png || respB.png || ''
+      result.image = result.preview
       result.svg = respB.svg || ''
       result.metadata = respB.metadata || null
 
@@ -321,13 +323,16 @@ const startGeneration = async () => {
         const payloadB = { source_type: 'generated', text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed, vector: { ...payload.vector }, image_base64: respA.png, image_name: respA.image_name || `${safeName(text || 'batch')}-orig.png` }
         const respB = await vectorizeArtImage(payloadB)
         result.original = respA.png
-        result.preview = respB.png || ''
+        result.transparent = respB.transparent_png || ''
+        result.preview = respB.preview_png || respB.png || ''
+        result.image = result.preview
         result.svg = respB.svg || ''
         result.metadata = respB.metadata || null
       }
       const base = getFileNameBase()
       const files = []
       if (result.original) files.push({ key: 'original', name: `${base}_original.png`, data: result.original, isText: false })
+      if (result.transparent) files.push({ key: 'transparent', name: `${base}_transparent.png`, data: result.transparent, isText: false })
       if (result.preview) files.push({ key: 'preview', name: `${base}_preview.png`, data: result.preview, isText: false })
       if (result.svg) files.push({ key: 'svg', name: `${base}_vector.svg`, data: result.svg, isText: true })
       if (result.metadata) files.push({ key: 'metadata', name: `${base}_metadata.json`, data: JSON.stringify(result.metadata, null, 2), isText: true })
@@ -403,17 +408,37 @@ const stripExtension = (name) => {
 const downloadOutput = async (type) => {
   const fileNameBase = getFileNameBase()
 
-  if (type === 'png' && result.image) {
-    const defaultName = `${fileNameBase}.png`
+  if (['original', 'transparent', 'preview'].includes(type)) {
+    const imageMap = {
+      original: {
+        data: result.original,
+        suffix: 'original',
+        label: '原始图像'
+      },
+      transparent: {
+        data: result.transparent,
+        suffix: 'transparent',
+        label: '透明化图像'
+      },
+      preview: {
+        data: result.preview || result.image,
+        suffix: 'preview',
+        label: '矢量化预览'
+      }
+    }
+    const target = imageMap[type]
+    if (!target.data) return
+
+    const defaultName = `${fileNameBase}_${target.suffix}.png`
     try {
-      const saved = await saveWithElectron(result.image, defaultName, [{ name: 'PNG', extensions: ['png'] }])
+      const saved = await saveWithElectron(target.data, defaultName, [{ name: 'PNG', extensions: ['png'] }])
       if (saved) return
     } catch (err) {
-      console.warn('Electron 保存 PNG 失败：', err)
+      console.warn(`Electron 保存 ${target.label} 失败：`, err)
     }
 
     const a = document.createElement('a')
-    a.href = result.image
+    a.href = target.data
     a.download = defaultName
     document.body.appendChild(a)
     a.click()
@@ -489,7 +514,13 @@ const saveAllResults = async () => {
         return
       }
     } else {
-      const saveResult = await saveResults({ png: result.image, svg: result.svg, metadata: result.metadata }, fileBase)
+      const saveResult = await saveResults({
+        original: result.original,
+        transparent: result.transparent,
+        preview: result.preview || result.image,
+        svg: result.svg,
+        metadata: result.metadata
+      }, fileBase)
       if (!saveResult?.canceled) {
         return
       }
@@ -498,23 +529,24 @@ const saveAllResults = async () => {
     console.warn('保存结果失败：', err)
   }
 
-  if (result.image) {
+  const fallbackImages = [
+    ['original', result.original],
+    ['transparent', result.transparent],
+    ['preview', result.preview || result.image]
+  ]
+  fallbackImages.forEach(([suffix, data]) => {
+    if (!data) return
     const a = document.createElement('a')
-    a.href = result.image
-    a.download = `${fileBase}.png`
+    a.href = data
+    a.download = `${fileBase}_${suffix}.png`
     document.body.appendChild(a)
     a.click()
     a.remove()
-  }
-
-  if (result.svg) {
-    const blob = new Blob([result.svg], { type: 'image/svg+xml;charset=utf-8' })
-    downloadFile(`${fileBase}.svg`, blob)
-  }
+  })
 
   if (result.metadata) {
     const blob = new Blob([JSON.stringify(result.metadata, null, 2)], { type: 'application/json;charset=utf-8' })
-    downloadFile(`${fileBase}.json`, blob)
+    downloadFile(`${fileBase}_metadata.json`, blob)
   }
 }
 
