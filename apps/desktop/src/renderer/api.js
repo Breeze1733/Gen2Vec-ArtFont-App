@@ -4,8 +4,8 @@
  * This module provides thin wrappers and documentation-friendly names for
  * renderer code to call native capabilities (IPC->main->backend).
  */
-const WORD2PIC_URL = 'http://127.0.0.1:9001/api/v1/generate'
-const WORD2PIC_WORKFLOW = 'test_z_image_turbo'
+const TXT2IMG_URL = 'http://127.0.0.1:9001/api/v1/txt2img'
+const TXT2IMG_WORKFLOW = 'test_z_image_turbo'
 
 function ensureElectronApi(method) {
   if (!window.artTextApp?.[method]) {
@@ -71,7 +71,7 @@ export async function vectorizeArtImage(payload) {
 
 /**
  * Generate artwork bitmap. If running in Electron this proxies to main,
- * otherwise it falls back to the local WORD2PIC HTTP endpoint.
+ * otherwise it falls back to the local TXT2IMG HTTP endpoint.
  * @param {Object} payload
  * @returns {Promise<{png:string,svg?:string,metadata?:Object}>}
  */
@@ -93,10 +93,10 @@ export async function generateArtBitmap(payload) {
     seed: payload.seed || 0,
     style: payload.style || 'default',
     format: safeFormat,
-    workflow: WORD2PIC_WORKFLOW,
+    workflow: TXT2IMG_WORKFLOW,
   }
 
-  const response = await fetch(WORD2PIC_URL, {
+  const response = await fetch(TXT2IMG_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

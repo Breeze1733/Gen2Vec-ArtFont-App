@@ -33,9 +33,9 @@ Development-Training/
 │   │       ├── main.py             # 路由：/healthz, POST /api/v1/vectorize, POST /api/v1/generate
 │   │       ├── models.py           # Pydantic 请求/响应模型
 │   │       └── vectorizer.py       # 核心引擎：OpenCV 量化 → vtracer 追踪 → svgwrite 组装
-│   └── word2pic/                   # FastAPI 服务：文本 → 位图生成
+│   └── txt2img-api/                  # FastAPI 服务：文本 → 位图生成
 │       └── src/app/
-│           ├── main.py             # 路由：/healthz, POST /api/v1/generate（自动启动 ComfyUI）
+│           ├── main.py             # 路由：/healthz, POST /api/v1/txt2img（自动启动 ComfyUI）
 │           ├── models.py           # Pydantic 模型
 │           └── generator.py        # 生成器：ComfyUI HTTP 客户端 + 本地 stub 降级
 ├── workflows/                      # ComfyUI 工作流 JSON
@@ -47,7 +47,7 @@ Development-Training/
 ## 关键架构决策
 
 - **FR3 矢量化引擎**（`vectorizer.py`）：通过 k-means 进行颜色量化，逐层用 vtracer 追踪路径，用 svgwrite 组装分层 SVG，用 cairosvg 渲染 PNG 预览，输出轮廓偏差质量指标。
-- **ComfyUI 集成**：word2pic 会自动启动捆绑的 ComfyUI 便携实例（如果存在），ComfyUI 不可达时降级为本地 Pillow stub。
+- **ComfyUI 集成**：txt2img-api 会自动启动捆绑的 ComfyUI 便携实例（如果存在），ComfyUI 不可达时降级为本地 Pillow stub。
 - **桌面端 ↔ 后端 IPC**：Electron 主进程代理 HTTP 请求到 FastAPI 后端。渲染层仅通过 `window.artTextApp`（contextBridge）通信，生产环境无 CORS 问题。
 - **前端无框架**：仅 global.css，未使用 Tailwind 等 CSS 框架。
 - **独立依赖管理**：每个服务/应用独立管理自己的依赖，无 monorepo workspace 工具。
@@ -64,12 +64,12 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 依赖：OpenCV, scikit-image, vtracer, cairosvg, svgwrite
 
-### Word2Pic（端口 9001）
+### txt2img-api（端口 9001）
 
 ```powershell
-cd services/word2pic
+cd services/txt2img-api
 uv sync
-uv run word2pic-api
+uv run txt2img-api
 # 或：uv run uvicorn app.main:app --host 0.0.0.0 --port 9001 --app-dir src
 ```
 
@@ -89,12 +89,12 @@ npm run electron:build  # 生产构建（electron-builder, NSIS 安装包）
 ## 测试
 
 ```powershell
-# word2pic 测试
-cd services/word2pic
+# txt2img-api 测试
+cd services/txt2img-api
 uv run pytest
 ```
 
-使用 FastAPI TestClient（见 [tests/test_api.py](services/word2pic/tests/test_api.py)）。
+使用 FastAPI TestClient（见 [tests/test_api.py](services/txt2img-api/tests/test_api.py)）。
 
 vectorizer-api 和 desktop 目前尚无测试。
 
@@ -102,7 +102,7 @@ vectorizer-api 和 desktop 目前尚无测试。
 
 | 方法 | 路径 | 服务 | 状态 |
 |--------|------|---------|--------|
-| GET | `/healthz` | vectorizer-api, word2pic | ✅ |
+| GET | `/healthz` | vectorizer-api, txt2img-api | ✅ |
 | POST | `/api/v1/vectorize` | vectorizer-api | ✅ 位图→SVG |
 | POST | `/api/v1/generate` | vectorizer-api | 🔧 预留（501） |
-| POST | `/api/v1/generate` | word2pic | ✅ 文本→位图 |
+| POST | `/api/v1/txt2img` | txt2img-api | ✅ 文本→位图 |

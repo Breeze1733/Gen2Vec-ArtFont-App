@@ -13,7 +13,8 @@ Development-Training/
 ├─ apps/
 │  └─ desktop/                  # Electron + Vue 桌面端
 ├─ services/
-│  └─ vectorizer-api/           # FR3 智能矢量化后端（FastAPI）
+│  ├─ vectorizer-api/           # FR3 智能矢量化后端（FastAPI）
+│  └─ txt2img-api/              # 文生图后端（FastAPI）
 ├─ workflows/                   # 文生图工作流与模型流程配置
 ├─ packages/                    # 共享包（类型/工具/SDK/UI，预留）
 ├─ docs/                        # 需求、接口、设计说明（预留）
@@ -41,7 +42,8 @@ Development-Training/
 接口：
 
 - `GET /healthz`
-- `POST /api/v1/generate`
+- `POST /api/v1/vectorize` — 位图 → 透明 PNG + SVG
+- `POST /api/v1/generate` — 🔧 预留位图生成（待实现，返回 501）
 
 详细接口说明见 [services/vectorizer-api/README.md](./services/vectorizer-api/README.md)。
 
@@ -49,11 +51,11 @@ Development-Training/
 
 所有命令在**项目根目录**下执行。
 
-### word2pic 文生图后端（端口 9001）
+### txt2img-api 文生图后端（端口 9001）
 
 ```powershell
-cd services/word2pic
-uv run word2pic-api
+cd services/txt2img-api
+uv run txt2img-api
 ```
 
 ### 矢量化后端（端口 8000）
@@ -71,7 +73,7 @@ cd apps/desktop
 npm run electron:dev
 ```
 
-桌面端默认连接 `http://127.0.0.1:8000/api/v1`（矢量化）。如需对接 word2pic：
+桌面端默认连接 `http://127.0.0.1:8000/api/v1`（矢量化）。如需对接 txt2img-api：
 
 ```powershell
 $env:ART_TEXT_BACKEND_URL="http://127.0.0.1:9001/api/v1"

@@ -43,7 +43,7 @@ Thumbs.db
 *.sw?
 
 # Python venv
-services/word2pic/.venv/
+services/txt2img-api/.venv/
 .venv/
 venv/
 __pycache__/
@@ -53,8 +53,9 @@ __pycache__/
 services/vectorizer-api/app/app.py
 
 # ComfyUI（便携包整体忽略，含 Python 运行时和模型）
-services/word2pic/ComfyUI_windows_portable_nvidia/
-services/word2pic/ComfyUI_windows_portable/
+services/txt2img-api/ComfyUI_windows_portable_nvidia/
+services/txt2img-api/ComfyUI_windows_portable/
+services/word2pic/
 
 # Jupyter
 .ipynb_checkpoints/

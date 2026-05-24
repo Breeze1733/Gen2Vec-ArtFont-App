@@ -3,6 +3,7 @@ const path = require('path')
 const fs = require('fs/promises')
 
 const DEFAULT_BACKEND_BASE_URL = 'http://127.0.0.1:8000/api/v1'
+const TXT2IMG_BACKEND_URL = process.env.TXT2IMG_BACKEND_URL || 'http://127.0.0.1:9001/api/v1/txt2img'
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -44,9 +45,6 @@ function getBackendBaseUrl() {
     return DEFAULT_BACKEND_BASE_URL
   }
   const normalized = envUrl.replace(/\/+$/, '')
-  if (normalized.endsWith('/generate')) {
-    return normalized.slice(0, -'/generate'.length)
-  }
   if (normalized.endsWith('/vectorize')) {
     return normalized.slice(0, -'/vectorize'.length)
   }
@@ -134,7 +132,7 @@ ipcMain.handle('art-text/vectorize', async (event, payload) => {
 })
 
 ipcMain.handle('art-text/generate', async (event, payload) => {
-  const apiUrl = `${getBackendBaseUrl()}/generate`
+  const apiUrl = TXT2IMG_BACKEND_URL
   return requestBackend(apiUrl, payload)
 })
 

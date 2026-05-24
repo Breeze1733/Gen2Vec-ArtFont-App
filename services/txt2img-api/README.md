@@ -1,4 +1,4 @@
-# word2pic
+# txt2img-api
 
 文生图生成后端。接收前端提示词等参数，通过 ComfyUI（或本地降级方案）生成图片，返回 PNG data URL 和元数据。
 
@@ -25,10 +25,10 @@
 ### `GET /healthz`
 
 ```json
-{ "ok": true, "service": "word2pic" }
+{ "ok": true, "service": "txt2img-api" }
 ```
 
-### `POST /api/v1/generate`
+### `POST /api/v1/txt2img`
 
 #### 请求体
 
@@ -99,9 +99,9 @@
 ### 安装与启动
 
 ```bash
-cd services/word2pic
+cd services/txt2img-api
 uv sync
-uv run word2pic-api
+uv run txt2img-api
 ```
 
 或直接用 uvicorn：
@@ -115,7 +115,7 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 9001 --app-dir src
 ### 测试
 
 ```bash
-cd services/word2pic
+cd services/txt2img-api
 uv run pytest
 ```
 
@@ -134,17 +134,17 @@ uv run pytest
 示例：使用手动启动的 ComfyUI 运行：
 
 ```bash
-AUTO_START_COMFYUI=0 uv run word2pic-api
+AUTO_START_COMFYUI=0 uv run txt2img-api
 ```
 
 ## ComfyUI 集成
 
 ### 自动启动
 
-启动 word2pic 时，如果检测到仓库内的可移植 ComfyUI 捆绑包，会自动以**无窗口、无浏览器**模式在后台启动：
+启动 txt2img-api 时，如果检测到仓库内的可移植 ComfyUI 捆绑包，会自动以**无窗口、无浏览器**模式在后台启动：
 
 ```
-services/word2pic/
+services/txt2img-api/
 └── ComfyUI_windows_portable_nvidia/
     └── ComfyUI_windows_portable/
         └── python_embeded/python.exe  ← 自动检测
@@ -156,7 +156,7 @@ services/word2pic/
 ### 交互流程
 
 ```
-word2pic                              ComfyUI
+txt2img-api                              ComfyUI
   │                                      │
   ├─ POST /prompt ──────────────────────→│  (提交工作流 JSON)
   │  ← { prompt_id: "xxx" }             │
@@ -173,15 +173,15 @@ word2pic                              ComfyUI
 如果不想使用自动启动，可先自行启动 ComfyUI：
 
 ```bash
-cd services/word2pic/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable
+cd services/txt2img-api/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable
 .\python_embeded\python.exe -s ComfyUI\main.py
 ```
 
-然后设置 `AUTO_START_COMFYUI=0` 运行 word2pic。
+然后设置 `AUTO_START_COMFYUI=0` 运行 txt2img-api。
 
 ## 工作流
 
-工作流 JSON 文件存放在 `services/word2pic/workflows/` 目录下，格式为 ComfyUI **API 格式**（flat JSON dict，每个节点包含 `class_type` 和 `inputs`）。
+工作流 JSON 文件存放在 `services/txt2img-api/workflows/` 目录下，格式为 ComfyUI **API 格式**（flat JSON dict，每个节点包含 `class_type` 和 `inputs`）。
 
 请求时通过 `workflow` 字段指定工作流名称（不含 `.json` 扩展名），例如 `workflows/test_z_image_turbo.json` → `"workflow": "test_z_image_turbo"`。
 
@@ -206,7 +206,7 @@ cd services/word2pic/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable
 ## 项目结构
 
 ```
-services/word2pic/
+services/txt2img-api/
 ├── src/app/
 │   ├── main.py          FastAPI 应用、路由、ComfyUI 生命周期管理
 │   ├── models.py        Pydantic 请求/响应模型

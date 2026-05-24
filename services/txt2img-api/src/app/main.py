@@ -19,7 +19,7 @@ from .models import GenerationRequest, GenerationResponse
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="word2pic",
+    title="txt2img-api",
     version="0.1.0",
     description="Text-to-image generation backend for the Development-Training workspace.",
 )
@@ -35,10 +35,10 @@ app.add_middleware(
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"ok": True, "service": "word2pic"}
+    return {"ok": True, "service": "txt2img-api"}
 
 
-@app.post("/api/v1/generate", response_model=GenerationResponse)
+@app.post("/api/v1/txt2img", response_model=GenerationResponse)
 def generate(payload: GenerationRequest) -> GenerationResponse:
     artifact = generate_artwork(payload)
     return GenerationResponse(

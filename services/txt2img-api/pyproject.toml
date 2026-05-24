@@ -1,5 +1,5 @@
 [project]
-name = "word2pic"
+name = "txt2img-api"
 version = "0.1.0"
 description = "Text-to-image generation backend for the Development-Training workspace"
 readme = "README.md"
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-word2pic-api = "app.main:run"
+txt2img-api = "app.main:run"
 
 [build-system]
 requires = ["hatchling>=1.26.3"]

@@ -1,8 +1,8 @@
 import os, requests, base64, sys
 
 def main():
-    url = os.environ.get("WORD2PIC_URL", "http://127.0.0.1:9001")
-    url = url.rstrip('/') + "/api/v1/generate"
+    url = os.environ.get("TXT2IMG_URL", "http://127.0.0.1:9001")
+    url = url.rstrip('/') + "/api/v1/txt2img"
     payload = {
         "prompt": "霓虹城市夜景",
         "negative_prompt": "模糊",

@@ -226,7 +226,7 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
 
             # 6. Build metadata
             slug = re.sub(r"[^\w一-鿿]+", "-", request.prompt.strip(), flags=re.UNICODE).strip("-")
-            image_name = f"{slug or 'word2pic-generated'}.png"
+            image_name = f"{slug or 'txt2img-generated'}.png"
             w, h = _parse_resolution(request.resolution)
 
             metadata: dict[str, Any] = {
@@ -285,7 +285,7 @@ def _local_stub_generate(request: GenerationRequest) -> GenerationArtifact:
     image_base64 = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
 
     slug = re.sub(r"[^\w一-鿿]+", "-", request.prompt.strip(), flags=re.UNICODE).strip("-")
-    image_name = f"{slug or 'word2pic-generated'}.png"
+    image_name = f"{slug or 'txt2img-generated'}.png"
 
     metadata: dict[str, Any] = {
         "engine": "local-studio",

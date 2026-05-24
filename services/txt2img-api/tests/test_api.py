@@ -9,12 +9,12 @@ client = TestClient(app)
 def test_healthz() -> None:
     response = client.get("/healthz")
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "service": "word2pic"}
+    assert response.json() == {"ok": True, "service": "txt2img-api"}
 
 
 def test_generate_returns_image_and_metadata() -> None:
     response = client.post(
-        "/api/v1/generate",
+        "/api/v1/txt2img",
         json={
             "prompt": "晨曦之城",
             "negative_prompt": "模糊, 断裂",
