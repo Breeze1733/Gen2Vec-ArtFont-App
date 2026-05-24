@@ -30,7 +30,6 @@ Development-Training/
 ├── services/
 │   ├── vectorizer-api/             # FastAPI 服务：位图 → SVG 矢量化（FR3 引擎）
 │   │   └── app/
-│   │       ├── main.py             # 路由：/healthz, POST /api/v1/vectorize, POST /api/v1/generate
 │   │       ├── models.py           # Pydantic 请求/响应模型
 │   │       └── vectorizer.py       # 核心引擎：OpenCV 量化 → vtracer 追踪 → svgwrite 组装
 │   └── txt2img-api/                  # FastAPI 服务：文本 → 位图生成
@@ -84,7 +83,8 @@ npm run electron:dev    # Vite 开发 + Electron
 npm run electron:build  # 生产构建（electron-builder, NSIS 安装包）
 ```
 
-后端地址默认 `http://127.0.0.1:8000/api/v1`，可通过 `ART_TEXT_BACKEND_URL` 环境变量覆盖。
+矢量化地址默认 `http://127.0.0.1:8000/api/v1/vectorize`，可通过 `VECTORIZER_BACKEND_URL` 环境变量覆盖。
+文生图地址默认 `http://127.0.0.1:9001/api/v1/txt2img`，可通过 `TXT2IMG_BACKEND_URL` 环境变量覆盖。
 
 ## 测试
 
@@ -104,5 +104,4 @@ vectorizer-api 和 desktop 目前尚无测试。
 |--------|------|---------|--------|
 | GET | `/healthz` | vectorizer-api, txt2img-api | ✅ |
 | POST | `/api/v1/vectorize` | vectorizer-api | ✅ 位图→SVG |
-| POST | `/api/v1/generate` | vectorizer-api | 🔧 预留（501） |
 | POST | `/api/v1/txt2img` | txt2img-api | ✅ 文本→位图 |

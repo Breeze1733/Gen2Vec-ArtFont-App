@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, net, shell, Notification } = requir
 const path = require('path')
 const fs = require('fs/promises')
 
-const DEFAULT_BACKEND_BASE_URL = 'http://127.0.0.1:8000/api/v1'
+const VECTORIZER_BACKEND_URL = process.env.VECTORIZER_BACKEND_URL || 'http://127.0.0.1:8000/api/v1/vectorize'
 const TXT2IMG_BACKEND_URL = process.env.TXT2IMG_BACKEND_URL || 'http://127.0.0.1:9001/api/v1/txt2img'
 
 function createWindow() {
@@ -37,18 +37,6 @@ function parseDataUrl(dataUrl) {
   const isBase64 = !!match[2]
   const data = match[3]
   return isBase64 ? Buffer.from(data, 'base64') : Buffer.from(decodeURIComponent(data), 'utf8')
-}
-
-function getBackendBaseUrl() {
-  const envUrl = process.env.ART_TEXT_BACKEND_URL
-  if (!envUrl) {
-    return DEFAULT_BACKEND_BASE_URL
-  }
-  const normalized = envUrl.replace(/\/+$/, '')
-  if (normalized.endsWith('/vectorize')) {
-    return normalized.slice(0, -'/vectorize'.length)
-  }
-  return normalized
 }
 
 async function requestBackend(apiUrl, payload) {
@@ -127,13 +115,11 @@ ipcMain.handle('art-text/open-external', async (event, url) => {
 })
 
 ipcMain.handle('art-text/vectorize', async (event, payload) => {
-  const apiUrl = `${getBackendBaseUrl()}/vectorize`
-  return requestBackend(apiUrl, payload)
+  return requestBackend(VECTORIZER_BACKEND_URL, payload)
 })
 
 ipcMain.handle('art-text/generate', async (event, payload) => {
-  const apiUrl = TXT2IMG_BACKEND_URL
-  return requestBackend(apiUrl, payload)
+  return requestBackend(TXT2IMG_BACKEND_URL, payload)
 })
 
 ipcMain.handle('art-text/save-file', async (event, options) => {

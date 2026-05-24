@@ -1,12 +1,11 @@
-﻿# Vectorizer API
+# Vectorizer API
 
-该服务仅负责“位图 -> SVG 矢量图”转换，普通艺术字位图生成接口仅预留。
+该服务仅负责“位图 -> SVG 矢量图”转换。
 
 ## 接口
 
 - `GET /healthz`
 - `POST /api/v1/vectorize`（已实现）
-- `POST /api/v1/generate`（预留，占位返回 501）
 
 ## 矢量化参数约定（6参数 + 4预设）
 

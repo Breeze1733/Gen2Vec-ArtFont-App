@@ -43,7 +43,6 @@ Development-Training/
 
 - `GET /healthz`
 - `POST /api/v1/vectorize` — 位图 → 透明 PNG + SVG
-- `POST /api/v1/generate` — 🔧 预留位图生成（待实现，返回 501）
 
 详细接口说明见 [services/vectorizer-api/README.md](./services/vectorizer-api/README.md)。
 
@@ -73,10 +72,13 @@ cd apps/desktop
 npm run electron:dev
 ```
 
-桌面端默认连接 `http://127.0.0.1:8000/api/v1`（矢量化）。如需对接 txt2img-api：
+桌面端默认连接 `http://127.0.0.1:8000/api/v1/vectorize`（矢量化），文生图请求默认转发到 `http://127.0.0.1:9001/api/v1/txt2img`。
+
+可通过完整 endpoint 环境变量覆盖：
 
 ```powershell
-$env:ART_TEXT_BACKEND_URL="http://127.0.0.1:9001/api/v1"
+$env:VECTORIZER_BACKEND_URL="http://127.0.0.1:8000/api/v1/vectorize"
+$env:TXT2IMG_BACKEND_URL="http://127.0.0.1:9001/api/v1/txt2img"
 npm run electron:dev
 ```
 

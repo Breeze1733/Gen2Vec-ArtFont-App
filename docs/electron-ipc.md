@@ -12,8 +12,8 @@
 - `getPlatform(): string` — 返回平台字符串（同步）。
 - `getAppVersion(): Promise<string>` — 获取应用版本（调用主进程）。
 - `isDev(): Promise<boolean>` — 是否为开发模式。
-- `vectorize(payload): Promise<object>` — 调用后端 `/vectorize` 进行位图→SVG 矢量化。
-- `generate(payload): Promise<object>` — 调用后端 `/generate`（或通过主进程转发）生成位图。
+- `vectorize(payload): Promise<object>` — 通过主进程转发到 vectorizer-api (`/api/v1/vectorize`) 进行位图→SVG 矢量化。
+- `generate(payload): Promise<object>` — 通过主进程转发到 txt2img-api (`/api/v1/txt2img`) 生成位图。
 - `saveFile(options): Promise<{canceled, filePath}>` — 打开保存对话框并保存单个文件。
 - `saveResults(options): Promise<{canceled, filePaths}>` — 选择目录并保存多个产物（png/svg/json 等）。
 - `notify(options): Promise<{ok:true}>` — 发送系统通知（如支持）。

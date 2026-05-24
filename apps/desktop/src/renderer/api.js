@@ -5,6 +5,7 @@
  * renderer code to call native capabilities (IPC->main->backend).
  */
 const TXT2IMG_URL = 'http://127.0.0.1:9001/api/v1/txt2img'
+const VECTORIZER_URL = 'http://127.0.0.1:8000/api/v1/vectorize'
 const TXT2IMG_WORKFLOW = 'test_z_image_turbo'
 
 function ensureElectronApi(method) {
@@ -61,12 +62,27 @@ export async function openExternal(url) {
 }
 
 /**
- * Call the vectorize pipeline (backed by /vectorize).
+ * Call the vectorize pipeline. If running in Electron this proxies to main,
+ * otherwise it falls back to the local vectorizer HTTP endpoint.
  * @param {Object} payload - See docs/electron-ipc.md for schema
  */
 export async function vectorizeArtImage(payload) {
-  ensureElectronApi('vectorize')
-  return window.artTextApp.vectorize(payload)
+  if (window.artTextApp?.vectorize) {
+    return window.artTextApp.vectorize(payload)
+  }
+
+  const response = await fetch(VECTORIZER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const errBody = await response.json().catch(() => ({}))
+    throw new Error(errBody.detail || `后端返回 ${response.status}`)
+  }
+
+  return response.json()
 }
 
 /**

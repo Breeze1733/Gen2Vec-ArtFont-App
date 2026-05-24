@@ -73,10 +73,10 @@ def _resolve_vectorize_image(payload: VectorizeRequest) -> tuple[bytes, str | No
 
     if generated.artifact_id:
         raise HTTPException(
-            status_code=501,
+            status_code=400,
             detail=(
-                "generated.artifact_id resolver is reserved but not implemented yet. "
-                "Please provide generated.image_base64 or generated.file_path for now."
+                "generated.artifact_id is not supported by vectorizer-api. "
+                "Please provide generated.image_base64 or generated.file_path."
             ),
         )
 
@@ -126,12 +126,3 @@ def vectorize(payload: VectorizeRequest) -> VectorizeResponse:
         "metadata": output["metadata"],
     }
     return VectorizeResponse(**response_payload)
-
-
-@app.post("/api/v1/generate")
-def generate_bitmap_placeholder() -> dict:
-    # Reserved for future bitmap-art-text generation service.
-    raise HTTPException(
-        status_code=501,
-        detail="Bitmap art text generation API is reserved but not implemented yet.",
-    )
