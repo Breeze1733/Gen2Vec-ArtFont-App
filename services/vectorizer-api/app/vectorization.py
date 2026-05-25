@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+import sys
 import tempfile
 import time
 from typing import Any
@@ -9,6 +10,11 @@ from xml.dom import minidom
 
 import numpy as np
 from PIL import Image
+
+if sys.platform == "win32":
+    _venv_scripts = os.path.join(sys.prefix, "Scripts")
+    if os.path.isdir(_venv_scripts):
+        os.add_dll_directory(_venv_scripts)
 
 try:
     import cairosvg

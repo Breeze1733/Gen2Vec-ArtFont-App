@@ -93,7 +93,29 @@ export async function vectorizeArtImage(payload) {
  */
 export async function generateArtBitmap(payload) {
   if (window.artTextApp?.generate) {
-    return window.artTextApp.generate(payload)
+    const combinedPrompt = payload.text
+      ? `艺术字文本：${payload.text}，风格：${payload.prompt || ''}`
+      : (payload.prompt || '')
+
+    const safeFormat = payload.format === 'SVG Only' ? 'PNG' : 'PNG'
+
+    const body = {
+      prompt: combinedPrompt,
+      negative_prompt: payload.negative || '',
+      resolution: payload.resolution || '1024 x 1024',
+      seed: payload.seed || 0,
+      style: payload.style || 'default',
+      format: safeFormat,
+      workflow: TXT2IMG_WORKFLOW,
+    }
+
+    const data = await window.artTextApp.generate(body)
+    return {
+      png: data.image_base64 || '',
+      image_name: data.image_name || '',
+      svg: '',
+      metadata: data.metadata || null,
+    }
   }
 
   const combinedPrompt = payload.text
