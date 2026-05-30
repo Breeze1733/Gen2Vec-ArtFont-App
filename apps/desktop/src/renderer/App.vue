@@ -75,7 +75,18 @@
     <!-- 输出面板 -->
     <div class="main-layout" v-if="activeTab === 'output'">
       <main class="workspace">
-        <ResultPanel :result="result" @download="downloadOutput" @save-all="saveAllResults" @open-svg="handleOpenSvg" />
+        <ResultPanel
+          :result="result"
+          :mode="mode"
+          :batch-items="batchItems"
+          :batch-progress="batchProgress"
+          :selected-batch-index="selectedBatchIndex"
+          :running="running"
+          @download="downloadOutput"
+          @save-all="saveAllResults"
+          @open-svg="handleOpenSvg"
+          @select-batch-item="selectBatchItem"
+        />
       </main>
     </div>
 
@@ -253,6 +264,11 @@ const result = reactive({
   transparent: ''
 })
 
+// 批量模式状态
+const batchItems = ref([])
+const batchProgress = reactive({ current: 0, total: 0, completed: 0, failed: 0 })
+const selectedBatchIndex = ref(-1)
+
 const currentFiles = ref([])
 
 const logs = ref(loadHistory())
@@ -308,6 +324,15 @@ const startGeneration = async () => {
   result.image = ''
   result.svg = ''
   result.metadata = null
+  result.original = ''
+  result.preview = ''
+  result.transparent = ''
+  batchItems.value = []
+  batchProgress.current = 0
+  batchProgress.total = 0
+  batchProgress.completed = 0
+  batchProgress.failed = 0
+  selectedBatchIndex.value = -1
 
   const taskTitle = mode.value === 'single' ? payload.text.trim() : mode.value === 'batch' ? '批量任务' : '图片矢量化'
   const task = {
@@ -427,44 +452,122 @@ const startGeneration = async () => {
       currentFiles.value = files
 
     } else if (mode.value === 'batch') {
-      // 简单批处理：每行一个任务，顺序执行
+      // 批量处理：逐条执行，支持进度展示和单条错误容错
       const lines = String(payload.batch || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
-      for (const line of lines) {
+      batchItems.value = []
+      batchProgress.current = 0
+      batchProgress.total = lines.length
+      batchProgress.completed = 0
+      batchProgress.failed = 0
+      selectedBatchIndex.value = -1
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
         const parts = line.split('|').map(p => p.trim())
         const text = parts[0] || ''
         const prompt = parts[1] || ''
-        const payloadA = { text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed }
-        const t1 = Date.now()
-        const respA = await generateArtBitmap(payloadA)
-        stage1Duration = Date.now() - t1
-        const payloadB = { source_type: 'generated', text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed, vector: { ...payload.vector }, image_base64: respA.png, image_name: respA.image_name || `${safeName(text || 'batch')}-orig.png` }
-        const t2 = Date.now()
-        const respB = await vectorizeArtImage(payloadB)
-        stage2Duration = Date.now() - t2
-        result.original = respA.png
-        result.transparent = respB.transparent_png || ''
-        result.preview = respB.preview_png || respB.png || ''
-        result.image = result.preview
-        result.svg = respB.svg || ''
-        result.metadata = respB.metadata || null
-        if (result.metadata) {
-          result.metadata.generation = result.metadata.generation || {}
-          result.metadata.generation.duration_ms = stage1Duration
+
+        // 初始化该条目
+        batchItems.value.push({
+          index: i,
+          text,
+          prompt,
+          status: 'running',
+          error: '',
+          original: '',
+          transparent: '',
+          preview: '',
+          svg: '',
+          metadata: null,
+          stage1Ms: 0,
+          stage2Ms: 0
+        })
+        batchProgress.current = i + 1
+
+        try {
+          // Stage 1: 生成位图
+          const payloadA = { text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed }
+          const t1 = Date.now()
+          const respA = await generateArtBitmap(payloadA)
+          const s1Ms = Date.now() - t1
+
+          // Stage 2: 矢量化
+          const payloadB = {
+            source_type: 'generated', text, prompt,
+            negative: payload.negative || '',
+            resolution: payload.resolution, format: payload.format, seed: payload.seed,
+            vector: { ...payload.vector },
+            image_base64: respA.png,
+            image_name: respA.image_name || `${safeName(text || 'batch')}-orig.png`
+          }
+          const t2 = Date.now()
+          const respB = await vectorizeArtImage(payloadB)
+          const s2Ms = Date.now() - t2
+
+          // 更新条目结果
+          const item = batchItems.value[i]
+          item.status = 'success'
+          item.original = respA.png || ''
+          item.transparent = respB.transparent_png || ''
+          item.preview = respB.preview_png || respB.png || ''
+          item.svg = respB.svg || ''
+          item.metadata = respB.metadata || null
+          item.stage1Ms = s1Ms
+          item.stage2Ms = s2Ms
+          if (item.metadata) {
+            item.metadata.generation = item.metadata.generation || {}
+            item.metadata.generation.duration_ms = s1Ms
+          }
+
+          batchProgress.completed++
+
+          // 自动选中最新成功的条目并展示结果
+          selectedBatchIndex.value = i
+          result.original = item.original
+          result.transparent = item.transparent
+          result.preview = item.preview
+          result.image = item.preview
+          result.svg = item.svg
+          result.metadata = item.metadata
+        } catch (itemErr) {
+          // 单条失败不中断整批
+          const item = batchItems.value[i]
+          item.status = 'failed'
+          item.error = itemErr?.message || '生成失败'
+          batchProgress.failed++
         }
       }
+
+      // 构建文件列表（汇总所有成功条目）
       const base = getFileNameBase()
       const files = []
-      if (result.original) files.push({ key: 'original', name: `${base}_original.png`, data: result.original, isText: false })
-      if (result.transparent) files.push({ key: 'transparent', name: `${base}_transparent.png`, data: result.transparent, isText: false })
-      if (result.preview) files.push({ key: 'preview', name: `${base}_preview.png`, data: result.preview, isText: false })
-      if (result.svg) files.push({ key: 'svg', name: `${base}_vector.svg`, data: result.svg, isText: true })
-      if (result.metadata) files.push({ key: 'metadata', name: `${base}_metadata.json`, data: JSON.stringify(result.metadata, null, 2), isText: true })
-      const logText = `task_id=${task.id}\nmode=batch\nitems=${lines.length}\nstatus=completed`
+      const successItems = batchItems.value.filter(b => b.status === 'success')
+      successItems.forEach((b, idx) => {
+        const suffix = successItems.length > 1 ? `_item${idx + 1}` : ''
+        if (b.original) files.push({ key: `original${suffix}`, name: `${base}${suffix}_original.png`, data: b.original, isText: false })
+        if (b.transparent) files.push({ key: `transparent${suffix}`, name: `${base}${suffix}_transparent.png`, data: b.transparent, isText: false })
+        if (b.preview) files.push({ key: `preview${suffix}`, name: `${base}${suffix}_preview.png`, data: b.preview, isText: false })
+        if (b.svg) files.push({ key: `svg${suffix}`, name: `${base}${suffix}_vector.svg`, data: b.svg, isText: true })
+        if (b.metadata) files.push({ key: `metadata${suffix}`, name: `${base}${suffix}_metadata.json`, data: JSON.stringify(b.metadata, null, 2), isText: true })
+      })
+      const logText = `task_id=${task.id}\nmode=batch\ntotal=${lines.length}\ncompleted=${batchProgress.completed}\nfailed=${batchProgress.failed}\nstatus=completed`
       files.push({ key: 'log', name: `${base}_log.log`, data: logText, isText: true })
       currentFiles.value = files
+
+      // 设置最终任务状态
+      if (batchProgress.failed === lines.length) {
+        task.status = '失败'
+        error.value = '所有批量任务均失败。'
+      } else if (batchProgress.failed > 0) {
+        task.status = `部分完成（${batchProgress.completed}/${lines.length}）`
+      } else {
+        task.status = '完成'
+      }
     }
 
-    task.status = '完成'
+    if (mode.value !== 'batch') {
+      task.status = '完成'
+    }
     saveHistory()
   } catch (err) {
     error.value = err?.message || '生成失败，请稍后重试。'
@@ -615,6 +718,26 @@ const resetForm = () => {
   result.svg = ''
   result.metadata = null
   result.original = ''
+  result.preview = ''
+  result.transparent = ''
+  batchItems.value = []
+  batchProgress.current = 0
+  batchProgress.total = 0
+  batchProgress.completed = 0
+  batchProgress.failed = 0
+  selectedBatchIndex.value = -1
+}
+
+const selectBatchItem = (index) => {
+  const item = batchItems.value[index]
+  if (!item || item.status !== 'success') return
+  selectedBatchIndex.value = index
+  result.original = item.original || ''
+  result.transparent = item.transparent || ''
+  result.preview = item.preview || ''
+  result.image = item.preview || ''
+  result.svg = item.svg || ''
+  result.metadata = item.metadata || null
 }
 
 const exportHistory = () => {
