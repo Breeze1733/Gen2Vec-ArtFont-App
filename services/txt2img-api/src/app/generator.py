@@ -105,6 +105,7 @@ def _find_nodes_by_class(workflow: dict, class_type: str) -> list[tuple[str, dic
 # 文本艺术字常见缺陷的默认负面提示词
 _DEFAULT_NEGATIVE = (
     "broken strokes, missing strokes, wrong characters, garbled text, "
+    "duplicate characters, repeated characters, extra character, wrong character count, "
     "deformed text, blurry text, low quality, jpeg artifacts, "
     "watermark, text signature, messy background, cluttered layout"
 )
@@ -125,24 +126,28 @@ def _build_text_art_prompt(text: str, style_prompt: str) -> str:
 
     parts = ["masterpiece typography design"]
 
-    # Text specification — language-aware
-    if has_chinese and has_english:
+    # Text specification — bilingual, anti-duplication
+    if has_chinese:
+        cn_chars = re.findall(r"[一-鿿]", text)
+        cn_count = len(cn_chars)
+        char_list = " ".join(cn_chars)
+        # 中英双语：Flux(T5-XXL) 吃英文，Z-Image(Qwen) 吃中文
         parts.append(
-            f'bilingual text "{text}", '
-            "accurate Chinese character strokes, complete radicals, "
-            "crisp English letterforms, perfect typography"
+            f'exactly {cn_count} Chinese character(s) "{char_list}", '
+            f'正好{cn_count}个汉字"{char_list}"，'
+            "accurate strokes, complete radicals, 笔画完整, 部首正确, "
+            "NO extra character, NO repeated character, 无多余字, 无重复字"
         )
-    elif has_chinese:
-        parts.append(
-            f'Chinese text "{text}", '
-            "perfect character strokes, accurate calligraphy structure, "
-            "no broken strokes, no missing radicals, correct Chinese characters"
-        )
+        if has_english:
+            parts.append(
+                f'and English text in "{text}", '
+                "crisp letterforms, 字母清晰"
+            )
     elif has_english:
         parts.append(
             f'text "{text}", '
             "crisp typography, perfect letterforms, clean kerning, "
-            "well-proportioned spacing"
+            "well-proportioned spacing, no duplicate letters"
         )
     else:
         parts.append(f'text "{text}"')
