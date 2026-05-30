@@ -2,6 +2,17 @@ const { app, BrowserWindow, ipcMain, dialog, net, shell, Notification } = requir
 const path = require('path')
 const fs = require('fs/promises')
 
+// 强制 Windows 使用高性能独立显卡（NVIDIA/AMD），避免默认分配集显导致 WebGL 检测不到独显
+// 必须在 app.whenReady() 之前调用
+// 注：部分 Electron 版本下 commandLine 可能未就绪，包裹 try/catch 作为尽力而为的优化
+try {
+  if (app && app.commandLine) {
+    app.commandLine.appendSwitch('force_high_performance_gpu')
+  }
+} catch (_) {
+  // 非关键路径，静默忽略
+}
+
 const VECTORIZER_BACKEND_URL = process.env.VECTORIZER_BACKEND_URL || 'http://127.0.0.1:8000/api/v1/vectorize'
 const TXT2IMG_BACKEND_URL = process.env.TXT2IMG_BACKEND_URL || 'http://127.0.0.1:9001/api/v1/txt2img'
 

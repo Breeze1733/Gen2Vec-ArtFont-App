@@ -151,6 +151,64 @@ h3 {
   border: 1px solid rgba(251, 191, 36, 0.3);
 }
 
+.gpu-info {
+  font-size: 12px;
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.08);
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(15, 118, 110, 0.2);
+}
+
+.gpu-info p {
+  margin: 0;
+}
+
+.gpu-warning p {
+  margin: 0 0 4px 0;
+}
+
+.gpu-help {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.gpu-help summary {
+  cursor: pointer;
+  color: #92400e;
+  font-weight: 600;
+}
+
+.gpu-help-body {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.08);
+  line-height: 1.7;
+}
+
+.gpu-help-body p {
+  margin: 0 0 6px 0;
+}
+
+.gpu-help-body ol {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.gpu-help-body li {
+  margin-bottom: 4px;
+}
+
+.gpu-help-body code {
+  background: rgba(31, 41, 55, 0.08);
+  color: var(--text);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  white-space: normal;
+}
+
 .hero-panel div {
   display: flex;
   justify-content: space-between;

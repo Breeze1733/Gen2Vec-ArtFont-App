@@ -33,8 +33,13 @@
           <span>运行环境</span>
           <strong>{{ gpuInfo }}</strong>
         </div>
-        <div v-if="!hasDiscreteGpu" class="gpu-warning">
-          只能使用图片矢量化模式
+        <!-- Intel 集显：可用但提醒性能 -->
+        <div v-if="gpuTier === 'integrated'" class="gpu-info">
+          <p>集显可用，但文生图速度可能较慢</p>
+        </div>
+        <!-- 无 GPU：仅矢量化模式 -->
+        <div v-if="gpuTier === 'none'" class="gpu-warning">
+          <p>仅限图片矢量化模式</p>
         </div>
       </div>
     </header>
@@ -48,7 +53,8 @@
             :payload="payload"
             :running="running"
             :error="error"
-            :has-discrete-gpu="hasDiscreteGpu"
+            :has-usable-gpu="hasUsableGpu"
+            :gpu-tier="gpuTier"
             @file-change="handleFileChange"
             @batch-file="(info) => { payload.batch = info.content }"
             @reset="resetForm"
@@ -95,46 +101,81 @@ import { generateArtBitmap, saveFile, saveResults, vectorizeArtImage } from './a
 
 // GPU 检测
 const gpuInfo = ref('检测中...')
-const hasDiscreteGpu = ref(false)
+const gpuRawRenderer = ref('')
+const gpuDetectFailed = ref(false)
+const hasUsableGpu = ref(false)
+const gpuTier = ref('unknown') // 'discrete' | 'integrated' | 'unknown' | 'none'
 
 const detectGPU = () => {
   try {
+    // 维度 1：WebGL UNMASKED_RENDERER_WEBGL
     const canvas = document.createElement('canvas')
     const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl')
     if (!gl) {
-      gpuInfo.value = 'CPU（无 WebGL）'
-      hasDiscreteGpu.value = false
+      gpuInfo.value = '未检测到 GPU（WebGL 不可用）'
+      gpuTier.value = 'none'
+      gpuDetectFailed.value = true
+      hasUsableGpu.value = false
       return
     }
 
     const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
+    let webglRenderer = ''
     if (debugInfo) {
-      const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
-      // 简化显示
-      if (renderer.includes('NVIDIA') || renderer.includes('AMD') || renderer.includes('Radeon')) {
-        gpuInfo.value = `GPU（${renderer.split(' ').slice(0, 2).join(' ')}）`
-        hasDiscreteGpu.value = true
-      } else if (renderer.includes('Intel')) {
-        gpuInfo.value = `集成显卡（Intel）`
-        hasDiscreteGpu.value = false
-      } else {
-        gpuInfo.value = `GPU（${renderer.substring(0, 30)}）`
-        hasDiscreteGpu.value = true
+      webglRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || ''
+      gpuRawRenderer.value = webglRenderer
+    }
+
+    // 维度 2：WebGPU adapter（如果可用）—— 可能暴露不同于 WebGL 的 GPU 信息
+    try {
+      if (typeof navigator !== 'undefined' && navigator.gpu) {
+        navigator.gpu.requestAdapter().then(adapter => {
+          if (adapter) {
+            const info = adapter.info || {}
+            const gpuName = [info.vendor, info.architecture].filter(Boolean).join(' ').trim() || '未知 GPU'
+            // WebGPU 可能在不同上下文中暴露独显——如果 WebGL 漏掉了，这里补上
+            if ((gpuName.includes('NVIDIA') || gpuName.includes('AMD') || gpuName.includes('Radeon'))
+              && gpuTier.value !== 'discrete') {
+              gpuTier.value = 'discrete'
+              gpuInfo.value = `GPU（${gpuName.substring(0, 30)}）`
+              hasUsableGpu.value = true
+            }
+          }
+        }).catch(() => {})
       }
+    } catch (_) { /* WebGPU 不可用，忽略 */ }
+
+    // 维度 3：综合判定
+    const renderer = webglRenderer
+    if (renderer.includes('NVIDIA') || renderer.includes('AMD') || renderer.includes('Radeon')) {
+      gpuInfo.value = `独立显卡（${renderer.split(' ').slice(0, 2).join(' ')}）`
+      gpuTier.value = 'discrete'
+      hasUsableGpu.value = true
+    } else if (renderer.includes('Intel')) {
+      gpuInfo.value = '集成显卡（Intel）'
+      gpuTier.value = 'integrated'
+      hasUsableGpu.value = true
+    } else if (renderer) {
+      gpuInfo.value = `GPU（${renderer.substring(0, 30)}）`
+      gpuTier.value = 'unknown'
+      hasUsableGpu.value = true
     } else {
       gpuInfo.value = 'GPU（WebGL）'
-      hasDiscreteGpu.value = true
+      gpuTier.value = 'unknown'
+      hasUsableGpu.value = true
     }
   } catch (e) {
-    gpuInfo.value = 'CPU（检测失败）'
-    hasDiscreteGpu.value = false
+    gpuInfo.value = 'GPU 检测失败'
+    gpuTier.value = 'none'
+    gpuDetectFailed.value = true
+    hasUsableGpu.value = false
   }
 }
 
 onMounted(() => {
   detectGPU()
-  // 无独立显卡时默认选择图片矢量化模式
-  if (!hasDiscreteGpu.value) {
+  // 仅在完全没有 GPU 时默认选择图片矢量化模式
+  if (!hasUsableGpu.value) {
     mode.value = 'vectorize'
   }
 })

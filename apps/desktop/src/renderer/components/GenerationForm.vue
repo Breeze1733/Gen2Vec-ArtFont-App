@@ -13,10 +13,10 @@
           v-for="item in modes"
           :key="item.value"
           type="button"
-          :class="['mode-button', { active: mode === item.value, disabled: item.requiresGpu && !hasDiscreteGpu }]"
-          :disabled="item.requiresGpu && !hasDiscreteGpu"
+          :class="['mode-button', { active: mode === item.value, disabled: item.requiresGpu && !hasUsableGpu }]"
+          :disabled="item.requiresGpu && !hasUsableGpu"
           @click="handleModeChange(item.value)"
-          :title="item.requiresGpu && !hasDiscreteGpu ? '需要独立显卡（NVIDIA/AMD）' : ''"
+          :title="item.requiresGpu && !hasUsableGpu ? '未检测到可用的 GPU' : (item.requiresGpu && gpuTier === 'integrated' ? '使用集成显卡，生成速度可能较慢' : '')"
         >
           {{ item.label }}
         </button>
@@ -115,9 +115,13 @@ const props = defineProps({
   payload: Object,
   running: Boolean,
   error: String,
-  hasDiscreteGpu: {
+  hasUsableGpu: {
     type: Boolean,
     default: false
+  },
+  gpuTier: {
+    type: String,
+    default: 'unknown'
   }
 })
 
@@ -129,11 +133,11 @@ const modes = [
 
 const emit = defineEmits(['file-change', 'update:mode', 'batch-file', 'reset'])
 
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
 const handleModeChange = (newMode) => {
-  // 如果没有独立显卡，只能使用矢量化模式
-  if (!props.hasDiscreteGpu && newMode !== 'vectorize') {
+  // 仅在完全没有 GPU 时限制为矢量化模式
+  if (!props.hasUsableGpu && newMode !== 'vectorize') {
     return
   }
   emit('update:mode', newMode)
