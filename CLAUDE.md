@@ -17,36 +17,65 @@
 ## 仓库结构
 
 ```
-Development-Training/
+Gen2Vec-ArtFont-App/
 ├── apps/
-│   ├── desktop/                    # Electron + Vue 3 桌面端
-│   │   ├── electron/main.cjs       # Electron 主进程（IPC、HTTP 请求后端）
-│   │   ├── electron/preload.cjs    # contextBridge 安全 IPC
-│   │   └── src/renderer/           # Vue 3 SPA（Vite 构建）
-│   │       ├── App.vue             # 根组件：状态管理、历史记录
-│   │       ├── api.js              # API 层：mock SVG 生成 + 后端调用
-│   │       ├── components/         # ModeSwitcher, GenerationForm, ResultPanel, HistoryPanel
-│   │       └── styles/global.css   # 单文件 CSS，无框架
-│   └── cli/                        # Node.js CLI 工具
-│       ├── bin/gen2vec.mjs         # CLI 入口
-│       └── src/
-│           ├── api.mjs             # 后端 API 调用（复用 desktop 相同接口）
-│           ├── commands/           # generate, vectorize, pipeline 命令
-│           └── utils/file.mjs      # 文件操作工具
+│   ├── desktop/                        # Electron + Vue 3 桌面端
+│   │   ├── electron/
+│   │   │   ├── main.cjs                # 主进程：IPC 处理、HTTP 代理到后端
+│   │   │   └── preload.cjs             # contextBridge 安全 IPC（window.artTextApp）
+│   │   ├── src/renderer/
+│   │   │   ├── App.vue                 # 根组件：GPU 检测、状态管理、历史记录
+│   │   │   ├── api.js                  # API 层：后端 HTTP 调用
+│   │   │   ├── main.js                 # Vue 入口
+│   │   │   ├── components/
+│   │   │   │   ├── ModeSwitcher.vue    # 模式切换（单条/批量/矢量化）
+│   │   │   │   ├── GenerationForm.vue  # 输入表单
+│   │   │   │   ├── VectorParams.vue    # 矢量化参数面板
+│   │   │   │   ├── ResultPanel.vue     # 结果展示
+│   │   │   │   └── HistoryPanel.vue    # 历史任务
+│   │   │   └── styles/global.css       # 单文件 CSS
+│   │   ├── package.json
+│   │   └── vite.config.js
+│   └── cli/                            # Node.js CLI 工具（无需 Electron）
+│       ├── bin/gen2vec.mjs             # CLI 入口
+│       ├── src/
+│       │   ├── api.mjs                 # 后端 API 调用层
+│       │   ├── commands/
+│       │   │   ├── generate.mjs        # generate 命令
+│       │   │   ├── vectorize.mjs       # vectorize 命令
+│       │   │   └── pipeline.mjs        # pipeline 命令
+│       │   └── utils/file.mjs          # 文件读写工具
+│       └── README.md
 ├── services/
-│   ├── vectorizer-api/             # FastAPI 服务：位图 → SVG 矢量化（FR3 引擎）
-│   │   └── app/
-│   │       ├── models.py           # Pydantic 请求/响应模型
-│   │       └── vectorizer.py       # 核心引擎：OpenCV 量化 → vtracer 追踪 → svgwrite 组装
-│   └── txt2img-api/                  # FastAPI 服务：文本 → 位图生成
-│       └── src/app/
-│           ├── main.py             # 路由：/healthz, POST /api/v1/txt2img（自动启动 ComfyUI）
-│           ├── models.py           # Pydantic 模型
-│           └── generator.py        # 生成器：ComfyUI HTTP 客户端 + 本地 stub 降级
-├── workflows/                      # ComfyUI 工作流 JSON
-├── packages/                       # （预留）共享 SDK/类型/工具
-├── docs/                           # （预留）文档
-└── scripts/                        # （预留）开发/构建/发布脚本
+│   ├── vectorizer-api/                 # FastAPI：位图 → SVG 矢量化
+│   │   ├── app/
+│   │   │   ├── main.py                 # 路由：/healthz, POST /api/v1/vectorize
+│   │   │   ├── models.py               # Pydantic 模型（VectorConfig, VectorizeRequest/Response）
+│   │   │   ├── image_processing.py     # 图像预处理：rembg 抠图、去噪、裁剪、量化
+│   │   │   ├── vectorization.py        # 矢量化核心：vtracer 追踪 + 质量评估
+│   │   │   └── app.py                  # 入口
+│   │   ├── models/rembg/               # 离线 rembg ONNX 模型
+│   │   └── requirements.txt
+│   └── txt2img-api/                    # FastAPI：文本 → 位图生成
+│       ├── src/app/
+│       │   ├── main.py                 # 路由：/healthz, POST /api/v1/txt2img
+│       │   ├── models.py               # Pydantic 模型（GenerationRequest/Response）
+│       │   └── generator.py            # ComfyUI 客户端 + Pillow 本地 stub 降级
+│       ├── scripts/
+│       │   ├── run_comfyui.py          # ComfyUI 启动脚本
+│       │   └── poll_comfy.py           # ComfyUI 状态轮询
+│       ├── tests/
+│       │   ├── test_api.py             # API 测试
+│       │   └── test_generator.py       # 生成器测试
+│       ├── workflows/                  # ComfyUI 工作流 JSON（独立于根目录 workflows）
+│       └── pyproject.toml
+├── workflows/                          # （预留）根目录工作流模板
+├── packages/                           # （预留）共享 SDK/类型/工具
+├── docs/
+│   └── electron-ipc.md                 # Electron IPC API 文档
+├── scripts/                            # （预留）开发/构建/发布脚本
+├── README.md
+└── CLAUDE.md
 ```
 
 ## 关键架构决策
@@ -126,3 +155,24 @@ vectorizer-api 和 desktop 目前尚无测试。
 | GET | `/healthz` | vectorizer-api, txt2img-api | ✅ |
 | POST | `/api/v1/vectorize` | vectorizer-api | ✅ 位图→SVG |
 | POST | `/api/v1/txt2img` | txt2img-api | ✅ 文本→位图 |
+
+## 环境变量
+
+| 变量 | 服务 | 说明 | 默认值 |
+|------|------|------|--------|
+| `VECTORIZER_BACKEND_URL` | desktop, cli | 矢量化接口完整 URL | `http://127.0.0.1:8000/api/v1/vectorize` |
+| `TXT2IMG_BACKEND_URL` | desktop, cli | 文生图接口完整 URL | `http://127.0.0.1:9001/api/v1/txt2img` |
+| `TXT2IMG_WORKFLOW` | cli | ComfyUI 工作流名称 | `test_z_image_turbo` |
+| `AUTO_START_COMFYUI` | txt2img-api | 是否自动启动 ComfyUI | `1` |
+| `WORKFLOW_PATH` | txt2img-api | 自定义工作流 JSON 路径 | — |
+| `COMFYUI_HOST` | txt2img-api | ComfyUI 地址 | `http://127.0.0.1:8188` |
+| `COMFYUI_POLL_TIMEOUT` | txt2img-api | ComfyUI 轮询超时（秒） | `120` |
+
+## 矢量化预设
+
+| 预设 | color_precision | filter_speckle | corner_threshold | length_threshold | layer_difference | scale |
+|------|-----------------|----------------|------------------|------------------|------------------|-------|
+| clean | 3 | 15 | 60 | 12 | 20 | 2 |
+| balanced | 5 | 6 | 45 | 5 | 10 | 2 |
+| detailed | 6 | 2 | 30 | 3 | 4 | 3 |
+| ultra | 8 | 1 | 20 | 2 | 2 | 3 |

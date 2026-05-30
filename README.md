@@ -5,7 +5,8 @@
 ```text
 Development-Training/
 ├─ apps/
-│  └─ desktop/                  # Electron + Vue 桌面端
+│  ├─ desktop/                  # Electron + Vue 桌面端
+│  └─ cli/                      # Node.js CLI 工具
 ├─ services/
 │  ├─ vectorizer-api/           # 智能矢量化后端
 │  └─ txt2img-api/              # 文生图后端
@@ -51,3 +52,67 @@ $env:VECTORIZER_BACKEND_URL="http://127.0.0.1:8000/api/v1/vectorize"
 $env:TXT2IMG_BACKEND_URL="http://127.0.0.1:9001/api/v1/txt2img"
 npm run electron:dev
 ```
+
+### CLI 命令行工具
+
+无需 Electron 环境，直接调用后端接口的轻量 CLI。
+
+```powershell
+# 查看帮助
+node apps/cli/bin/gen2vec.mjs --help
+
+# 检查后端服务状态
+node apps/cli/bin/gen2vec.mjs health
+```
+
+#### 生成艺术字位图
+
+```powershell
+node apps/cli/bin/gen2vec.mjs generate --text "你好" --prompt "霓虹风格" --output hello.png
+```
+
+| 参数 | 简写 | 说明 |
+|------|------|------|
+| `--text` | `-t` | 艺术字文本（必填） |
+| `--prompt` | `-p` | 风格提示词 |
+| `--negative` | `-n` | 负面提示词 |
+| `--resolution` | `-r` | 分辨率，默认 `1024x1024` |
+| `--seed` | `-s` | 随机种子 |
+| `--output` | `-o` | 输出文件路径 |
+
+#### 矢量化位图为 SVG
+
+```powershell
+node apps/cli/bin/gen2vec.mjs vectorize --input artwork.png --preset detailed --preview
+```
+
+| 参数 | 简写 | 说明 |
+|------|------|------|
+| `--input` | `-i` | 输入图片路径（必填） |
+| `--output` | `-o` | 输出 SVG 路径 |
+| `--preset` | | 矢量化预设：`clean` / `balanced` / `detailed` / `ultra` |
+| `--preview` | | 同时保存预览 PNG |
+
+#### 完整流水线（文本 → SVG）
+
+```powershell
+node apps/cli/bin/gen2vec.mjs pipeline --text "Hello" --prompt "赛博朋克" --vector-preset ultra
+```
+
+| 参数 | 简写 | 说明 |
+|------|------|------|
+| `--text` | `-t` | 艺术字文本（必填） |
+| `--prompt` | `-p` | 风格提示词 |
+| `--negative` | `-n` | 负面提示词 |
+| `--resolution` | `-r` | 分辨率 |
+| `--seed` | `-s` | 随机种子 |
+| `--vector-preset` | | 矢量化预设 |
+| `--output-dir` | | 输出目录 |
+
+#### 环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `TXT2IMG_BACKEND_URL` | 文生图服务地址 | `http://127.0.0.1:9001` |
+| `VECTORIZER_BACKEND_URL` | 矢量化服务地址 | `http://127.0.0.1:8000` |
+| `TXT2IMG_WORKFLOW` | ComfyUI 工作流名称 | `test_z_image_turbo` |
