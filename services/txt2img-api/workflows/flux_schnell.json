@@ -13,7 +13,7 @@
   "2": {
     "inputs": {
       "unet_name": "flux1-schnell-fp8-e4m3fn.safetensors",
-      "weight_dtype": "default"
+      "weight_dtype": "fp8_e4m3fn"
     },
     "class_type": "UNETLoader",
     "_meta": {
@@ -61,7 +61,6 @@
       "scheduler": "ddim_uniform",
       "denoise": 1.0,
       "add_noise": "enable",
-      "noise_seed": 0,
       "start_at_step": 0,
       "end_at_step": 10000,
       "return_with_leftover_noise": "disable",

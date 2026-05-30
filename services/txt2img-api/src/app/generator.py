@@ -447,19 +447,33 @@ def _parse_resolution(resolution: str) -> tuple[int, int]:
 
 # 工作流降级链：按优先级依次尝试，全部失败后用本地 stub
 _WORKFLOW_FALLBACK_CHAIN = ["flux_schnell", "test_z_image_turbo"]
+# Flux 中文渲染效果差，中文为主时跳过 Flux 直走 Z-Image
+_CHINESE_SKIP_FLUX = True
+
+
+def _is_primarily_chinese(text: str) -> bool:
+    """Return True if the text has more Chinese characters than non-Chinese."""
+    if not text.strip():
+        return False
+    cn = len(re.findall(r"[一-鿿]", text))
+    return cn > 0 and cn >= len(text.strip()) * 0.5
 
 
 def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
     """依次尝试工作流降级链，全部失败则用本地 Pillow stub。
 
     - 用户显式指定了 workflow → 只尝试那一个
-    - 未指定 → 按 _WORKFLOW_FALLBACK_CHAIN 顺序降级
+    - 中文为主 → 跳过 Flux，直走 Z-Image（中文效果更好）
+    - 其他 → 按 _WORKFLOW_FALLBACK_CHAIN 顺序降级
     """
     workflows_to_try: list[str]
     if request.workflow:
         workflows_to_try = [request.workflow]
     else:
         workflows_to_try = list(_WORKFLOW_FALLBACK_CHAIN)
+        # 中文文字跳过 Flux，直走 Z-Image（Flux T5-XXL 中文渲染差）
+        if _CHINESE_SKIP_FLUX and _is_primarily_chinese(request.text):
+            workflows_to_try = [w for w in workflows_to_try if w != "flux_schnell"]
 
     for name in workflows_to_try:
         try:
