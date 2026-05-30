@@ -93,14 +93,11 @@ export async function vectorizeArtImage(payload) {
  */
 export async function generateArtBitmap(payload) {
   if (window.artTextApp?.generate) {
-    const combinedPrompt = payload.text
-      ? `艺术字文本：${payload.text}，风格：${payload.prompt || ''}`
-      : (payload.prompt || '')
-
     const safeFormat = payload.format === 'SVG Only' ? 'PNG' : 'PNG'
 
     const body = {
-      prompt: combinedPrompt,
+      text: payload.text || '',
+      prompt: payload.prompt || '',
       negative_prompt: payload.negative || '',
       resolution: payload.resolution || '1024 x 1024',
       seed: payload.seed || 0,
@@ -118,14 +115,11 @@ export async function generateArtBitmap(payload) {
     }
   }
 
-  const combinedPrompt = payload.text
-    ? `艺术字文本：${payload.text}，风格：${payload.prompt || ''}`
-    : (payload.prompt || '')
-
   const safeFormat = payload.format === 'SVG Only' ? 'PNG' : 'PNG'
 
   const body = {
-    prompt: combinedPrompt,
+    text: payload.text || '',
+    prompt: payload.prompt || '',
     negative_prompt: payload.negative || '',
     resolution: payload.resolution || '1024 x 1024',
     seed: payload.seed || 0,
