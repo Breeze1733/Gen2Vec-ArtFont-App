@@ -59,7 +59,7 @@ def _resolve_workflow_path(workflow_name: str = "") -> Path:
     Priority:
       1. WORKFLOW_PATH env var (highest, for dev overrides)
       2. ``workflow_name`` from request → ``workflows/{name}.json``
-      3. Default: ``workflows/txt2img_api.json``
+      3. Default: ``workflows/flux_schnell.json``
     """
     env_path = os.environ.get(_ENV_WORKFLOW_PATH)
     if env_path:
@@ -72,7 +72,7 @@ def _resolve_workflow_path(workflow_name: str = "") -> Path:
         name = workflow_name if workflow_name.endswith(".json") else f"{workflow_name}.json"
         return workflows_dir / name
 
-    return workflows_dir / "txt2img_api.json"
+    return workflows_dir / "flux_schnell.json"
 
 
 def _load_workflow(path: Path) -> dict:
@@ -104,15 +104,16 @@ def _patch_workflow(workflow: dict, request: GenerationRequest) -> dict:
     """Deep-copy workflow and inject user parameters by scanning class_type.
 
     Patching rules:
-      - First CLIPTextEncode        → positive prompt
-      - Second CLIPTextEncode       → negative prompt
-      - EmptyLatentImage / SD3      → width, height
-      - KSampler                    → seed
+      - First CLIPTextEncode / CLIPTextEncodeFlux  → positive prompt
+      - Second CLIPTextEncode                        → negative prompt
+      - EmptyLatentImage / SD3                       → width, height
+      - KSampler / KSamplerAdvanced                  → seed
     """
     patched = copy.deepcopy(workflow)
 
-    # ── CLIPTextEncode (positive / negative) ──
+    # ── CLIPTextEncode / CLIPTextEncodeFlux (positive / negative) ──
     clip_nodes = _find_nodes_by_class(patched, "CLIPTextEncode")
+    clip_nodes += _find_nodes_by_class(patched, "CLIPTextEncodeFlux")
     for i, (nid, node) in enumerate(clip_nodes):
         if i == 0:
             node["inputs"]["text"] = request.prompt
@@ -321,15 +322,30 @@ def _parse_resolution(resolution: str) -> tuple[int, int]:
 # ── Public entry point ──
 
 
+# 工作流降级链：按优先级依次尝试，全部失败后用本地 stub
+_WORKFLOW_FALLBACK_CHAIN = ["flux_schnell", "test_z_image_turbo"]
+
+
 def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
-    """Generate artwork: try ComfyUI first, fall back to local stub."""
-    try:
-        workflow_path = _resolve_workflow_path(request.workflow)
-        workflow = _load_workflow(workflow_path)
-        result = _call_comfyui_api(request, workflow)
-        if result is not None:
-            return result
-    except Exception:
-        pass
+    """依次尝试工作流降级链，全部失败则用本地 Pillow stub。
+
+    - 用户显式指定了 workflow → 只尝试那一个
+    - 未指定 → 按 _WORKFLOW_FALLBACK_CHAIN 顺序降级
+    """
+    workflows_to_try: list[str]
+    if request.workflow:
+        workflows_to_try = [request.workflow]
+    else:
+        workflows_to_try = list(_WORKFLOW_FALLBACK_CHAIN)
+
+    for name in workflows_to_try:
+        try:
+            workflow_path = _resolve_workflow_path(name)
+            workflow = _load_workflow(workflow_path)
+            result = _call_comfyui_api(request, workflow)
+            if result is not None:
+                return result
+        except Exception:
+            continue
 
     return _local_stub_generate(request)
