@@ -112,6 +112,13 @@ def vectorize(payload: VectorizeRequest) -> VectorizeResponse:
             "source_type": payload.source_type,
             "source_channel": source_channel,
             "source_image_name": source_image_name,
+            "generation": {
+                "text": payload.text or "",
+                "prompt": payload.prompt or "",
+                "negative": payload.negative or "",
+                "resolution": payload.resolution or "",
+                "seed": payload.seed if payload.seed else 0,
+            },
             "preprocess": {
                 "transparent_size": processed["size"],
                 "png_transparency": processed.get("png_transparency"),

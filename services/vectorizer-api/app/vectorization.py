@@ -176,8 +176,21 @@ def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> d
     preview_data_url = _png_bytes_to_data_url(preview_png_bytes)
     elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
 
+    # 统一元数据格式：所有模式（单条/批量/矢量化）共用同一结构。
+    # generation 字段由调用方按需填充（矢量化模式留空）。
+    # source / preprocess / created_at 由 main.py 补充。
     metadata = {
         "engine": "vectorizer-api-split-pipeline",
+        "source_type": "",
+        "source_channel": "",
+        "source_image_name": "",
+        "generation": {
+            "text": "",
+            "prompt": "",
+            "negative": "",
+            "resolution": "",
+            "seed": 0,
+        },
         "params": {
             "preset": params["preset"],
             "color_precision": int(params["cp"]),
@@ -197,9 +210,13 @@ def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> d
             "svg_size_kb": svg_size_kb,
             "preview_png_size_kb": round(len(preview_png_bytes) / 1024.0, 3),
         },
+        "preprocess": {
+            "png_transparency": None,
+        },
         "quality": {
             "svg_fidelity": svg_fidelity,
         },
+        "created_at": "",
     }
 
     return {

@@ -335,6 +335,12 @@ const startGeneration = async () => {
       result.svg = respB.svg || ''
       result.metadata = respB.metadata || null
 
+      // 将生成耗时写入 metadata
+      if (result.metadata) {
+        result.metadata.generation = result.metadata.generation || {}
+        result.metadata.generation.duration_ms = stage1Duration
+      }
+
       // 构建文件列表
       const base = getFileNameBase()
       const files = []
@@ -387,15 +393,23 @@ const startGeneration = async () => {
         const text = parts[0] || ''
         const prompt = parts[1] || ''
         const payloadA = { text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed }
+        const t1 = Date.now()
         const respA = await generateArtBitmap(payloadA)
+        stage1Duration = Date.now() - t1
         const payloadB = { source_type: 'generated', text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed, vector: { ...payload.vector }, image_base64: respA.png, image_name: respA.image_name || `${safeName(text || 'batch')}-orig.png` }
+        const t2 = Date.now()
         const respB = await vectorizeArtImage(payloadB)
+        stage2Duration = Date.now() - t2
         result.original = respA.png
         result.transparent = respB.transparent_png || ''
         result.preview = respB.preview_png || respB.png || ''
         result.image = result.preview
         result.svg = respB.svg || ''
         result.metadata = respB.metadata || null
+        if (result.metadata) {
+          result.metadata.generation = result.metadata.generation || {}
+          result.metadata.generation.duration_ms = stage1Duration
+        }
       }
       const base = getFileNameBase()
       const files = []

@@ -37,25 +37,46 @@
     </div>
 
     <div class="metrics-block" v-if="result.metadata">
-      <h3>矢量化指标</h3>
-      <table class="metrics-table">
-        <thead>
-          <tr>
-            <th>指标</th>
-            <th>数值</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="result.metadata.preprocess?.png_transparency !== undefined">
-            <td>PNG 透明度</td>
-            <td>{{ result.metadata.preprocess.png_transparency }}%</td>
-          </tr>
-          <tr v-if="result.metadata.quality?.svg_fidelity !== undefined">
-            <td>SVG 还原度</td>
-            <td>{{ result.metadata.quality.svg_fidelity }}%</td>
-          </tr>
-        </tbody>
-      </table>
+      <h3>处理指标</h3>
+      <div class="metrics-grid">
+        <table class="metrics-table">
+          <thead>
+            <tr>
+              <th>耗时统计</th>
+              <th>数值</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>生成图片耗时</td>
+              <td v-if="result.metadata.generation?.duration_ms">{{ result.metadata.generation.duration_ms }} ms</td>
+              <td v-else class="muted">用户上传图片</td>
+            </tr>
+            <tr v-if="result.metadata.stats?.elapsed_ms !== undefined">
+              <td>矢量化耗时</td>
+              <td>{{ result.metadata.stats.elapsed_ms }} ms</td>
+            </tr>
+          </tbody>
+        </table>
+        <table class="metrics-table">
+          <thead>
+            <tr>
+              <th>质量指标</th>
+              <th>数值</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="result.metadata.preprocess?.png_transparency !== undefined && result.metadata.preprocess?.png_transparency !== null">
+              <td>PNG 透明度</td>
+              <td>{{ result.metadata.preprocess.png_transparency }}%</td>
+            </tr>
+            <tr v-if="result.metadata.quality?.svg_fidelity !== undefined && result.metadata.quality?.svg_fidelity !== null">
+              <td>SVG 还原度</td>
+              <td>{{ result.metadata.quality.svg_fidelity }}%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </section>
 </template>
@@ -166,6 +187,23 @@ const emit = defineEmits(['download', 'save-all', 'open-svg'])
 .metrics-table td:last-child {
   font-weight: 600;
   color: var(--accent);
+}
+
+.metrics-table td:last-child.muted {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.metrics-grid {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.metrics-grid .metrics-table {
+  flex: 1;
+  min-width: 240px;
 }
 
 @media (max-width: 768px) {

@@ -1,11 +1,5 @@
 # 矢量艺术字生成应用
 
-基于开源文生图模型与计算机视觉算法的本地化艺术字工具仓库。  
-当前已包含：
-
-- Electron + Vue 桌面端（单条生成 / 批量生成 / 图片矢量化界面）
-- Python FR3 智能矢量化后端（HTTP REST API）
-
 ## 项目结构
 
 ```text
@@ -13,12 +7,12 @@ Development-Training/
 ├─ apps/
 │  └─ desktop/                  # Electron + Vue 桌面端
 ├─ services/
-│  ├─ vectorizer-api/           # FR3 智能矢量化后端（FastAPI）
-│  └─ txt2img-api/              # 文生图后端（FastAPI）
+│  ├─ vectorizer-api/           # 智能矢量化后端
+│  └─ txt2img-api/              # 文生图后端
 ├─ workflows/                   # 文生图工作流与模型流程配置
-├─ packages/                    # 共享包（类型/工具/SDK/UI，预留）
-├─ docs/                        # 需求、接口、设计说明（预留）
-├─ scripts/                     # 开发/构建/发布脚本（预留）
+├─ packages/                    # 共享包
+├─ docs/                        # 需求、接口、设计说明
+├─ scripts/                     # 开发/构建/发布脚本
 └─ README.md
 ```
 
