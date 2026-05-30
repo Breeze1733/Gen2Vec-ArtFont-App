@@ -55,10 +55,10 @@
   "6": {
     "inputs": {
       "seed": 0,
-      "steps": 8,
+      "steps": 15,
       "cfg": 1.0,
-      "sampler_name": "euler",
-      "scheduler": "simple",
+      "sampler_name": "deis",
+      "scheduler": "ddim_uniform",
       "denoise": 1.0,
       "add_noise": "enable",
       "noise_seed": 0,
@@ -67,7 +67,7 @@
       "return_with_leftover_noise": "disable",
       "model": ["2", 0],
       "positive": ["4", 0],
-      "negative": ["4", 0],
+      "negative": ["9", 0],
       "latent_image": ["5", 0]
     },
     "class_type": "KSamplerAdvanced",
@@ -83,6 +83,18 @@
     "class_type": "VAEDecode",
     "_meta": {
       "title": "VAE解码"
+    }
+  },
+  "9": {
+    "inputs": {
+      "clip": ["1", 0],
+      "clip_l": "",
+      "t5xxl": "",
+      "guidance": 1.0
+    },
+    "class_type": "CLIPTextEncodeFlux",
+    "_meta": {
+      "title": "Flux文本编码（负向）"
     }
   },
   "8": {
