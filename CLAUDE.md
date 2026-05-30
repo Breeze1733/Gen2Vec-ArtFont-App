@@ -19,14 +19,20 @@
 ```
 Development-Training/
 ├── apps/
-│   └── desktop/                    # Electron + Vue 3 桌面端
-│       ├── electron/main.cjs       # Electron 主进程（IPC、HTTP 请求后端）
-│       ├── electron/preload.cjs    # contextBridge 安全 IPC
-│       └── src/renderer/           # Vue 3 SPA（Vite 构建）
-│           ├── App.vue             # 根组件：状态管理、历史记录
-│           ├── api.js              # API 层：mock SVG 生成 + 后端调用
-│           ├── components/         # ModeSwitcher, GenerationForm, ResultPanel, HistoryPanel
-│           └── styles/global.css   # 单文件 CSS，无框架
+│   ├── desktop/                    # Electron + Vue 3 桌面端
+│   │   ├── electron/main.cjs       # Electron 主进程（IPC、HTTP 请求后端）
+│   │   ├── electron/preload.cjs    # contextBridge 安全 IPC
+│   │   └── src/renderer/           # Vue 3 SPA（Vite 构建）
+│   │       ├── App.vue             # 根组件：状态管理、历史记录
+│   │       ├── api.js              # API 层：mock SVG 生成 + 后端调用
+│   │       ├── components/         # ModeSwitcher, GenerationForm, ResultPanel, HistoryPanel
+│   │       └── styles/global.css   # 单文件 CSS，无框架
+│   └── cli/                        # Node.js CLI 工具
+│       ├── bin/gen2vec.mjs         # CLI 入口
+│       └── src/
+│           ├── api.mjs             # 后端 API 调用（复用 desktop 相同接口）
+│           ├── commands/           # generate, vectorize, pipeline 命令
+│           └── utils/file.mjs      # 文件操作工具
 ├── services/
 │   ├── vectorizer-api/             # FastAPI 服务：位图 → SVG 矢量化（FR3 引擎）
 │   │   └── app/
@@ -85,6 +91,21 @@ npm run electron:build  # 生产构建（electron-builder, NSIS 安装包）
 
 矢量化地址默认 `http://127.0.0.1:8000/api/v1/vectorize`，可通过 `VECTORIZER_BACKEND_URL` 环境变量覆盖。
 文生图地址默认 `http://127.0.0.1:9001/api/v1/txt2img`，可通过 `TXT2IMG_BACKEND_URL` 环境变量覆盖。
+
+### CLI 工具
+
+```powershell
+# 直接运行（无需安装）
+node apps/cli/bin/gen2vec.mjs --help
+
+# 常用命令
+node apps/cli/bin/gen2vec.mjs generate --text "你好" --prompt "霓虹风格"
+node apps/cli/bin/gen2vec.mjs vectorize --input artwork.png --preset detailed
+node apps/cli/bin/gen2vec.mjs pipeline --text "Hello" --vector-preset ultra
+node apps/cli/bin/gen2vec.mjs health
+```
+
+CLI 直接调用后端 HTTP 接口，无需 Electron 环境。详见 [apps/cli/README.md](apps/cli/README.md)。
 
 ## 测试
 
