@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class GenerationRequest(BaseModel):
-    prompt: str = Field(min_length=1, description="Text prompt for image generation")
+    text: str = Field(default="", description="Text content to render (Chinese, English, numbers)")
+    prompt: str = Field(default="", description="Style description (e.g. 'calligraphy, gold gradient')")
     negative_prompt: str = ""
     resolution: str = "1024 x 1024"
     seed: int = 0

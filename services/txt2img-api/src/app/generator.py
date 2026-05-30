@@ -59,7 +59,7 @@ def _resolve_workflow_path(workflow_name: str = "") -> Path:
     Priority:
       1. WORKFLOW_PATH env var (highest, for dev overrides)
       2. ``workflow_name`` from request → ``workflows/{name}.json``
-      3. Default: ``workflows/txt2img_api.json``
+      3. Default: ``workflows/flux_schnell.json``
     """
     env_path = os.environ.get(_ENV_WORKFLOW_PATH)
     if env_path:
@@ -72,7 +72,7 @@ def _resolve_workflow_path(workflow_name: str = "") -> Path:
         name = workflow_name if workflow_name.endswith(".json") else f"{workflow_name}.json"
         return workflows_dir / name
 
-    return workflows_dir / "txt2img_api.json"
+    return workflows_dir / "flux_schnell.json"
 
 
 def _load_workflow(path: Path) -> dict:
@@ -100,24 +100,94 @@ def _find_nodes_by_class(workflow: dict, class_type: str) -> list[tuple[str, dic
     return [(nid, node) for nid, node in workflow.items() if node.get("class_type") == class_type]
 
 
+# ── Prompt template engine ──
+
+# 文本艺术字常见缺陷的默认负面提示词
+_DEFAULT_NEGATIVE = (
+    "broken strokes, missing strokes, wrong characters, garbled text, "
+    "deformed text, blurry text, low quality, jpeg artifacts, "
+    "watermark, text signature, messy background, cluttered layout"
+)
+
+
+def _build_text_art_prompt(text: str, style_prompt: str) -> str:
+    """Build an optimized Flux.1 prompt for text art generation.
+
+    Detects text content type (Chinese / English / numbers / mixed)
+    and injects targeted quality keywords for each scenario.
+    """
+    if not text.strip():
+        return style_prompt
+
+    has_chinese = bool(re.search(r"[一-鿿]", text))
+    has_english = bool(re.search(r"[a-zA-Z]{2,}", text))
+    has_number = bool(re.search(r"\d", text))
+
+    parts = ["masterpiece typography design"]
+
+    # Text specification — language-aware
+    if has_chinese and has_english:
+        parts.append(
+            f'bilingual text "{text}", '
+            "accurate Chinese character strokes, complete radicals, "
+            "crisp English letterforms, perfect typography"
+        )
+    elif has_chinese:
+        parts.append(
+            f'Chinese text "{text}", '
+            "perfect character strokes, accurate calligraphy structure, "
+            "no broken strokes, no missing radicals, correct Chinese characters"
+        )
+    elif has_english:
+        parts.append(
+            f'text "{text}", '
+            "crisp typography, perfect letterforms, clean kerning, "
+            "well-proportioned spacing"
+        )
+    else:
+        parts.append(f'text "{text}"')
+
+    if has_number:
+        parts.append("bold clear numbers, accurate digits")
+
+    # Style injection
+    if style_prompt.strip():
+        parts.append(style_prompt.strip())
+
+    # Universal quality suffix
+    parts.append("clean composition, high contrast, sharp details, 4K, professional design")
+
+    return ", ".join(parts)
+
+
+def _build_negative_prompt(user_negative: str = "") -> str:
+    """Merge user negative prompt with text-art-specific default negatives."""
+    if user_negative.strip():
+        return f"{_DEFAULT_NEGATIVE}, {user_negative.strip()}"
+    return _DEFAULT_NEGATIVE
+
+
 def _patch_workflow(workflow: dict, request: GenerationRequest) -> dict:
     """Deep-copy workflow and inject user parameters by scanning class_type.
 
     Patching rules:
-      - First CLIPTextEncode        → positive prompt
-      - Second CLIPTextEncode       → negative prompt
-      - EmptyLatentImage / SD3      → width, height
-      - KSampler                    → seed
+      - First CLIPTextEncode / CLIPTextEncodeFlux  → positive prompt
+      - Second CLIPTextEncode                        → negative prompt
+      - EmptyLatentImage / SD3                       → width, height
+      - KSampler / KSamplerAdvanced                  → seed
     """
     patched = copy.deepcopy(workflow)
 
-    # ── CLIPTextEncode (positive / negative) ──
+    # ── CLIPTextEncode / CLIPTextEncodeFlux (positive / negative) ──
+    positive_prompt = _build_text_art_prompt(request.text, request.prompt)
+    negative_prompt = _build_negative_prompt(request.negative_prompt)
     clip_nodes = _find_nodes_by_class(patched, "CLIPTextEncode")
+    clip_nodes += _find_nodes_by_class(patched, "CLIPTextEncodeFlux")
     for i, (nid, node) in enumerate(clip_nodes):
         if i == 0:
-            node["inputs"]["text"] = request.prompt
+            node["inputs"]["text"] = positive_prompt
         elif i == 1:
-            node["inputs"]["text"] = request.negative_prompt
+            node["inputs"]["text"] = negative_prompt
 
     # ── EmptyLatentImage / EmptySD3LatentImage (resolution) ──
     latent_nodes = _find_nodes_by_class(patched, "EmptyLatentImage")
@@ -321,15 +391,30 @@ def _parse_resolution(resolution: str) -> tuple[int, int]:
 # ── Public entry point ──
 
 
+# 工作流降级链：按优先级依次尝试，全部失败后用本地 stub
+_WORKFLOW_FALLBACK_CHAIN = ["flux_schnell", "test_z_image_turbo"]
+
+
 def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
-    """Generate artwork: try ComfyUI first, fall back to local stub."""
-    try:
-        workflow_path = _resolve_workflow_path(request.workflow)
-        workflow = _load_workflow(workflow_path)
-        result = _call_comfyui_api(request, workflow)
-        if result is not None:
-            return result
-    except Exception:
-        pass
+    """依次尝试工作流降级链，全部失败则用本地 Pillow stub。
+
+    - 用户显式指定了 workflow → 只尝试那一个
+    - 未指定 → 按 _WORKFLOW_FALLBACK_CHAIN 顺序降级
+    """
+    workflows_to_try: list[str]
+    if request.workflow:
+        workflows_to_try = [request.workflow]
+    else:
+        workflows_to_try = list(_WORKFLOW_FALLBACK_CHAIN)
+
+    for name in workflows_to_try:
+        try:
+            workflow_path = _resolve_workflow_path(name)
+            workflow = _load_workflow(workflow_path)
+            result = _call_comfyui_api(request, workflow)
+            if result is not None:
+                return result
+        except Exception:
+            continue
 
     return _local_stub_generate(request)
