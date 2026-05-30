@@ -2,77 +2,144 @@
   <div class="app-shell">
     <header class="hero">
       <div class="hero-content">
-        <p class="eyebrow">Local-first studio</p>
         <h1>矢量艺术字生成器</h1>
-        <p class="subtitle">
-          管理单条提示词、批量提示词和已有图片矢量化流程，面向后续模型接入与桌面端打包。
-        </p>
+        <div class="hero-tabs">
+          <button
+            :class="['tab-button', { active: activeTab === 'input' }]"
+            type="button"
+            @click="activeTab = 'input'"
+          >
+            输入面板
+          </button>
+          <button
+            :class="['tab-button', { active: activeTab === 'output' }]"
+            type="button"
+            @click="activeTab = 'output'"
+          >
+            输出面板
+          </button>
+          <button
+            :class="['tab-button', { active: activeTab === 'history' }]"
+            type="button"
+            @click="activeTab = 'history'"
+          >
+            历史任务
+          </button>
+        </div>
       </div>
 
       <div class="hero-panel" aria-label="运行概览">
         <div>
-          <span>模型版本</span>
-          <strong>v3.1.0</strong>
-        </div>
-        <div>
-          <span>工作流版本</span>
-          <strong>flow-2026.05</strong>
-        </div>
-        <div>
           <span>运行环境</span>
-          <strong>本地 GPU</strong>
+          <strong>{{ gpuInfo }}</strong>
+        </div>
+        <div v-if="!hasDiscreteGpu" class="gpu-warning">
+          只能使用图片矢量化模式
         </div>
       </div>
     </header>
 
-    <ModeSwitcher v-model:modelValue="mode" :modes="modes" />
+    <!-- 输入面板 -->
+    <div class="main-layout" v-if="activeTab === 'input'">
+      <main class="workspace">
+        <div class="params-row">
+          <GenerationForm
+            v-model:mode="mode"
+            :payload="payload"
+            :running="running"
+            :error="error"
+            :has-discrete-gpu="hasDiscreteGpu"
+            @file-change="handleFileChange"
+            @batch-file="(info) => { payload.batch = info.content }"
+            @reset="resetForm"
+          />
 
-    <main class="workspace">
-      <div>
-        <GenerationForm
-          :mode="mode"
-          :payload="payload"
-          :running="running"
-          :error="error"
-          :vector-presets="vectorPresets"
-          @file-change="handleFileChange"
-          @update:mode="(v) => (mode.value = v)"
-          @batch-file="(info) => { payload.batch = info.content }"
-          @submit="startGeneration"
-          @reset="resetForm"
-          @preset-change="applyVectorPreset"
-        />
+          <VectorParams
+            :vector="payload.vector"
+            :vector-presets="vectorPresets"
+            :running="running"
+            @update:vector="(v) => Object.assign(payload.vector, v)"
+            @preset-change="applyVectorPreset"
+            @submit="startGeneration"
+          />
+        </div>
+      </main>
+    </div>
 
+    <!-- 输出面板 -->
+    <div class="main-layout" v-if="activeTab === 'output'">
+      <main class="workspace">
         <ResultPanel :result="result" @download="downloadOutput" @save-all="saveAllResults" @open-svg="handleOpenSvg" />
-      </div>
+      </main>
+    </div>
 
-      <HistoryPanel :logs="logs" :current-files="currentFiles" @export-history="exportHistory" @delete-history="deleteHistoryItem" />
-    </main>
-
-    <section class="panel command-panel">
-      <div>
-        <p class="section-kicker">CLI</p>
-        <h2>命令行入口</h2>
-        <p>适用于批处理和自动化脚本，参数与界面保持一致。</p>
-      </div>
-      <code>art-text-gen --mode batch --input prompts.txt --out ./output</code>
-    </section>
+    <!-- 历史任务 -->
+    <div class="main-layout" v-if="activeTab === 'history'">
+      <HistoryPanel
+        :logs="logs"
+        :current-files="currentFiles"
+        @export-history="exportHistory"
+        @delete-history="deleteHistoryItem"
+      />
+    </div>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
-import ModeSwitcher from './components/ModeSwitcher.vue'
+import { reactive, ref, onMounted } from 'vue'
 import GenerationForm from './components/GenerationForm.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
+import VectorParams from './components/VectorParams.vue'
 import { generateArtBitmap, saveFile, saveResults, vectorizeArtImage } from './api'
 
-const modes = [
-  { label: '单条提示词', value: 'single' },
-  { label: '批量提示词', value: 'batch' },
-  { label: '图片矢量化', value: 'vectorize' }
-]
+// GPU 检测
+const gpuInfo = ref('检测中...')
+const hasDiscreteGpu = ref(false)
+
+const detectGPU = () => {
+  try {
+    const canvas = document.createElement('canvas')
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl')
+    if (!gl) {
+      gpuInfo.value = 'CPU（无 WebGL）'
+      hasDiscreteGpu.value = false
+      return
+    }
+
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
+    if (debugInfo) {
+      const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+      // 简化显示
+      if (renderer.includes('NVIDIA') || renderer.includes('AMD') || renderer.includes('Radeon')) {
+        gpuInfo.value = `GPU（${renderer.split(' ').slice(0, 2).join(' ')}）`
+        hasDiscreteGpu.value = true
+      } else if (renderer.includes('Intel')) {
+        gpuInfo.value = `集成显卡（Intel）`
+        hasDiscreteGpu.value = false
+      } else {
+        gpuInfo.value = `GPU（${renderer.substring(0, 30)}）`
+        hasDiscreteGpu.value = true
+      }
+    } else {
+      gpuInfo.value = 'GPU（WebGL）'
+      hasDiscreteGpu.value = true
+    }
+  } catch (e) {
+    gpuInfo.value = 'CPU（检测失败）'
+    hasDiscreteGpu.value = false
+  }
+}
+
+onMounted(() => {
+  detectGPU()
+  // 无独立显卡时默认选择图片矢量化模式
+  if (!hasDiscreteGpu.value) {
+    mode.value = 'vectorize'
+  }
+})
+
+const activeTab = ref('input')
 
 const vectorPresets = {
   clean: {
@@ -194,6 +261,7 @@ const startGeneration = async () => {
     return
   }
 
+  activeTab.value = 'output'
   error.value = ''
   running.value = true
   result.image = ''
@@ -487,7 +555,6 @@ const resetForm = () => {
   payload.format = 'PNG + SVG'
   payload.seed = 0
   payload.imageFile = null
-  applyVectorPreset('balanced')
   error.value = ''
   result.image = ''
   result.svg = ''

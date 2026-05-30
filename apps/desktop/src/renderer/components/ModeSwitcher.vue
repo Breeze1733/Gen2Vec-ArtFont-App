@@ -9,7 +9,6 @@
     >
       {{ item.label }}
     </button>
-    <span>支持图形界面与命令行入口</span>
   </section>
 </template>
 

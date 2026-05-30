@@ -1,5 +1,6 @@
 # Local assistant/tooling
 .claude/
+.spec-workflow/
 
 # Dependencies
 node_modules/

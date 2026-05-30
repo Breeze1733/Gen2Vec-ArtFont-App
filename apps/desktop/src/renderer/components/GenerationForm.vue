@@ -1,13 +1,25 @@
 <template>
   <section class="panel main-panel">
     <div class="panel-header">
-      <div>
-        <p class="section-kicker">Generation</p>
-        <h2>生成配置</h2>
+      <div class="header-top">
+        <div>
+          <p class="section-kicker">Input</p>
+          <h2>模式选择</h2>
+        </div>
+        <button class="reset-btn secondary-button small" type="button" :disabled="running" @click="$emit('reset')">重置</button>
       </div>
-      <div class="status">
-        <span class="status-dot" :class="{ active: running }"></span>
-        <span>{{ running ? '运行中' : '空闲' }}</span>
+      <div class="mode-switch">
+        <button
+          v-for="item in modes"
+          :key="item.value"
+          type="button"
+          :class="['mode-button', { active: mode === item.value, disabled: item.requiresGpu && !hasDiscreteGpu }]"
+          :disabled="item.requiresGpu && !hasDiscreteGpu"
+          @click="handleModeChange(item.value)"
+          :title="item.requiresGpu && !hasDiscreteGpu ? '需要独立显卡（NVIDIA/AMD）' : ''"
+        >
+          {{ item.label }}
+        </button>
       </div>
     </div>
 
@@ -15,131 +27,84 @@
       <div v-if="error" class="status-banner error">{{ error }}</div>
       <div v-else-if="running" class="status-banner info">正在生成，请稍候…</div>
 
-      <!-- 模式切换由顶部 ModeSwitcher 控制（局部切换面板已移除） -->
-
       <!-- 生成参数面板 -->
-      <div class="panel-section generation-params">
-        <h3>生成参数</h3>
 
-        <div v-if="mode === 'single'" class="gen-single">
-          <label class="field">
-            <span>文字内容</span>
-            <input v-model="payload.text" type="text" placeholder="支持 2-8 个字符，示例：霓虹之风" />
-          </label>
-          <label class="field">
-            <span>风格提示词</span>
-            <textarea v-model="payload.prompt" rows="4" placeholder="例如：霓虹渐变、金属质感"></textarea>
-          </label>
-          <label class="field">
-            <span>负面提示词</span>
-            <textarea v-model="payload.negative" rows="3" placeholder="缺字，错字，笔画断裂，杂乱背景，低清晰度"></textarea>
-          </label>
-          <label class="field two-col">
-            <div>
-              <span>分辨率</span>
-              <select v-model="payload.resolution">
-                <option>1024 x 1024</option>
-                <option>1280 x 720</option>
-                <option>1920 x 1080</option>
-                <option value="custom">自定义</option>
-              </select>
-            </div>
-            <div v-if="payload.resolution === 'custom'">
-              <input v-model="customRes" placeholder="例如 1400x800" />
-            </div>
-          </label>
-          <!-- 输出格式已移除，默认由后台或全局配置决定 -->
-          <label class="field seed-field">
-            <span>随机种子</span>
-            <input v-model.number="payload.seed" type="number" />
-          </label>
-        </div>
+      <div v-if="mode === 'single'" class="gen-single">
+        <label class="field">
+          <span>文字内容</span>
+          <input v-model="payload.text" type="text" placeholder="支持 2-8 个字符，示例：霓虹之风" />
+        </label>
+        <label class="field">
+          <span>风格提示词</span>
+          <textarea v-model="payload.prompt" rows="4" placeholder="例如：霓虹渐变、金属质感"></textarea>
+        </label>
+        <label class="field">
+          <span>负面提示词</span>
+          <textarea v-model="payload.negative" rows="2" placeholder="缺字，错字，笔画断裂，杂乱背景，低清晰度"></textarea>
+        </label>
+        <label class="field two-col">
+          <div>
+            <span>分辨率</span>
+            <select v-model="payload.resolution">
+              <option>1024 x 1024</option>
+              <option>1280 x 720</option>
+              <option>1920 x 1080</option>
+              <option value="custom">自定义</option>
+            </select>
+          </div>
+          <div v-if="payload.resolution === 'custom'">
+            <input v-model="customRes" placeholder="例如 1400x800" />
+          </div>
+        </label>
+        <!-- 输出格式已移除，默认由后台或全局配置决定 -->
+        <label class="field seed-field">
+          <span>随机种子</span>
+          <input v-model.number="payload.seed" type="number" />
+        </label>
+      </div>
 
-        <div v-else-if="mode === 'batch'" class="gen-batch">
-          <label class="field">
-            <span>批量提示词（或上传文件 CSV/TXT/JSON）</span>
-            <textarea v-model="payload.batch" rows="5" placeholder="每行一条：文本 | 风格"></textarea>
-            <div class="batch-upload">
-              <input type="file" accept=".txt,.csv,.json" @change="onBatchFileChange" />
-            </div>
-          </label>
-          <label class="field">
-            <span>全局负面提示词</span>
-            <textarea v-model="payload.negative" rows="3" placeholder="应用于所有批量任务"></textarea>
-          </label>
-          <label class="field">
+      <div v-else-if="mode === 'batch'" class="gen-batch">
+        <label class="field">
+          <span>批量提示词（或上传文件 CSV/TXT/JSON）</span>
+          <textarea v-model="payload.batch" rows="5" placeholder="每行一条：文本 | 风格"></textarea>
+          <div class="batch-upload">
+            <input type="file" accept=".txt,.csv,.json" @change="onBatchFileChange" />
+          </div>
+        </label>
+        <label class="field">
+          <span>全局负面提示词</span>
+          <textarea v-model="payload.negative" rows="2" placeholder="应用于所有批量任务"></textarea>
+        </label>
+        <label class="field two-col">
+          <div>
             <span>全局分辨率</span>
             <select v-model="payload.resolution">
               <option>1024 x 1024</option>
               <option>1280 x 720</option>
               <option>1920 x 1080</option>
+              <option value="custom">自定义</option>
             </select>
-          </label>
-          <!-- 全局输出格式已移除 -->
-          <label class="field seed-field">
-            <span>全局随机种子</span>
-            <input v-model.number="payload.seed" type="number" />
-          </label>
-        </div>
-
-        <div v-else class="gen-image">
-          <label class="field">
-            <span>选择图片（PNG/JPG）</span>
-            <input type="file" accept="image/png,image/jpeg" @change="onImageFileChange" />
-            <div v-if="previewThumb" class="thumb"><img :src="previewThumb" alt="thumb" /></div>
-            <small>支持拖拽上传（开发版请使用桌面端以便保存结果）</small>
-          </label>
-        </div>
+          </div>
+          <div v-if="payload.resolution === 'custom'">
+            <input v-model="customRes" placeholder="例如 1400x800" />
+          </div>
+        </label>
+        <!-- 全局输出格式已移除 -->
+        <label class="field seed-field">
+          <span>全局随机种子</span>
+          <input v-model.number="payload.seed" type="number" />
+        </label>
       </div>
 
-      <!-- 矢量化参数面板（通用） -->
-      <div class="panel-section vector-panel">
-        <h3>矢量化参数</h3>
-        <div class="presets">
-          <label v-for="(p, key) in vectorPresets" :key="key" class="preset">
-            <input type="radio" name="preset" :value="key" v-model="payload.vector.preset" @change="$emit('preset-change', payload.vector.preset)" />
-            <span>{{ presetLabels[key] }}</span>
-          </label>
-        </div>
-        <div class="vector-grid">
-          <label>
-            <span>颜色精度 (color_precision)</span>
-            <input v-model.number="payload.vector.color_precision" type="number" min="1" max="16" />
-            <small>（1-16）</small>
-          </label>
-          <label>
-            <span>斑点过滤 (filter_speckle)</span>
-            <input v-model.number="payload.vector.filter_speckle" type="number" min="1" max="50" />
-            <small>（1-50）</small>
-          </label>
-          <label>
-            <span>拐角阈值 (corner_threshold)</span>
-            <input v-model.number="payload.vector.corner_threshold" type="number" min="1" max="100" />
-            <small>（1-100）</small>
-          </label>
-          <label>
-            <span>长度阈值 (length_threshold)</span>
-            <input v-model.number="payload.vector.length_threshold" type="number" min="1" max="50" />
-            <small>（1-50）</small>
-          </label>
-          <label>
-            <span>图层差异 (layer_difference)</span>
-            <input v-model.number="payload.vector.layer_difference" type="number" min="1" max="50" />
-            <small>（1-50）</small>
-          </label>
-          <label>
-            <span>放大倍数 (scale)</span>
-            <input v-model.number="payload.vector.scale" type="number" min="1" max="4" />
-            <small>（1-4）</small>
-          </label>
-        </div>
+      <div v-else class="gen-image">
+        <label class="field">
+          <span>选择图片（PNG/JPG）</span>
+          <input type="file" accept="image/png,image/jpeg" @change="onImageFileChange" />
+          <div v-if="previewThumb" class="thumb"><img :src="previewThumb" alt="thumb" /></div>
+          <small>支持拖拽上传</small>
+        </label>
       </div>
-
-      <div class="actions">
-        <button class="primary-button" type="button" :disabled="running" @click="$emit('submit')">开始生成</button>
-        <button class="secondary-button" type="button" :disabled="running" @click="$emit('reset')">重置</button>
-        <button class="secondary-button" type="button" @click="$emit('preset-change', 'balanced')">恢复默认预设</button>
-      </div>
+      
     </div>
   </section>
 </template>
@@ -150,19 +115,29 @@ const props = defineProps({
   payload: Object,
   running: Boolean,
   error: String,
-  vectorPresets: Object
+  hasDiscreteGpu: {
+    type: Boolean,
+    default: false
+  }
 })
 
-const presetLabels = {
-  clean: '清爽',
-  balanced: '平衡',
-  detailed: '精细',
-  ultra: '超清'
-}
+const modes = [
+  { label: '单条提示词', value: 'single', requiresGpu: true },
+  { label: '批量提示词', value: 'batch', requiresGpu: true },
+  { label: '图片矢量化', value: 'vectorize', requiresGpu: false }
+]
 
-const emit = defineEmits(['file-change', 'submit', 'reset', 'preset-change', 'update:mode', 'batch-file'])
+const emit = defineEmits(['file-change', 'update:mode', 'batch-file', 'reset'])
 
 import { ref } from 'vue'
+
+const handleModeChange = (newMode) => {
+  // 如果没有独立显卡，只能使用矢量化模式
+  if (!props.hasDiscreteGpu && newMode !== 'vectorize') {
+    return
+  }
+  emit('update:mode', newMode)
+}
 
 const customRes = ref('')
 const previewThumb = ref('')
@@ -200,3 +175,64 @@ const fileToDataUrl = (file) => new Promise((resolve, reject) => {
 })
 
 </script>
+
+<style scoped>
+.main-panel {
+  display: flex;
+  flex-direction: column;
+  height: 615px;
+}
+
+.panel-header {
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: stretch;
+  margin-bottom: -2px;
+}
+
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.mode-switch {
+  display: flex;
+  gap: 6px;
+}
+
+.mode-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(100%);
+}
+
+.panel-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.panel-body textarea {
+  min-height: auto;
+}
+
+.two-col select,
+.two-col input {
+  height: 42px;
+  min-height: 42px;
+  max-height: 42px;
+  box-sizing: border-box;
+}
+
+.reset-btn {
+  background: #1f2937;
+  color: #fff;
+  border: none;
+}
+
+.reset-btn:hover {
+  background: #374151;
+}
+</style>

@@ -22,30 +22,6 @@ Development-Training/
 └─ README.md
 ```
 
-## FR3 智能矢量化引擎（已实现）
-
-后端路径：`services/vectorizer-api`
-
-核心能力：
-
-- 输入透明 PNG/JPG 艺术字位图 + 矢量化控制参数
-- `OpenCV + scikit-image` 做图像清洗与颜色分层聚类
-- 按层调用 `vtracer` 进行路径追踪与平滑拟合
-- 使用 `svgwrite` 组装标准 SVG（含 `viewBox` 和分组）
-- 回渲染 PNG 预览并输出轮廓偏差指标
-
-输入来源已支持两类：
-
-- `source_type=upload`：用户上传位图
-- `source_type=generated`：系统生成位图（支持 `image_base64` / `file_path`；`artifact_id` 已预留）
-
-接口：
-
-- `GET /healthz`
-- `POST /api/v1/vectorize` — 位图 → 透明 PNG + SVG
-
-详细接口说明见 [services/vectorizer-api/README.md](./services/vectorizer-api/README.md)。
-
 ## 快速启动联调
 
 所有命令在**项目根目录**下执行。
@@ -81,15 +57,3 @@ $env:VECTORIZER_BACKEND_URL="http://127.0.0.1:8000/api/v1/vectorize"
 $env:TXT2IMG_BACKEND_URL="http://127.0.0.1:9001/api/v1/txt2img"
 npm run electron:dev
 ```
-
-## 当前状态
-
-- `single` / `batch` 在后端仍为 mock 返回（用于前端联调）
-- `vectorize` 已接入真实 FR3 矢量化流水线
-- “系统生成位图 -> 资产ID解析”通道字段已预留，解析器待接入生成模块
-
-## 目录职责约定
-
-- `docs`：产品文档、需求文档、API 文档、联调说明
-- `packages`：跨应用复用的共享代码（SDK、类型、工具）
-- `scripts`：一键启动、构建、发布、批处理等自动化脚本

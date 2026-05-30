@@ -12,11 +12,18 @@ function createWindow() {
     minWidth: 920,
     minHeight: 640,
     title: '矢量艺术字生成器',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false
     }
+  })
+
+  // 窗口准备好后最大化显示
+  win.once('ready-to-show', () => {
+    win.maximize()
+    win.show()
   })
 
   if (process.env.VITE_DEV_SERVER_URL) {

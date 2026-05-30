@@ -56,11 +56,39 @@ button {
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 24px;
+  margin-bottom: 0;
 }
 
 .hero-content {
   max-width: 660px;
+}
+
+.hero-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tab-button {
+  min-height: 36px;
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-button:hover {
+  border-color: var(--accent);
+}
+
+.tab-button.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
 .eyebrow,
@@ -114,6 +142,15 @@ h3 {
   box-shadow: var(--shadow-soft);
 }
 
+.gpu-warning {
+  font-size: 12px;
+  color: #b45309;
+  background: rgba(251, 191, 36, 0.1);
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
 .hero-panel div {
   display: flex;
   justify-content: space-between;
@@ -158,10 +195,22 @@ h3 {
   font-weight: 700;
 }
 
+.main-layout {
+  display: flex;
+  gap: 20px;
+  margin-top: 20px;
+}
+
 .workspace {
+  flex: 1;
+  min-width: 0;
+}
+
+.params-row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
-  gap: 22px;
+  grid-template-columns: 5.4fr 3fr;
+  gap: 20px;
+  align-items: stretch;
 }
 
 .panel {
@@ -580,16 +629,17 @@ code {
 }
 
 @media (max-width: 920px) {
-  .hero,
-  .workspace,
-  .command-panel {
-    grid-template-columns: 1fr;
+  .hero {
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .hero,
-  .command-panel {
-    align-items: stretch;
+  .main-layout {
     flex-direction: column;
+  }
+
+  .params-row {
+    grid-template-columns: 1fr;
   }
 }
 
