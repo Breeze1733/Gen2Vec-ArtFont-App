@@ -111,12 +111,23 @@ _DEFAULT_NEGATIVE = (
 )
 
 
-def _build_text_art_prompt(text: str, style_prompt: str) -> str:
-    """Build an optimized Flux.1 prompt for text art generation.
+def _detect_workflow_model(workflow: dict) -> str:
+    """Detect which model family a workflow targets.
 
-    Detects text content type (Chinese / English / numbers / mixed)
-    and injects targeted quality keywords for each scenario.
+    Returns 'flux' if the workflow uses DualCLIPLoader + CLIPTextEncodeFlux,
+    'zimage' if it uses CLIPLoader(type=lumina2), otherwise 'unknown'.
     """
+    for node in workflow.values():
+        ct = node.get("class_type", "")
+        if ct == "DualCLIPLoader":
+            return "flux"
+        if ct == "CLIPLoader" and node.get("inputs", {}).get("type") == "lumina2":
+            return "zimage"
+    return "unknown"
+
+
+def _build_flux_prompt(text: str, style_prompt: str) -> str:
+    """Build Flux.1 prompt — text accuracy guard only, style from user."""
     if not text.strip():
         return style_prompt
 
@@ -124,45 +135,78 @@ def _build_text_art_prompt(text: str, style_prompt: str) -> str:
     has_english = bool(re.search(r"[a-zA-Z]{2,}", text))
     has_number = bool(re.search(r"\d", text))
 
-    parts = ["masterpiece typography design"]
+    parts = []
 
-    # Text specification — bilingual, anti-duplication
     if has_chinese:
         cn_chars = re.findall(r"[一-鿿]", text)
         cn_count = len(cn_chars)
         char_list = " ".join(cn_chars)
-        # 中英双语：Flux(T5-XXL) 吃英文，Z-Image(Qwen) 吃中文
         parts.append(
-            f'exactly {cn_count} Chinese character(s) "{char_list}", '
-            f'正好{cn_count}个汉字"{char_list}"，'
-            "accurate strokes, complete radicals, 笔画完整, 部首正确, "
-            "NO extra character, NO repeated character, 无多余字, 无重复字"
+            f'Chinese text "{char_list}", exactly {cn_count} characters, '
+            "accurate strokes, complete radicals, "
+            "no missing character, no extra character, no repeated character"
         )
         if has_english:
-            parts.append(
-                f'and English text in "{text}", '
-                "crisp letterforms, 字母清晰"
-            )
+            parts.append("crisp letterforms, perfect typography")
     elif has_english:
         parts.append(
-            f'text "{text}", '
-            "crisp typography, perfect letterforms, clean kerning, "
-            "well-proportioned spacing, no duplicate letters"
+            f'text "{text}", crisp typography, perfect letterforms, no duplicate letters'
         )
     else:
         parts.append(f'text "{text}"')
 
     if has_number:
-        parts.append("bold clear numbers, accurate digits")
+        parts.append("accurate digits, no repeated digits")
 
-    # Style injection
     if style_prompt.strip():
         parts.append(style_prompt.strip())
 
-    # Universal quality suffix
-    parts.append("clean composition, high contrast, sharp details, 4K, professional design")
+    return ", ".join(parts) if parts else style_prompt
 
-    return ", ".join(parts)
+
+def _build_zimage_prompt(text: str, style_prompt: str) -> str:
+    """Build Z-Image prompt — text accuracy guard only, style from user."""
+    if not text.strip():
+        return style_prompt
+
+    has_chinese = bool(re.search(r"[一-鿿]", text))
+    has_english = bool(re.search(r"[a-zA-Z]{2,}", text))
+    has_number = bool(re.search(r"\d", text))
+
+    parts = []
+
+    if has_chinese:
+        cn_chars = re.findall(r"[一-鿿]", text)
+        cn_count = len(cn_chars)
+        char_list = " ".join(cn_chars)
+        parts.append(
+            f'文字内容为"{char_list}"，不多不少正好{cn_count}个字，'
+            "不丢字不缺字，不重字不多字，每个字笔画完整结构正确"
+        )
+        if has_english:
+            parts.append(f'同时包含英文"{text}"，字母清晰比例正确')
+    elif has_english:
+        parts.append(f'文字内容为"{text}"，字母清晰，间距合理，不重复不遗漏')
+    else:
+        parts.append(f'文字内容为"{text}"')
+
+    if has_number:
+        parts.append("数字大小比例正确，清晰可辨，不重不漏")
+
+    if style_prompt.strip():
+        parts.append(style_prompt.strip())
+
+    return "，".join(parts) if parts else style_prompt
+
+
+def _build_text_art_prompt(text: str, style_prompt: str, model: str = "unknown") -> str:
+    """Dispatch to the right prompt builder based on detected model family."""
+    if model == "flux":
+        return _build_flux_prompt(text, style_prompt)
+    elif model == "zimage":
+        return _build_zimage_prompt(text, style_prompt)
+    # Fallback: use Flux template as default (more conservative)
+    return _build_flux_prompt(text, style_prompt)
 
 
 def _build_negative_prompt(user_negative: str = "") -> str:
@@ -183,16 +227,21 @@ def _patch_workflow(workflow: dict, request: GenerationRequest) -> dict:
     """
     patched = copy.deepcopy(workflow)
 
+    # ── Detect model family for prompt templating ──
+    model = _detect_workflow_model(patched)
+
     # ── CLIPTextEncode / CLIPTextEncodeFlux (positive / negative) ──
-    positive_prompt = _build_text_art_prompt(request.text, request.prompt)
+    positive_prompt = _build_text_art_prompt(request.text, request.prompt, model)
     negative_prompt = _build_negative_prompt(request.negative_prompt)
     clip_nodes = _find_nodes_by_class(patched, "CLIPTextEncode")
     clip_nodes += _find_nodes_by_class(patched, "CLIPTextEncodeFlux")
     for i, (nid, node) in enumerate(clip_nodes):
-        if i == 0:
-            node["inputs"]["text"] = positive_prompt
-        elif i == 1:
-            node["inputs"]["text"] = negative_prompt
+        prompt_text = positive_prompt if i == 0 else negative_prompt
+        if node.get("class_type") == "CLIPTextEncodeFlux":
+            node["inputs"]["clip_l"] = prompt_text
+            node["inputs"]["t5xxl"] = prompt_text
+        else:
+            node["inputs"]["text"] = prompt_text
 
     # ── EmptyLatentImage / EmptySD3LatentImage (resolution) ──
     latent_nodes = _find_nodes_by_class(patched, "EmptyLatentImage")

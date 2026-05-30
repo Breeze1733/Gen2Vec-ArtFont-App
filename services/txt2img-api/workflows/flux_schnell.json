@@ -31,8 +31,9 @@
   },
   "4": {
     "inputs": {
-      "text": "",
       "clip": ["1", 0],
+      "clip_l": "",
+      "t5xxl": "",
       "guidance": 1.0
     },
     "class_type": "CLIPTextEncodeFlux",
@@ -59,6 +60,11 @@
       "sampler_name": "euler",
       "scheduler": "simple",
       "denoise": 1.0,
+      "add_noise": true,
+      "noise_seed": 0,
+      "start_at_step": 0,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable",
       "model": ["2", 0],
       "positive": ["4", 0],
       "negative": ["4", 0],
