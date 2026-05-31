@@ -115,14 +115,19 @@ def _detect_workflow_model(workflow: dict) -> str:
     """Detect which model family a workflow targets.
 
     Returns 'flux' if the workflow uses DualCLIPLoader + CLIPTextEncodeFlux,
-    'zimage' if it uses CLIPLoader(type=lumina2), otherwise 'unknown'.
+    'zimage' if it uses CLIPLoader(type=lumina2),
+    'qwen_image' if it uses CLIPLoader(type=qwen_image), otherwise 'unknown'.
     """
     for node in workflow.values():
         ct = node.get("class_type", "")
         if ct == "DualCLIPLoader":
             return "flux"
-        if ct == "CLIPLoader" and node.get("inputs", {}).get("type") == "lumina2":
-            return "zimage"
+        if ct == "CLIPLoader":
+            clip_type = node.get("inputs", {}).get("type", "")
+            if clip_type == "lumina2":
+                return "zimage"
+            if clip_type == "qwen_image":
+                return "qwen_image"
     return "unknown"
 
 
@@ -201,12 +206,10 @@ def _build_zimage_prompt(text: str, style_prompt: str) -> str:
 
 def _build_text_art_prompt(text: str, style_prompt: str, model: str = "unknown") -> str:
     """Dispatch to the right prompt builder based on detected model family."""
-    if model == "flux":
+    if model in ("flux", "unknown"):
         return _build_flux_prompt(text, style_prompt)
-    elif model == "zimage":
+    elif model in ("zimage", "qwen_image"):
         return _build_zimage_prompt(text, style_prompt)
-    # Fallback: use Flux template as default (more conservative)
-    return _build_flux_prompt(text, style_prompt)
 
 
 def _build_negative_prompt(user_negative: str = "") -> str:
@@ -445,10 +448,9 @@ def _parse_resolution(resolution: str) -> tuple[int, int]:
 # ── Public entry point ──
 
 
-# 工作流降级链：按优先级依次尝试，全部失败后用本地 stub
-_WORKFLOW_FALLBACK_CHAIN = ["flux_schnell", "test_z_image_turbo"]
-# Flux 中文渲染效果差，中文为主时跳过 Flux 直走 Z-Image
-_CHINESE_SKIP_FLUX = True
+# 工作流降级链：按内容类型选择优先级
+_CHINESE_FALLBACK = ["qwen_image_2512_gguf", "test_z_image_turbo"]
+_ENGLISH_FALLBACK = ["flux_schnell", "test_z_image_turbo"]
 
 
 def _is_primarily_chinese(text: str) -> bool:
@@ -463,17 +465,16 @@ def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
     """依次尝试工作流降级链，全部失败则用本地 Pillow stub。
 
     - 用户显式指定了 workflow → 只尝试那一个
-    - 中文为主 → 跳过 Flux，直走 Z-Image（中文效果更好）
-    - 其他 → 按 _WORKFLOW_FALLBACK_CHAIN 顺序降级
+    - 中文为主 → Qwen-Image → Z-Image
+    - 英文/其他 → Flux → Z-Image
     """
     workflows_to_try: list[str]
     if request.workflow:
         workflows_to_try = [request.workflow]
+    elif _is_primarily_chinese(request.text):
+        workflows_to_try = list(_CHINESE_FALLBACK)
     else:
-        workflows_to_try = list(_WORKFLOW_FALLBACK_CHAIN)
-        # 中文文字跳过 Flux，直走 Z-Image（Flux T5-XXL 中文渲染差）
-        if _CHINESE_SKIP_FLUX and _is_primarily_chinese(request.text):
-            workflows_to_try = [w for w in workflows_to_try if w != "flux_schnell"]
+        workflows_to_try = list(_ENGLISH_FALLBACK)
 
     for name in workflows_to_try:
         try:
