@@ -172,18 +172,39 @@
         </div>
       </div>
 
-      <div class="preview-grid" v-if="result.original || result.transparent || result.preview || result.image">
-        <div class="preview-card" v-if="result.original">
+      <div class="preview-grid" v-if="shouldShowPreviewGrid">
+        <!-- 原始图像 -->
+        <div class="preview-card" v-if="result.original || stageProgress.stage1.active || (running && mode !== 'vectorize')">
           <div class="preview-label">原始图像</div>
-          <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }"><img :src="result.original" alt="原始图像" /></div>
+          <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }">
+            <img v-if="result.original" :src="result.original" alt="原始图像" />
+            <div v-else class="preview-loading">
+              <div class="loading-spinner"></div>
+              <span class="loading-text">正在生成中<span class="loading-dots"><i>.</i><i>.</i><i>.</i></span></span>
+            </div>
+          </div>
         </div>
-        <div class="preview-card" v-if="result.transparent">
+        <!-- 透明化图像 -->
+        <div class="preview-card" v-if="result.transparent || stageProgress.stage2.active || running">
           <div class="preview-label">透明化图像</div>
-          <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }"><img :src="result.transparent" alt="透明化图像" /></div>
+          <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }">
+            <img v-if="result.transparent" :src="result.transparent" alt="透明化图像" />
+            <div v-else class="preview-loading">
+              <div class="loading-spinner"></div>
+              <span class="loading-text">正在生成中<span class="loading-dots"><i>.</i><i>.</i><i>.</i></span></span>
+            </div>
+          </div>
         </div>
-        <div class="preview-card" v-if="result.preview || result.image">
+        <!-- 矢量化预览 -->
+        <div class="preview-card" v-if="(result.preview || result.image) || stageProgress.stage2.active || running">
           <div class="preview-label">矢量化预览</div>
-          <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }"><img :src="result.preview || result.image" alt="矢量化预览" /></div>
+          <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }">
+            <img v-if="result.preview || result.image" :src="result.preview || result.image" alt="矢量化预览" />
+            <div v-else class="preview-loading">
+              <div class="loading-spinner"></div>
+              <span class="loading-text">正在生成中<span class="loading-dots"><i>.</i><i>.</i><i>.</i></span></span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -232,7 +253,8 @@ const props = defineProps({
   batchItems: { type: Array, default: () => [] },
   batchProgress: { type: Object, default: () => ({ current: 0, total: 0, completed: 0, failed: 0 }) },
   selectedBatchIndex: { type: Number, default: -1 },
-  running: { type: Boolean, default: false }
+  running: { type: Boolean, default: false },
+  stageProgress: { type: Object, default: () => ({ stage1: { active: false, percent: 0 }, stage2: { active: false, percent: 0 } }) }
 })
 
 const emit = defineEmits(['download', 'save-all', 'open-svg', 'select-batch-item'])
@@ -253,6 +275,12 @@ const hasContent = computed(() => {
 
 const hasResultContent = computed(() => {
   return props.result.original || props.result.transparent || props.result.preview || props.result.image || props.result.metadata
+})
+
+// 非批量模式下：有结果数据 或 正在运行时显示预览网格
+const shouldShowPreviewGrid = computed(() => {
+  if (isBatch.value) return false
+  return hasResultContent.value || props.running
 })
 </script>
 
@@ -358,6 +386,50 @@ const hasResultContent = computed(() => {
   height: 100%;
   object-fit: contain;
   display: block;
+}
+
+/* ── 加载中覆盖层 ── */
+.preview-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+}
+
+.loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(15, 118, 110, 0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+.loading-dots i {
+  font-style: normal;
+  animation: dot-bounce 1.4s infinite;
+}
+.loading-dots i:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots i:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes dot-bounce {
+  0%, 60%, 100% { opacity: 0.2; }
+  30% { opacity: 1; }
 }
 
 .metrics-block {

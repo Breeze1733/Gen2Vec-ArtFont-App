@@ -82,6 +82,7 @@
           :batch-progress="batchProgress"
           :selected-batch-index="selectedBatchIndex"
           :running="running"
+          :stage-progress="stageProgress"
           @download="downloadOutput"
           @save-all="saveAllResults"
           @open-svg="handleOpenSvg"
@@ -271,6 +272,13 @@ const batchItems = ref([])
 const batchProgress = reactive({ current: 0, total: 0, completed: 0, failed: 0 })
 const selectedBatchIndex = ref(-1)
 
+// 阶段进度（单条/矢量化模式的生成过程）
+const stageProgress = reactive({
+  stage1: { active: false, percent: 0 },
+  stage2: { active: false, percent: 0 }
+})
+let progressTimer = null
+
 const currentFiles = ref([])
 
 const logs = ref(loadHistory())
@@ -327,6 +335,36 @@ const handleFileChange = (file) => {
   payload.imageFile = file || null
 }
 
+// ── 阶段进度管理（时间估算，每 100ms 刷新） ──
+
+function resetStageProgress() {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
+  stageProgress.stage1.active = false; stageProgress.stage1.percent = 0
+  stageProgress.stage2.active = false; stageProgress.stage2.percent = 0
+}
+
+function startStageProgress(stage) {
+  const sp = stageProgress[stage]
+  sp.active = true
+  sp.percent = 0
+  const startTime = Date.now()
+  // 对数曲线：前期较快，后期越来越慢，自然趋近 99% 但不会到
+  // 约 15s → 62%，约 25s → 85%，约 40s → 96%
+  progressTimer = setInterval(() => {
+    const elapsed = Date.now() - startTime
+    const t = elapsed / 1000 // 秒
+    sp.percent = Math.min(99, Math.round(99 * Math.log(1 + t / 10) / Math.log(5)))
+  }, 100)
+}
+
+function finishStageProgress(stage) {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
+  const sp = stageProgress[stage]
+  sp.percent = 100
+  // 短暂显示 100% 后关闭
+  setTimeout(() => { sp.active = false }, 600)
+}
+
 const startGeneration = async () => {
   if (!validateForm()) {
     return
@@ -341,6 +379,7 @@ const startGeneration = async () => {
   result.original = ''
   result.preview = ''
   result.transparent = ''
+  resetStageProgress()
   batchItems.value = []
   batchProgress.current = 0
   batchProgress.total = 0
@@ -376,6 +415,7 @@ const startGeneration = async () => {
 
     if (mode.value === 'single') {
       // Stage 1: 生成位图（后端 A）
+      startStageProgress('stage1')
       const payloadA = {
         text: payload.text.trim(),
         prompt: payload.prompt.trim(),
@@ -391,8 +431,10 @@ const startGeneration = async () => {
       imageBase64 = respA.png || ''
       imageName = respA.image_name || `${safeName(payload.text || 'art')}-orig.png`
       result.original = imageBase64
+      finishStageProgress('stage1')
 
       // Stage 2: 矢量化（后端 B）
+      startStageProgress('stage2')
       const payloadB = {
         source_type: 'generated',
         text: payload.text.trim(),
@@ -414,6 +456,7 @@ const startGeneration = async () => {
       result.image = result.preview
       result.svg = respB.svg || ''
       result.metadata = respB.metadata || null
+      finishStageProgress('stage2')
 
       // 将生成耗时写入 metadata
       if (result.metadata) {
@@ -435,6 +478,7 @@ const startGeneration = async () => {
 
     } else if (mode.value === 'vectorize') {
       // 直接调用后端 B
+      startStageProgress('stage2')
       const payloadB = {
         source_type: 'upload',
         resolution: payload.resolution,
@@ -453,6 +497,7 @@ const startGeneration = async () => {
       result.image = result.preview
       result.svg = respB.svg || ''
       result.metadata = respB.metadata || null
+      finishStageProgress('stage2')
 
       const base = getFileNameBase()
       const files = []
@@ -647,6 +692,8 @@ const startGeneration = async () => {
     saveHistory()
   } finally {
     running.value = false
+    // 如果异常退出，确保进度条关闭
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
   }
 }
 
@@ -798,6 +845,7 @@ const resetForm = () => {
   batchProgress.completed = 0
   batchProgress.failed = 0
   selectedBatchIndex.value = -1
+  resetStageProgress()
 }
 
 const selectBatchItem = (index) => {
