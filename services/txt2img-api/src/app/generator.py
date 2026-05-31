@@ -4,6 +4,7 @@ import base64
 import copy
 import io
 import json
+import logging
 import os
 import random
 import re
@@ -18,6 +19,8 @@ import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from .models import GenerationRequest
+
+logger = logging.getLogger(__name__)
 
 
 # ── Default node ID mappings (fallback when class_type scanning fails) ──
@@ -273,7 +276,6 @@ def warmup_comfyui_connection() -> None:
         with httpx.Client(timeout=5.0) as client:
             resp = client.get(f"{host}/system_stats")
             if resp.status_code == 200:
-                logger = __import__("logging").getLogger(__name__)
                 logger.info("ComfyUI connection verified at %s", host)
     except Exception:
         pass  # ComfyUI may still be starting — that's fine
@@ -372,7 +374,8 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
 
             return GenerationArtifact(image_base64=image_base64, image_name=image_name, metadata=metadata)
 
-    except Exception:
+    except Exception as exc:
+        logger.warning("ComfyUI generation failed: %s", exc)
         return None
 
 
@@ -482,8 +485,11 @@ def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
             workflow = _load_workflow(workflow_path)
             result = _call_comfyui_api(request, workflow)
             if result is not None:
+                logger.info("Workflow '%s' succeeded", name)
                 return result
-        except Exception:
+            logger.warning("Workflow '%s' returned None, trying next", name)
+        except Exception as exc:
+            logger.warning("Workflow '%s' failed: %s", name, exc)
             continue
 
     return _local_stub_generate(request)
