@@ -61,6 +61,7 @@
       "scheduler": "ddim_uniform",
       "denoise": 1.0,
       "add_noise": "enable",
+      "noise_seed": 0,
       "start_at_step": 0,
       "end_at_step": 10000,
       "return_with_leftover_noise": "disable",
