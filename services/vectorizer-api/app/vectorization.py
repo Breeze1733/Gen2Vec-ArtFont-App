@@ -11,6 +11,11 @@ from xml.dom import minidom
 import numpy as np
 from PIL import Image
 
+try:
+    import cv2
+except Exception:  # pragma: no cover
+    cv2 = None
+
 if sys.platform == "win32":
     _venv_scripts = os.path.join(sys.prefix, "Scripts")
     if os.path.isdir(_venv_scripts):
@@ -28,10 +33,49 @@ except Exception:  # pragma: no cover
 
 
 PRESET_CONFIG: dict[str, dict[str, int]] = {
-    "clean": {"cp": 3, "fs": 15, "ct": 60, "lt": 12, "ld": 20, "scale": 2},
-    "balanced": {"cp": 5, "fs": 6, "ct": 45, "lt": 5, "ld": 10, "scale": 2},
+    "clean": {"cp": 2, "fs": 48, "ct": 120, "lt": 30, "ld": 38, "scale": 2},
+    "balanced": {"cp": 4, "fs": 18, "ct": 70, "lt": 12, "ld": 20, "scale": 2},
     "detailed": {"cp": 6, "fs": 2, "ct": 30, "lt": 3, "ld": 4, "scale": 3},
     "ultra": {"cp": 8, "fs": 1, "ct": 20, "lt": 2, "ld": 2, "scale": 3},
+}
+
+TRACE_CLEANUP_CONFIG: dict[str, dict[str, int | bool]] = {
+    "clean": {
+        "alpha_floor": 48,
+        "min_area_divisor": 1500,
+        "morph": 2,
+        "median": True,
+        "solid_alpha": True,
+        "smooth_mask": True,
+        "snap_near_white": True,
+    },
+    "balanced": {
+        "alpha_floor": 28,
+        "min_area_divisor": 3600,
+        "morph": 1,
+        "median": True,
+        "solid_alpha": True,
+        "smooth_mask": True,
+        "snap_near_white": True,
+    },
+    "detailed": {
+        "alpha_floor": 10,
+        "min_area_divisor": 12000,
+        "morph": 0,
+        "median": True,
+        "solid_alpha": False,
+        "smooth_mask": False,
+        "snap_near_white": False,
+    },
+    "ultra": {
+        "alpha_floor": 4,
+        "min_area_divisor": 24000,
+        "morph": 0,
+        "median": False,
+        "solid_alpha": False,
+        "smooth_mask": False,
+        "snap_near_white": False,
+    },
 }
 
 
@@ -106,6 +150,91 @@ def _calculate_svg_fidelity(source_img: Image.Image, preview_png_bytes: bytes) -
         return None
 
 
+def _remove_small_alpha_components(alpha: np.ndarray, min_area: int) -> np.ndarray:
+    if cv2 is None or min_area <= 1:
+        return alpha
+
+    mask = (alpha > 0).astype(np.uint8)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if num_labels <= 1:
+        return alpha
+
+    keep = np.zeros(mask.shape, dtype=bool)
+    for label in range(1, num_labels):
+        if int(stats[label, cv2.CC_STAT_AREA]) >= min_area:
+            keep |= labels == label
+
+    cleaned = alpha.copy()
+    cleaned[~keep] = 0
+    return cleaned
+
+
+def _smooth_binary_alpha(alpha: np.ndarray, alpha_floor: int) -> np.ndarray:
+    if cv2 is None:
+        return alpha
+
+    mask = (alpha > 0).astype(np.uint8) * 255
+    mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=1.35, sigmaY=1.35)
+    _, mask = cv2.threshold(mask, 128, 255, cv2.THRESH_BINARY)
+
+    # A second, smaller pass rounds stair-stepped edges without expanding the glyph too far.
+    mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=0.55, sigmaY=0.55)
+    _, mask = cv2.threshold(mask, 128, 255, cv2.THRESH_BINARY)
+
+    out = alpha.copy()
+    out[mask == 0] = 0
+    out[(mask > 0) & (out < alpha_floor)] = alpha_floor
+    return out
+
+
+def _prepare_trace_input(img: Image.Image, params: dict[str, int | str]) -> Image.Image:
+    rgba = img.convert("RGBA")
+    arr = np.array(rgba)
+    alpha = arr[:, :, 3].copy()
+    preset = str(params["preset"])
+    cleanup = TRACE_CLEANUP_CONFIG.get(preset, TRACE_CLEANUP_CONFIG["balanced"])
+
+    alpha_floor = int(cleanup["alpha_floor"])
+    alpha[alpha < alpha_floor] = 0
+
+    if cv2 is not None:
+        if bool(cleanup["median"]):
+            alpha = cv2.medianBlur(alpha, 3)
+
+        morph_iterations = int(cleanup["morph"])
+        if morph_iterations > 0:
+            kernel = np.ones((3, 3), np.uint8)
+            mask = (alpha > 0).astype(np.uint8) * 255
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=morph_iterations)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=morph_iterations)
+            alpha[mask == 0] = 0
+            alpha[(mask > 0) & (alpha < alpha_floor)] = alpha_floor
+
+        rgb = arr[:, :, :3]
+        rgb = cv2.bilateralFilter(rgb, d=5, sigmaColor=32, sigmaSpace=24)
+        arr[:, :, :3] = rgb
+
+    min_area = max(2, int((rgba.width * rgba.height) / int(cleanup["min_area_divisor"])))
+    alpha = _remove_small_alpha_components(alpha, min_area)
+
+    if bool(cleanup["smooth_mask"]):
+        alpha = _smooth_binary_alpha(alpha, alpha_floor)
+
+    if bool(cleanup["solid_alpha"]):
+        alpha[alpha > 0] = 255
+
+    arr[:, :, 3] = alpha
+    arr[alpha == 0, :3] = 255
+
+    if bool(cleanup["snap_near_white"]) and cv2 is not None:
+        visible = alpha > 0
+        hsv = cv2.cvtColor(arr[:, :, :3], cv2.COLOR_RGB2HSV)
+        near_white = visible & (hsv[:, :, 1] <= 34) & (hsv[:, :, 2] >= 220)
+        arr[near_white, :3] = 245
+
+    return Image.fromarray(arr, mode="RGBA")
+
+
 def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> dict[str, Any]:
     if vtracer is None:
         raise RuntimeError("vtracer is not installed. Please install dependencies first.")
@@ -123,12 +252,13 @@ def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> d
         input_png_path = os.path.join(tmp, "input.png")
         output_svg_path = os.path.join(tmp, "output.svg")
 
-        work_img = transparent_image
+        work_img = _prepare_trace_input(transparent_image, params)
         if scale > 1:
-            work_img = transparent_image.resize(
+            work_img = work_img.resize(
                 (int(original_width * scale), int(original_height * scale)),
                 Image.Resampling.LANCZOS,
             )
+            work_img = _prepare_trace_input(work_img, params)
         work_img.save(input_png_path, "PNG")
 
         if hasattr(vtracer, "convert_image_to_svg_py"):
@@ -199,6 +329,16 @@ def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> d
             "length_threshold": int(params["lt"]),
             "layer_difference": int(params["ld"]),
             "scale": scale,
+            "trace_cleanup": {
+                "alpha_floor": int(TRACE_CLEANUP_CONFIG[str(params["preset"])]["alpha_floor"]),
+                "small_component_min_area": max(
+                    2,
+                    int(
+                        (work_img.width * work_img.height)
+                        / int(TRACE_CLEANUP_CONFIG[str(params["preset"])]["min_area_divisor"])
+                    ),
+                ),
+            },
         },
         "canvas": {
             "width": int(original_width),

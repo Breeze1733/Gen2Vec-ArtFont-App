@@ -105,12 +105,33 @@ def _find_nodes_by_class(workflow: dict, class_type: str) -> list[tuple[str, dic
 
 # ── Prompt template engine ──
 
+# 背景抑制前缀 — 要求模型生成干净、易抠图的纯色背景
+_FLUX_BG_SUPPRESS = (
+    "plain solid background, simple clean backdrop, "
+    "no complex scene, no landscape, no environment, "
+    "no indoor background, no outdoor background, "
+    "no textured surface, no patterned backdrop, "
+    "isolated on solid color"
+)
+
+_ZIMAGE_BG_SUPPRESS = (
+    "纯色背景，简洁干净的背景，"
+    "无复杂场景，无风景，无环境，"
+    "无室内背景，无室外背景，"
+    "无纹理背景，无图案背景"
+)
+
 # 文本艺术字常见缺陷的默认负面提示词
 _DEFAULT_NEGATIVE = (
     "broken strokes, missing strokes, wrong characters, garbled text, "
     "duplicate characters, repeated characters, extra character, wrong character count, "
     "deformed text, blurry text, low quality, jpeg artifacts, "
-    "watermark, text signature, messy background, cluttered layout"
+    "watermark, text signature, "
+    "messy background, cluttered layout, "
+    "complex background, busy background, detailed background, "
+    "scenery background, landscape background, environmental background, "
+    "indoor scene, outdoor scene, gradient background, patterned texture, "
+    "photographic background, realistic setting"
 )
 
 
@@ -143,7 +164,7 @@ def _build_flux_prompt(text: str, style_prompt: str) -> str:
     has_english = bool(re.search(r"[a-zA-Z]{2,}", text))
     has_number = bool(re.search(r"\d", text))
 
-    parts = []
+    parts = [_FLUX_BG_SUPPRESS]
 
     if has_chinese:
         cn_chars = re.findall(r"[一-鿿]", text)
@@ -181,7 +202,7 @@ def _build_zimage_prompt(text: str, style_prompt: str) -> str:
     has_english = bool(re.search(r"[a-zA-Z]{2,}", text))
     has_number = bool(re.search(r"\d", text))
 
-    parts = []
+    parts = [_ZIMAGE_BG_SUPPRESS]
 
     if has_chinese:
         cn_chars = re.findall(r"[一-鿿]", text)
