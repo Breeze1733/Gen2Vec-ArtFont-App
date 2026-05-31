@@ -303,9 +303,11 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
 
             submit_resp = client.post(f"{host}/prompt", json=submit_payload)
             if submit_resp.is_error:
+                logger.warning("ComfyUI /prompt returned %s: %s", submit_resp.status_code, submit_resp.text[:200])
                 return None
             prompt_id = submit_resp.json().get("prompt_id")
             if not prompt_id:
+                logger.warning("ComfyUI /prompt returned no prompt_id: %s", submit_resp.text[:200])
                 return None
 
             # 2. Poll history for completion
@@ -322,11 +324,13 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
                 time.sleep(interval)
 
             if history is None:
+                logger.warning("ComfyUI timeout waiting for prompt %s after %ss", prompt_id[:8], timeout)
                 return None  # timeout
 
             # 3. Extract image info from SaveImage output
             save_nodes = _find_nodes_by_class(patched, "SaveImage")
             if not save_nodes:
+                logger.warning("No SaveImage node found in patched workflow")
                 return None
             save_node_id = save_nodes[0][0]
 
@@ -334,6 +338,8 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
             node_outputs = outputs.get(save_node_id, {})
             images = node_outputs.get("images", [])
             if not images:
+                logger.warning("No images in output node %s; available outputs: %s",
+                               save_node_id, list(outputs.keys()))
                 return None
 
             img_info = images[0]
