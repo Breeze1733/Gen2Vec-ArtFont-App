@@ -52,7 +52,21 @@
         <div class="result-header">
           <div>
             <p class="section-kicker">Result #{{ selectedBatchIndex + 1 }}</p>
-            <h2>{{ batchItems[selectedBatchIndex].text || '生成结果' }}</h2>
+            <div class="title-row">
+              <h2>{{ batchItems[selectedBatchIndex].text || '生成结果' }}</h2>
+              <div class="bg-toggle">
+                <button
+                  :class="['bg-toggle-btn', { active: previewBg === 'white' }]"
+                  title="白色背景"
+                  @click="previewBg = 'white'"
+                >白</button>
+                <button
+                  :class="['bg-toggle-btn', { active: previewBg === 'black' }]"
+                  title="黑色背景"
+                  @click="previewBg = 'black'"
+                >黑</button>
+              </div>
+            </div>
           </div>
           <div class="download-actions">
             <button class="secondary-button small" type="button" :disabled="!result.original" @click="$emit('download', 'original')">原始图像</button>
@@ -67,15 +81,15 @@
         <div class="preview-grid" v-if="result.original || result.transparent || result.preview || result.image">
           <div class="preview-card" v-if="result.original">
             <div class="preview-label">原始图像</div>
-            <div class="preview-frame"><img :src="result.original" alt="原始图像" /></div>
+            <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }"><img :src="result.original" alt="原始图像" /></div>
           </div>
           <div class="preview-card" v-if="result.transparent">
             <div class="preview-label">透明化图像</div>
-            <div class="preview-frame"><img :src="result.transparent" alt="透明化图像" /></div>
+            <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }"><img :src="result.transparent" alt="透明化图像" /></div>
           </div>
           <div class="preview-card" v-if="result.preview || result.image">
             <div class="preview-label">矢量化预览</div>
-            <div class="preview-frame"><img :src="result.preview || result.image" alt="矢量化预览" /></div>
+            <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }"><img :src="result.preview || result.image" alt="矢量化预览" /></div>
           </div>
         </div>
 
@@ -132,7 +146,21 @@
       <div class="result-header">
         <div>
           <p class="section-kicker">Result</p>
-          <h2>生成结果</h2>
+          <div class="title-row">
+            <h2>生成结果</h2>
+            <div class="bg-toggle">
+              <button
+                :class="['bg-toggle-btn', { active: previewBg === 'white' }]"
+                title="白色背景"
+                @click="previewBg = 'white'"
+              >白</button>
+              <button
+                :class="['bg-toggle-btn', { active: previewBg === 'black' }]"
+                title="黑色背景"
+                @click="previewBg = 'black'"
+              >黑</button>
+            </div>
+          </div>
         </div>
         <div class="download-actions">
           <button class="secondary-button small" type="button" :disabled="!result.original" @click="$emit('download', 'original')">原始图像</button>
@@ -147,15 +175,15 @@
       <div class="preview-grid" v-if="result.original || result.transparent || result.preview || result.image">
         <div class="preview-card" v-if="result.original">
           <div class="preview-label">原始图像</div>
-          <div class="preview-frame"><img :src="result.original" alt="原始图像" /></div>
+          <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }"><img :src="result.original" alt="原始图像" /></div>
         </div>
         <div class="preview-card" v-if="result.transparent">
           <div class="preview-label">透明化图像</div>
-          <div class="preview-frame"><img :src="result.transparent" alt="透明化图像" /></div>
+          <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }"><img :src="result.transparent" alt="透明化图像" /></div>
         </div>
         <div class="preview-card" v-if="result.preview || result.image">
           <div class="preview-label">矢量化预览</div>
-          <div class="preview-frame"><img :src="result.preview || result.image" alt="矢量化预览" /></div>
+          <div class="preview-frame" :style="{ background: previewBg === 'white' ? '#fff' : '#1a1a1a' }"><img :src="result.preview || result.image" alt="矢量化预览" /></div>
         </div>
       </div>
 
@@ -196,7 +224,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
   result: Object,
@@ -208,6 +236,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['download', 'save-all', 'open-svg', 'select-batch-item'])
+
+const previewBg = ref('white')  // 'white' | 'black'
 
 const isBatch = computed(() => props.mode === 'batch')
 
@@ -248,6 +278,45 @@ const hasResultContent = computed(() => {
 .result-header h2 {
   margin: 0;
   font-size: 18px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bg-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.bg-toggle-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1.5;
+}
+
+.bg-toggle-btn:hover {
+  background: rgba(31, 41, 55, 0.06);
+  color: var(--text);
+}
+
+.bg-toggle-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.bg-toggle-btn + .bg-toggle-btn {
+  border-left: 1px solid var(--border);
 }
 
 .download-actions {
