@@ -198,20 +198,20 @@ const activeTab = ref('input')
 const vectorPresets = {
   clean: {
     preset: 'clean',
-    color_precision: 3,
-    filter_speckle: 15,
-    corner_threshold: 60,
-    length_threshold: 12,
-    layer_difference: 20,
+    color_precision: 2,
+    filter_speckle: 48,
+    corner_threshold: 120,
+    length_threshold: 30,
+    layer_difference: 38,
     scale: 2
   },
   balanced: {
     preset: 'balanced',
-    color_precision: 5,
-    filter_speckle: 6,
-    corner_threshold: 45,
-    length_threshold: 5,
-    layer_difference: 10,
+    color_precision: 4,
+    filter_speckle: 18,
+    corner_threshold: 70,
+    length_threshold: 12,
+    layer_difference: 20,
     scale: 2
   },
   detailed: {
@@ -959,11 +959,11 @@ const restoreHistoryItem = async (id) => {
       if (saved.metadata?.params) {
         Object.assign(payload.vector, {
           preset: saved.metadata.params.preset || 'balanced',
-          color_precision: saved.metadata.params.color_precision || 5,
-          filter_speckle: saved.metadata.params.filter_speckle || 6,
-          corner_threshold: saved.metadata.params.corner_threshold || 45,
-          length_threshold: saved.metadata.params.length_threshold || 5,
-          layer_difference: saved.metadata.params.layer_difference || 10,
+          color_precision: saved.metadata.params.color_precision || vectorPresets.balanced.color_precision,
+          filter_speckle: saved.metadata.params.filter_speckle || vectorPresets.balanced.filter_speckle,
+          corner_threshold: saved.metadata.params.corner_threshold || vectorPresets.balanced.corner_threshold,
+          length_threshold: saved.metadata.params.length_threshold || vectorPresets.balanced.length_threshold,
+          layer_difference: saved.metadata.params.layer_difference || vectorPresets.balanced.layer_difference,
           scale: saved.metadata.params.scale || 2
         })
       }
