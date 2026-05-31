@@ -215,6 +215,24 @@ def _build_text_art_prompt(text: str, style_prompt: str, model: str = "unknown")
         return _build_zimage_prompt(text, style_prompt)
 
 
+# Qwen-Image 官方支持的 7 种分辨率
+_QWEN_RESOLUTIONS = [
+    (1328, 1328),   # 1:1
+    (1664, 928),    # 16:9
+    (928, 1664),    # 9:16
+    (1472, 1104),   # 4:3
+    (1104, 1472),   # 3:4
+    (1584, 1056),   # 3:2
+    (1056, 1584),   # 2:3
+]
+
+
+def _map_qwen_resolution(w: int, h: int) -> tuple[int, int]:
+    """Map a requested resolution to the nearest official Qwen-Image size."""
+    ratio = w / h
+    return min(_QWEN_RESOLUTIONS, key=lambda r: abs(r[0] / r[1] - ratio))
+
+
 def _build_negative_prompt(user_negative: str = "") -> str:
     """Merge user negative prompt with text-art-specific default negatives."""
     if user_negative.strip():
@@ -253,6 +271,8 @@ def _patch_workflow(workflow: dict, request: GenerationRequest) -> dict:
     latent_nodes = _find_nodes_by_class(patched, "EmptyLatentImage")
     latent_nodes += _find_nodes_by_class(patched, "EmptySD3LatentImage")
     w, h = _parse_resolution(request.resolution)
+    if model == "qwen_image":
+        w, h = _map_qwen_resolution(w, h)
     for _nid, node in latent_nodes:
         node["inputs"]["width"] = w
         node["inputs"]["height"] = h
