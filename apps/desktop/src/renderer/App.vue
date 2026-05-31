@@ -286,8 +286,13 @@ function loadHistory() {
 function saveHistory() {
   const trimmed = logs.value.slice(0, 50)
   localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed))
-  // 清理 IndexedDB 中已不在历史列表的旧数据
-  cleanupResults(trimmed.map(l => l.id)).catch(() => {})
+}
+
+// 保存历史 + 清理 IndexedDB 孤立数据（仅在确认写入成功后调用）
+function saveHistoryAndCleanup() {
+  saveHistory()
+  const validIds = logs.value.slice(0, 50).map(l => l.id)
+  cleanupResults(validIds).catch(() => {})
 }
 
 const validateForm = () => {
@@ -606,7 +611,7 @@ const startGeneration = async () => {
       console.warn('结果持久化失败（不影响正常使用）:', storageErr)
     }
 
-    saveHistory()
+    saveHistoryAndCleanup()
   } catch (err) {
     error.value = err?.message || '生成失败，请稍后重试。'
     task.status = '失败'
@@ -836,7 +841,7 @@ const saveAllResults = async () => {
 const deleteHistoryItem = async (id) => {
   logs.value = logs.value.filter((item) => item.id !== id)
   await deleteResultFromDB(id)
-  saveHistory()
+  saveHistoryAndCleanup()
 }
 
 const restoreHistoryItem = async (id) => {
@@ -845,7 +850,13 @@ const restoreHistoryItem = async (id) => {
 
   const saved = await loadResultFromDB(id)
   if (!saved) {
-    error.value = '该记录的结果数据已丢失，无法恢复。'
+    if (!item.thumb) {
+      // 旧记录（功能上线前创建的），从未存储过结果数据
+      error.value = '该记录创建于历史恢复功能上线前，无可用数据。请重新生成。'
+    } else {
+      // 有缩略图但结果数据丢失——异常情况
+      error.value = '该记录的结果数据已丢失，无法恢复。请重新生成。'
+    }
     return
   }
 
