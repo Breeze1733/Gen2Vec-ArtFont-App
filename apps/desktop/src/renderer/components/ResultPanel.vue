@@ -1,5 +1,5 @@
 <template>
-  <section class="result-panel" v-if="hasContent">
+  <section class="result-panel">
     <!-- 批量进度条 -->
     <div v-if="isBatch && (running || batchItems.length > 0)" class="batch-progress-bar">
       <div class="progress-info">
@@ -9,6 +9,27 @@
       </div>
       <div class="progress-track">
         <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
+      </div>
+    </div>
+
+    <!-- 单条/矢量化模式：生成进度 -->
+    <div v-if="!isBatch && running" class="gen-progress">
+      <div class="gen-progress-spinner"></div>
+      <div class="gen-progress-info">
+        <div class="gen-progress-steps">
+          <span v-if="mode !== 'vectorize'" :class="['gen-step', { active: stageProgress.stage1.active, done: !stageProgress.stage1.active && result.original }]">
+            <span class="gen-step-dot"></span>生成位图
+          </span>
+          <span class="gen-step-arrow" v-if="mode !== 'vectorize'">→</span>
+          <span :class="['gen-step', { active: stageProgress.stage2.active, done: !stageProgress.stage2.active && (result.transparent || result.preview) }]">
+            <span class="gen-step-dot"></span>矢量化
+          </span>
+        </div>
+        <p class="gen-progress-text">
+          <template v-if="stageProgress.stage1.active">正在生成位图，请稍候…</template>
+          <template v-else-if="stageProgress.stage2.active">正在矢量化处理，请稍候…</template>
+          <template v-else>准备中…</template>
+        </p>
       </div>
     </div>
 
@@ -241,6 +262,13 @@
         </div>
       </div>
     </template>
+
+    <!-- 空状态 -->
+    <div v-if="!hasContent && !running" class="empty-state">
+      <div class="empty-icon">📭</div>
+      <p class="empty-title">无输出任务</p>
+      <p class="empty-desc">在输入面板生成内容后，结果将显示在此处</p>
+    </div>
   </section>
 </template>
 
@@ -493,6 +521,84 @@ const shouldShowPreviewGrid = computed(() => {
   }
 }
 
+/* ── 单条生成进度 ── */
+.gen-progress {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(15, 118, 110, 0.15);
+  border-radius: 10px;
+  background: rgba(15, 118, 110, 0.04);
+}
+
+.gen-progress-spinner {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(15, 118, 110, 0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.gen-progress-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.gen-progress-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.gen-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.gen-step.active {
+  color: var(--accent);
+}
+
+.gen-step.done {
+  color: #16a34a;
+}
+
+.gen-step-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.gen-step.active .gen-step-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.2);
+}
+
+.gen-step.done .gen-step-dot {
+  background: #16a34a;
+}
+
+.gen-step-arrow {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.gen-progress-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 /* ── 批量进度条 ── */
 .batch-progress-bar {
   margin-bottom: 16px;
@@ -700,5 +806,34 @@ const shouldShowPreviewGrid = computed(() => {
 .fail-reason {
   color: var(--text-muted) !important;
   font-size: 13px;
+}
+
+/* ── 空状态 ── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+  opacity: 0.7;
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.empty-desc {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 </style>
