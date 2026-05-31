@@ -45,6 +45,7 @@ function openDB() {
  */
 export async function saveResultToDB(id, resultData) {
   try {
+    console.log('[storage] 开始保存到 IndexedDB, id:', id, '类型:', typeof id, '数据字段:', Object.keys(resultData))
     const db = await openDB()
     const tx = db.transaction(STORE_NAME, 'readwrite')
     const store = tx.objectStore(STORE_NAME)
@@ -78,15 +79,31 @@ export async function saveResultToDB(id, resultData) {
  */
 export async function loadResultFromDB(id) {
   try {
+    // 确保 id 是数字类型，与保存时一致
+    const numericId = typeof id === 'string' ? Number(id) : id
+    console.log('[storage] 读取 IndexedDB, id:', id, '转换后:', numericId, '类型:', typeof numericId)
+
     const db = await openDB()
     const tx = db.transaction(STORE_NAME, 'readonly')
     const store = tx.objectStore(STORE_NAME)
-    const request = store.get(id)
+    const request = store.get(numericId)
     return new Promise((resolve) => {
       request.onsuccess = () => {
         const result = request.result || null
-        console.log('[storage] IndexedDB 读取 id:', id, result ? '✓ 有数据' : '✗ 无数据')
-        resolve(result)
+        console.log('[storage] IndexedDB 读取 id:', numericId, result ? '✓ 有数据' : '✗ 无数据')
+        if (!result) {
+          // 如果数字类型找不到，尝试用原始 id（可能是字符串）
+          console.log('[storage] 数字 id 未找到，尝试原始 id:', id)
+          const request2 = store.get(id)
+          request2.onsuccess = () => {
+            const result2 = request2.result || null
+            console.log('[storage] 原始 id 读取:', id, result2 ? '✓ 有数据' : '✗ 无数据')
+            resolve(result2)
+          }
+          request2.onerror = () => resolve(null)
+        } else {
+          resolve(result)
+        }
       }
       request.onerror = () => {
         console.error('[storage] IndexedDB 读取失败:', request.error)
@@ -130,6 +147,7 @@ export async function cleanupResults(validIds) {
   // 每次清理用独立连接，避免复用正在写入的连接导致事务冲突
   let db = null
   try {
+    console.log('[storage] 开始清理 IndexedDB, 保留的 IDs:', validIds)
     db = await new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
       req.onsuccess = () => resolve(req.result)
@@ -145,14 +163,16 @@ export async function cleanupResults(validIds) {
         const validSet = new Set(validIds)
         const keys = getAllReq.result
         let deleted = 0
+        const deletedIds = []
         for (const key of keys) {
           if (!validSet.has(key)) {
             store.delete(key)
+            deletedIds.push(key)
             deleted++
           }
         }
         if (deleted > 0) {
-          console.log(`[storage] 清理了 ${deleted} 条过期 IndexedDB 记录`)
+          console.log(`[storage] 清理了 ${deleted} 条过期 IndexedDB 记录, 删除的 IDs:`, deletedIds)
         }
       }
       tx.oncomplete = () => resolve(true)

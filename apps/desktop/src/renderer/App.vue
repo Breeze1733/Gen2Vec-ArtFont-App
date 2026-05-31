@@ -289,10 +289,14 @@ function saveHistory() {
 }
 
 // 保存历史 + 清理 IndexedDB 孤立数据（仅在确认写入成功后调用）
-function saveHistoryAndCleanup() {
+async function saveHistoryAndCleanup() {
   saveHistory()
   const validIds = logs.value.slice(0, 50).map(l => l.id)
-  cleanupResults(validIds).catch(() => {})
+  try {
+    await cleanupResults(validIds)
+  } catch (err) {
+    console.warn('[history] 清理旧数据失败:', err)
+  }
 }
 
 const validateForm = () => {
@@ -580,38 +584,63 @@ const startGeneration = async () => {
     }
 
     // 持久化结果到 IndexedDB + 生成缩略图
+    // 注意：IndexedDB 无法克隆 Vue 响应式对象(Proxy)，需要转为普通对象
     try {
       if (mode.value === 'batch') {
         const successItems = batchItems.value.filter(b => b.status === 'success')
         if (successItems.length > 0) {
           const lastItem = successItems[successItems.length - 1]
           task.thumb = await makeThumbnail(lastItem.preview || lastItem.original)
+          console.log('[save] 保存批量结果到 IndexedDB, task.id:', task.id, '类型:', typeof task.id)
           await saveResultToDB(task.id, {
             batchMode: true,
-            items: batchItems.value.map(b => ({
+            items: JSON.parse(JSON.stringify(batchItems.value.map(b => ({
               index: b.index, text: b.text, prompt: b.prompt,
               status: b.status, error: b.error,
               original: b.original, transparent: b.transparent,
               preview: b.preview, svg: b.svg, metadata: b.metadata,
               stage1Ms: b.stage1Ms, stage2Ms: b.stage2Ms
-            }))
+            })))),
+            // 保存批量模式的全局输入参数
+            inputParams: {
+              mode: 'batch',
+              batch: payload.batch,
+              negative: payload.negative,
+              resolution: payload.resolution,
+              format: payload.format,
+              seed: payload.seed,
+              vector: JSON.parse(JSON.stringify(payload.vector))
+            }
           })
         }
       } else {
         task.thumb = await makeThumbnail(result.preview || result.original)
+        console.log('[save] 保存单条结果到 IndexedDB, task.id:', task.id, '类型:', typeof task.id)
         await saveResultToDB(task.id, {
           original: result.original,
           transparent: result.transparent,
           preview: result.preview,
           svg: result.svg,
-          metadata: result.metadata
+          metadata: JSON.parse(JSON.stringify(result.metadata)),
+          // 保存输入参数，用于恢复输入面板
+          inputParams: {
+            mode: mode.value,
+            text: payload.text,
+            prompt: payload.prompt,
+            negative: payload.negative,
+            resolution: payload.resolution,
+            format: payload.format,
+            seed: payload.seed,
+            vector: JSON.parse(JSON.stringify(payload.vector))
+          }
         })
       }
     } catch (storageErr) {
-      console.warn('结果持久化失败（不影响正常使用）:', storageErr)
+      console.error('结果持久化失败:', storageErr)
+      error.value = `结果保存失败: ${storageErr.message}`
     }
 
-    saveHistoryAndCleanup()
+    await saveHistoryAndCleanup()
   } catch (err) {
     error.value = err?.message || '生成失败，请稍后重试。'
     task.status = '失败'
@@ -841,14 +870,18 @@ const saveAllResults = async () => {
 const deleteHistoryItem = async (id) => {
   logs.value = logs.value.filter((item) => item.id !== id)
   await deleteResultFromDB(id)
-  saveHistoryAndCleanup()
+  await saveHistoryAndCleanup()
 }
 
 const restoreHistoryItem = async (id) => {
   const item = logs.value.find(l => l.id === id)
   if (!item || item.status === '运行中') return
 
+  console.log('[restore] 尝试恢复记录:', { id, idType: typeof id, item })
+
   const saved = await loadResultFromDB(id)
+  console.log('[restore] IndexedDB 返回:', saved ? '有数据' : '无数据', saved)
+
   if (!saved) {
     if (!item.thumb) {
       // 旧记录（功能上线前创建的），从未存储过结果数据
@@ -879,6 +912,18 @@ const restoreHistoryItem = async (id) => {
       result.svg = lastSuccess.svg || ''
       result.metadata = lastSuccess.metadata || null
     }
+
+    // 恢复批量模式的全局输入参数
+    if (saved.inputParams) {
+      payload.batch = saved.inputParams.batch || ''
+      payload.negative = saved.inputParams.negative || ''
+      payload.resolution = saved.inputParams.resolution || '1024 x 1024'
+      payload.format = saved.inputParams.format || 'PNG'
+      payload.seed = saved.inputParams.seed || 0
+      if (saved.inputParams.vector) {
+        Object.assign(payload.vector, saved.inputParams.vector)
+      }
+    }
   } else {
     // 恢复单条/矢量化模式
     mode.value = item.mode === '矢量化' ? 'vectorize' : 'single'
@@ -890,6 +935,39 @@ const restoreHistoryItem = async (id) => {
     result.metadata = saved.metadata || null
     batchItems.value = []
     selectedBatchIndex.value = -1
+
+    // 恢复输入参数
+    if (saved.inputParams) {
+      payload.text = saved.inputParams.text || ''
+      payload.prompt = saved.inputParams.prompt || ''
+      payload.negative = saved.inputParams.negative || ''
+      payload.resolution = saved.inputParams.resolution || '1024 x 1024'
+      payload.format = saved.inputParams.format || 'PNG'
+      payload.seed = saved.inputParams.seed || 0
+      if (saved.inputParams.vector) {
+        Object.assign(payload.vector, saved.inputParams.vector)
+      }
+    } else {
+      // 兼容旧数据：从 metadata 中恢复部分信息
+      if (saved.metadata?.generation) {
+        payload.text = saved.metadata.generation.text || ''
+        payload.prompt = saved.metadata.generation.prompt || ''
+        payload.negative = saved.metadata.generation.negative || ''
+        payload.resolution = saved.metadata.generation.resolution || '1024 x 1024'
+        payload.seed = saved.metadata.generation.seed || 0
+      }
+      if (saved.metadata?.params) {
+        Object.assign(payload.vector, {
+          preset: saved.metadata.params.preset || 'balanced',
+          color_precision: saved.metadata.params.color_precision || 5,
+          filter_speckle: saved.metadata.params.filter_speckle || 6,
+          corner_threshold: saved.metadata.params.corner_threshold || 45,
+          length_threshold: saved.metadata.params.length_threshold || 5,
+          layer_difference: saved.metadata.params.layer_difference || 10,
+          scale: saved.metadata.params.scale || 2
+        })
+      }
+    }
   }
 
   activeTab.value = 'output'
