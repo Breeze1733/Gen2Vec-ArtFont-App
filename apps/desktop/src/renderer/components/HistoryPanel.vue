@@ -7,14 +7,22 @@
     </div>
 
     <div class="sidebar-content">
-      <article v-for="item in logs" :key="item.id" class="log-item">
-        <div class="log-thumb" aria-hidden="true"></div>
+      <article
+        v-for="item in logs"
+        :key="item.id"
+        :class="['log-item', { clickable: item.status !== '运行中' }]"
+        @click="item.status !== '运行中' && $emit('restore-history', item.id)"
+      >
+        <div class="log-thumb" aria-hidden="true">
+          <img v-if="item.thumb" :src="item.thumb" alt="" />
+          <span v-else class="log-thumb-icon">{{ item.mode === '矢量化' ? '📐' : '🎨' }}</span>
+        </div>
         <div class="log-main">
           <h3>{{ item.title }}</h3>
           <p class="muted">{{ item.time }} • {{ item.status }} • {{ item.mode }}</p>
         </div>
         <div class="log-actions">
-          <button class="secondary-button tiny" type="button" @click="$emit('delete-history', item.id)">删除</button>
+          <button class="secondary-button tiny" type="button" @click.stop="$emit('delete-history', item.id)">删除</button>
         </div>
       </article>
       <p v-if="logs.length === 0" class="empty-log">暂无运行记录</p>
@@ -25,7 +33,7 @@
 <script setup>
 const props = defineProps({ logs: Array, currentFiles: { type: Array, required: false } })
 
-const emit = defineEmits(['export-history', 'delete-history'])
+const emit = defineEmits(['export-history', 'delete-history', 'restore-history'])
 </script>
 
 <style scoped>
@@ -70,11 +78,21 @@ const emit = defineEmits(['export-history', 'delete-history'])
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.68);
   margin-bottom: 8px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.log-item.clickable {
+  cursor: pointer;
+}
+
+.log-item.clickable:hover {
+  border-color: rgba(15, 118, 110, 0.3);
+  background: rgba(15, 118, 110, 0.04);
 }
 
 .log-thumb {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 4px;
   background: rgba(31, 41, 55, 0.04);
   display: flex;
@@ -83,6 +101,17 @@ const emit = defineEmits(['export-history', 'delete-history'])
   color: var(--text-muted);
   font-size: 10px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.log-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.log-thumb-icon {
+  font-size: 18px;
 }
 
 .log-main {

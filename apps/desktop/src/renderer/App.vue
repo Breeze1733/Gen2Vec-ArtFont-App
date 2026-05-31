@@ -97,6 +97,7 @@
         :current-files="currentFiles"
         @export-history="exportHistory"
         @delete-history="deleteHistoryItem"
+        @restore-history="restoreHistoryItem"
       />
     </div>
   </div>
@@ -109,6 +110,7 @@ import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import VectorParams from './components/VectorParams.vue'
 import { generateArtBitmap, saveFile, saveResults, vectorizeArtImage } from './api'
+import { saveResultToDB, loadResultFromDB, deleteResultFromDB, cleanupResults, makeThumbnail } from './utils/storage'
 
 // GPU 检测
 const gpuInfo = ref('检测中...')
@@ -282,7 +284,10 @@ function loadHistory() {
 }
 
 function saveHistory() {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(logs.value.slice(0, 50)))
+  const trimmed = logs.value.slice(0, 50)
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed))
+  // 清理 IndexedDB 中已不在历史列表的旧数据
+  cleanupResults(trimmed.map(l => l.id)).catch(() => {})
 }
 
 const validateForm = () => {
@@ -568,6 +573,39 @@ const startGeneration = async () => {
     if (mode.value !== 'batch') {
       task.status = '完成'
     }
+
+    // 持久化结果到 IndexedDB + 生成缩略图
+    try {
+      if (mode.value === 'batch') {
+        const successItems = batchItems.value.filter(b => b.status === 'success')
+        if (successItems.length > 0) {
+          const lastItem = successItems[successItems.length - 1]
+          task.thumb = await makeThumbnail(lastItem.preview || lastItem.original)
+          await saveResultToDB(task.id, {
+            batchMode: true,
+            items: batchItems.value.map(b => ({
+              index: b.index, text: b.text, prompt: b.prompt,
+              status: b.status, error: b.error,
+              original: b.original, transparent: b.transparent,
+              preview: b.preview, svg: b.svg, metadata: b.metadata,
+              stage1Ms: b.stage1Ms, stage2Ms: b.stage2Ms
+            }))
+          })
+        }
+      } else {
+        task.thumb = await makeThumbnail(result.preview || result.original)
+        await saveResultToDB(task.id, {
+          original: result.original,
+          transparent: result.transparent,
+          preview: result.preview,
+          svg: result.svg,
+          metadata: result.metadata
+        })
+      }
+    } catch (storageErr) {
+      console.warn('结果持久化失败（不影响正常使用）:', storageErr)
+    }
+
     saveHistory()
   } catch (err) {
     error.value = err?.message || '生成失败，请稍后重试。'
@@ -795,8 +833,54 @@ const saveAllResults = async () => {
   }
 }
 
-const deleteHistoryItem = (id) => {
+const deleteHistoryItem = async (id) => {
   logs.value = logs.value.filter((item) => item.id !== id)
+  await deleteResultFromDB(id)
   saveHistory()
+}
+
+const restoreHistoryItem = async (id) => {
+  const item = logs.value.find(l => l.id === id)
+  if (!item || item.status === '运行中') return
+
+  const saved = await loadResultFromDB(id)
+  if (!saved) {
+    error.value = '该记录的结果数据已丢失，无法恢复。'
+    return
+  }
+
+  // 恢复批量模式
+  if (saved.batchMode && saved.items) {
+    mode.value = 'batch'
+    batchItems.value = saved.items.map(b => ({ ...b }))
+    batchProgress.total = saved.items.length
+    batchProgress.completed = saved.items.filter(b => b.status === 'success').length
+    batchProgress.failed = saved.items.filter(b => b.status === 'failed').length
+    batchProgress.current = saved.items.length
+
+    const lastSuccess = [...saved.items].reverse().find(b => b.status === 'success')
+    if (lastSuccess) {
+      selectedBatchIndex.value = lastSuccess.index
+      result.original = lastSuccess.original || ''
+      result.transparent = lastSuccess.transparent || ''
+      result.preview = lastSuccess.preview || ''
+      result.image = lastSuccess.preview || ''
+      result.svg = lastSuccess.svg || ''
+      result.metadata = lastSuccess.metadata || null
+    }
+  } else {
+    // 恢复单条/矢量化模式
+    mode.value = item.mode === '矢量化' ? 'vectorize' : 'single'
+    result.original = saved.original || ''
+    result.transparent = saved.transparent || ''
+    result.preview = saved.preview || ''
+    result.image = saved.preview || ''
+    result.svg = saved.svg || ''
+    result.metadata = saved.metadata || null
+    batchItems.value = []
+    selectedBatchIndex.value = -1
+  }
+
+  activeTab.value = 'output'
 }
 </script>
