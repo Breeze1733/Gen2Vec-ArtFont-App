@@ -7,6 +7,12 @@ from pathlib import Path
 import pytest
 
 from app.generator import (
+    _DEFAULT_NEGATIVE,
+    _FLUX_BG_SUPPRESS,
+    _ZIMAGE_BG_SUPPRESS,
+    _build_flux_prompt,
+    _build_negative_prompt,
+    _build_zimage_prompt,
     _call_comfyui_api,
     _find_nodes_by_class,
     _load_workflow,
@@ -229,3 +235,116 @@ class TestGenerateArtwork:
         assert artifact.metadata["prompt"] == "晨曦之城"
         assert artifact.metadata["seed"] == 42
         assert artifact.metadata["resolution"] == "1024x1024"
+
+
+# ── Prompt template: background suppression ──
+
+
+class TestDefaultNegativePrompt:
+    """Verify _DEFAULT_NEGATIVE contains background-related terms."""
+
+    def test_contains_background_terms(self) -> None:
+        assert "complex background" in _DEFAULT_NEGATIVE
+        assert "scenery background" in _DEFAULT_NEGATIVE
+        assert "landscape background" in _DEFAULT_NEGATIVE
+        assert "indoor scene" in _DEFAULT_NEGATIVE
+        assert "outdoor scene" in _DEFAULT_NEGATIVE
+
+    def test_retains_original_quality_terms(self) -> None:
+        assert "broken strokes" in _DEFAULT_NEGATIVE
+        assert "missing strokes" in _DEFAULT_NEGATIVE
+        assert "wrong characters" in _DEFAULT_NEGATIVE
+        assert "garbled text" in _DEFAULT_NEGATIVE
+
+
+class TestBuildFluxPrompt:
+    """Verify _build_flux_prompt includes background suppression."""
+
+    def test_chinese_text_includes_bg_suppress(self) -> None:
+        result = _build_flux_prompt("测试文字", "neon style")
+        assert "plain solid background" in result
+        assert "no complex scene" in result
+
+    def test_english_text_includes_bg_suppress(self) -> None:
+        result = _build_flux_prompt("Hello World", "gold")
+        assert "plain solid background" in result
+
+    def test_digits_only_includes_bg_suppress(self) -> None:
+        result = _build_flux_prompt("123", "digital")
+        assert "plain solid background" in result
+
+    def test_background_suppress_comes_before_style(self) -> None:
+        result = _build_flux_prompt("测试", "neon style")
+        bg_pos = result.index("plain solid background")
+        style_pos = result.index("neon style")
+        assert bg_pos < style_pos, "背景抑制应在风格提示词之前"
+
+    def test_style_prompt_still_present(self) -> None:
+        result = _build_flux_prompt("测试", "neon style")
+        assert "neon style" in result
+
+    def test_empty_text_returns_style_only(self) -> None:
+        result = _build_flux_prompt("", "minimal")
+        assert result == "minimal"
+        assert "plain solid background" not in result
+
+
+class TestBuildZimagePrompt:
+    """Verify _build_zimage_prompt includes background suppression."""
+
+    def test_chinese_text_includes_bg_suppress(self) -> None:
+        result = _build_zimage_prompt("测试文字", "科技风")
+        assert "纯色背景" in result
+        assert "无复杂场景" in result
+
+    def test_english_text_includes_bg_suppress(self) -> None:
+        result = _build_zimage_prompt("Hello", "gold")
+        assert "纯色背景" in result
+
+    def test_background_suppress_comes_before_style(self) -> None:
+        result = _build_zimage_prompt("测试", "科技风")
+        bg_pos = result.index("纯色背景")
+        style_pos = result.index("科技风")
+        assert bg_pos < style_pos, "背景抑制应在风格提示词之前"
+
+    def test_style_prompt_still_present(self) -> None:
+        result = _build_zimage_prompt("测试", "科技风")
+        assert "科技风" in result
+
+    def test_empty_text_returns_style_only(self) -> None:
+        result = _build_zimage_prompt("", "minimal")
+        assert result == "minimal"
+        assert "纯色背景" not in result
+
+
+class TestBuildNegativePrompt:
+    """Verify _build_negative_prompt merging logic."""
+
+    def test_returns_default_when_empty(self) -> None:
+        result = _build_negative_prompt("")
+        assert result == _DEFAULT_NEGATIVE
+
+    def test_merges_user_negative(self) -> None:
+        result = _build_negative_prompt("extra term")
+        assert _DEFAULT_NEGATIVE in result
+        assert "extra term" in result
+        assert result.endswith("extra term")
+
+    def test_trims_user_input(self) -> None:
+        result = _build_negative_prompt("  padded  ")
+        assert "padded" in result
+
+
+# ── Module-level constants ──
+
+
+class TestBackgroundSuppressConstants:
+    """Verify background suppression constants are non-empty strings."""
+
+    def test_flux_bg_suppress_is_string(self) -> None:
+        assert isinstance(_FLUX_BG_SUPPRESS, str)
+        assert len(_FLUX_BG_SUPPRESS) > 0
+
+    def test_zimage_bg_suppress_is_string(self) -> None:
+        assert isinstance(_ZIMAGE_BG_SUPPRESS, str)
+        assert len(_ZIMAGE_BG_SUPPRESS) > 0
