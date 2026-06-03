@@ -57,7 +57,7 @@ Gen2Vec-ArtFont-App/
 │   │   ├── models/rembg/               # 离线 rembg ONNX 模型
 │   │   └── requirements.txt
 │   └── txt2img-api/                    # FastAPI：文本 → 位图生成
-│       ├── src/app/
+│       ├── app/
 │       │   ├── main.py                 # 路由：/healthz, POST /api/v1/txt2img
 │       │   ├── models.py               # Pydantic 模型（GenerationRequest/Response）
 │       │   └── generator.py            # ComfyUI 客户端 + Pillow 本地 stub 降级
@@ -104,7 +104,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 cd services/txt2img-api
 uv sync
 uv run txt2img-api
-# 或：uv run uvicorn app.main:app --host 0.0.0.0 --port 9001 --app-dir src
+# 或：uv run uvicorn app.main:app --host 0.0.0.0 --port 9001
 ```
 
 设置 `AUTO_START_COMFYUI=0` 可跳过自动启动 ComfyUI。ComfyUI 不可达时自动降级为本地 Pillow stub。
