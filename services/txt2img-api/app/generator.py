@@ -68,7 +68,11 @@ def _resolve_workflow_path(workflow_name: str = "") -> Path:
     if env_path:
         return Path(env_path).expanduser().resolve()
 
-    project_root = Path(__file__).resolve().parents[2]
+    # __file__ = .../app/generator.py → .parents[1] = .../txt2img-api/
+    # This is correct in both dev (project checkout) and PyInstaller-frozen
+    # layouts because frozen bundles lay out the package as `app/*.py` rooted
+    # at the service directory alongside the `workflows/` data folder.
+    project_root = Path(__file__).resolve().parents[1]
     workflows_dir = project_root / "workflows"
 
     if workflow_name:
