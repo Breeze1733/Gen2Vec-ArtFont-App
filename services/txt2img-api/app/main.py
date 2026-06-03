@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -17,6 +18,15 @@ from .generator import generate_artwork, warmup_comfyui_connection
 from .models import GenerationRequest, GenerationResponse
 
 logger = logging.getLogger(__name__)
+
+# ComfyUI portable bundle lives as a sibling of the running EXE (frozen) or
+# the service checkout root (dev). Keeping it out of `_MEIPASS` lets users
+# drop a 60 GB bundle next to the EXE without bloating the frozen binary.
+_ENV_COMFYUI_LAUNCHER_BAT = "COMFYUI_LAUNCHER_BAT"
+_COMFYUI_PORTABLE_DIRNAME = "ComfyUI_windows_portable_nvidia"
+_COMFYUI_PORTABLE_INNER = "ComfyUI_windows_portable"
+_GPU_BAT = "run_nvidia_gpu_fast_fp16_accumulation.bat"
+_CPU_BAT = "run_cpu.bat"
 
 app = FastAPI(
     title="txt2img-api",
@@ -49,10 +59,22 @@ def generate(payload: GenerationRequest) -> GenerationResponse:
 
 
 def run() -> None:
-    uvicorn.run("app.main:app", host="0.0.0.0", port=9001, reload=False)
+    """Entry point for ``txt2img-api`` console script (used by uv / pip)."""
+    uvicorn.run(app, host="0.0.0.0", port=9001, reload=False)
 
 
 # ── ComfyUI lifecycle ──
+
+
+def _get_executable_dir() -> Path:
+    """Return the directory containing the running binary.
+
+    * Frozen (PyInstaller): the folder that contains ``txt2img-backend.exe``.
+    * Dev: the ``txt2img-api/`` service checkout (where ``pyproject.toml`` lives).
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
 
 
 def _is_port_open(host: str, port: int, timeout: float = 0.6) -> bool:
@@ -63,11 +85,35 @@ def _is_port_open(host: str, port: int, timeout: float = 0.6) -> bool:
         return False
 
 
+def _has_nvidia_gpu() -> bool:
+    """Return True if an NVIDIA GPU + driver is reachable on this machine."""
+    nvidia_smi = shutil.which("nvidia-smi")
+    if nvidia_smi is None:
+        return False
+    try:
+        result = subprocess.run(
+            [nvidia_smi],
+            capture_output=True,
+            timeout=3.0,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def _find_embedded_python() -> Path | None:
-    """Locate the embedded Python bundled with ComfyUI portable."""
-    project_root = Path(__file__).resolve().parents[2]
+    """Locate the embedded Python bundled with the ComfyUI portable release.
+
+    Kept as a fallback path: when the user has the ``python_embeded`` layout
+    but not the ``.bat`` launchers, we can still spawn ComfyUI via
+    ``python.exe -s main.py`` directly.
+    """
     candidates = [
-        project_root / "ComfyUI_windows_portable_nvidia" / "ComfyUI_windows_portable" / "python_embeded" / "python.exe",
+        _get_executable_dir()
+        / _COMFYUI_PORTABLE_DIRNAME
+        / _COMFYUI_PORTABLE_INNER
+        / "python_embeded"
+        / "python.exe",
     ]
     for p in candidates:
         if p.exists():
@@ -75,27 +121,69 @@ def _find_embedded_python() -> Path | None:
     return None
 
 
+def _pick_comfyui_launcher_bat() -> Path:
+    """Choose the ComfyUI ``.bat`` launcher to spawn.
+
+    Resolution order:
+      1. ``COMFYUI_LAUNCHER_BAT`` env var (operator override, absolute path)
+      2. NVIDIA GPU detected → ``run_nvidia_gpu_fast_fp16_accumulation.bat``
+      3. Otherwise            → ``run_cpu.bat``
+    """
+    override = os.environ.get(_ENV_COMFYUI_LAUNCHER_BAT, "").strip()
+    if override:
+        bat_path = Path(override).expanduser().resolve()
+        if bat_path.exists():
+            return bat_path
+        raise FileNotFoundError(
+            f"COMFYUI_LAUNCHER_BAT is set to {bat_path!s} but the file does not exist"
+        )
+
+    portable_dir = (
+        _get_executable_dir() / _COMFYUI_PORTABLE_DIRNAME / _COMFYUI_PORTABLE_INNER
+    )
+    if not portable_dir.is_dir():
+        raise FileNotFoundError(
+            f"ComfyUI portable bundle not found at {portable_dir!s}. "
+            f"Place the {_COMFYUI_PORTABLE_DIRNAME}/ folder next to the running EXE "
+            f"(or set {_ENV_COMFYUI_LAUNCHER_BAT} to a custom .bat)."
+        )
+
+    if _has_nvidia_gpu():
+        bat = portable_dir / _GPU_BAT
+        if bat.exists():
+            return bat
+        logger.warning("NVIDIA GPU detected but %s missing — falling back to CPU", bat)
+    bat = portable_dir / _CPU_BAT
+    if bat.exists():
+        return bat
+    raise FileNotFoundError(
+        f"Neither {_GPU_BAT} nor {_CPU_BAT} found under {portable_dir!s}"
+    )
+
+
 def _start_comfyui_background(
     host: str = "127.0.0.1",
     port: int = 8188,
     timeout: float = 120.0,
 ) -> None:
-    """Launch ComfyUI in a hidden process and wait for it to be ready."""
-    python_exe = _find_embedded_python()
-    if python_exe is None:
-        logger.warning("ComfyUI embedded Python not found — skipping auto-start")
-        return
+    """Launch ComfyUI in a hidden process and wait for it to be ready.
 
-    main_py = python_exe.parents[1] / "ComfyUI" / "main.py"
-    if not main_py.exists():
-        logger.warning("ComfyUI main.py not found at %s — skipping auto-start", main_py)
+    The bundled ``.bat`` launcher is preferred because it sets up the
+    embedded Python path, environment variables, and fp16 fast-mode flags
+    that match the portable distribution's expectations.
+    """
+    try:
+        bat = _pick_comfyui_launcher_bat()
+    except FileNotFoundError as exc:
+        logger.warning("ComfyUI launcher not found — skipping auto-start (%s)", exc)
         return
 
     def _runner():
         try:
-            logger.info("Starting ComfyUI (headless): %s", main_py)
+            logger.info("Starting ComfyUI via launcher: %s", bat)
             proc = subprocess.Popen(
-                [str(python_exe), "-s", str(main_py), "--fast", "fp16_accumulation"],
+                [str(bat)],
+                shell=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
