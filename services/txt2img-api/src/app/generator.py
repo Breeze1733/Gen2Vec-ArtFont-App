@@ -75,7 +75,7 @@ def _resolve_workflow_path(workflow_name: str = "") -> Path:
         name = workflow_name if workflow_name.endswith(".json") else f"{workflow_name}.json"
         return workflows_dir / name
 
-    return workflows_dir / "flux_schnell.json"
+    return workflows_dir / "txt2img_api.json"
 
 
 def _load_workflow(path: Path) -> dict:
