@@ -20,7 +20,7 @@ requires = ["hatchling>=1.26.3"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/app"]
+packages = ["app"]
 
 [dependency-groups]
 dev = [
