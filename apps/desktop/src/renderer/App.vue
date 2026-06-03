@@ -83,8 +83,7 @@
           :selected-batch-index="selectedBatchIndex"
           :running="running"
           :stage-progress="stageProgress"
-          @download="downloadOutput"
-          @save-all="saveAllResults"
+          @open-output-dir="openOutputDirectory"
           @open-svg="handleOpenSvg"
           @select-batch-item="selectBatchItem"
         />
@@ -96,7 +95,6 @@
       <HistoryPanel
         :logs="logs"
         :current-files="currentFiles"
-        @export-history="exportHistory"
         @delete-history="deleteHistoryItem"
         @restore-history="restoreHistoryItem"
       />
@@ -110,8 +108,8 @@ import GenerationForm from './components/GenerationForm.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import VectorParams from './components/VectorParams.vue'
-import { generateArtBitmap, saveFile, saveResults, vectorizeArtImage } from './api'
-import { saveResultToDB, loadResultFromDB, deleteResultFromDB, cleanupResults, makeThumbnail } from './utils/storage'
+import { generateArtBitmap, openPath, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, vectorizeArtImage, writeTaskArtifacts } from './api'
+import { makeThumbnail } from './utils/storage'
 
 // GPU 检测
 const gpuInfo = ref('检测中...')
@@ -236,6 +234,7 @@ const vectorPresets = {
 }
 
 const HISTORY_KEY = 'art-text-generator-history'
+const HISTORY_DIR_KEY = 'art-text-generator-history-dirs'
 
 const mode = ref('single')
 const running = ref(false)
@@ -280,8 +279,13 @@ const stageProgress = reactive({
 let progressTimer = null
 
 const currentFiles = ref([])
+const currentTaskDir = ref('')
+const currentOutputRoot = ref('')
+const currentTaskPaths = ref(null)
 
 const logs = ref(loadHistory())
+
+const historyDirs = ref(loadHistoryDirs())
 
 function loadHistory() {
   try {
@@ -291,20 +295,39 @@ function loadHistory() {
   }
 }
 
+function loadHistoryDirs() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_DIR_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+
 function saveHistory() {
   const trimmed = logs.value.slice(0, 50)
   localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed))
+  localStorage.setItem(HISTORY_DIR_KEY, JSON.stringify(historyDirs.value || {}))
 }
 
-// 保存历史 + 清理 IndexedDB 孤立数据（仅在确认写入成功后调用）
-async function saveHistoryAndCleanup() {
+function setHistoryDir(id, payload) {
+  historyDirs.value = { ...historyDirs.value, [String(id)]: payload }
+  localStorage.setItem(HISTORY_DIR_KEY, JSON.stringify(historyDirs.value))
+}
+
+function getHistoryDir(id) {
+  return historyDirs.value?.[String(id)] || null
+}
+
+function deleteHistoryDir(id) {
+  const next = { ...historyDirs.value }
+  delete next[String(id)]
+  historyDirs.value = next
+  localStorage.setItem(HISTORY_DIR_KEY, JSON.stringify(next))
+}
+
+// 仅写入 localStorage：历史记录列表 + 任务目录映射
+function persistHistory() {
   saveHistory()
-  const validIds = logs.value.slice(0, 50).map(l => l.id)
-  try {
-    await cleanupResults(validIds)
-  } catch (err) {
-    console.warn('[history] 清理旧数据失败:', err)
-  }
 }
 
 const validateForm = () => {
@@ -379,6 +402,9 @@ const startGeneration = async () => {
   result.original = ''
   result.preview = ''
   result.transparent = ''
+  currentTaskDir.value = ''
+  currentOutputRoot.value = ''
+  currentTaskPaths.value = null
   resetStageProgress()
   batchItems.value = []
   batchProgress.current = 0
@@ -388,10 +414,12 @@ const startGeneration = async () => {
   selectedBatchIndex.value = -1
 
   const taskTitle = mode.value === 'single' ? payload.text.trim() : mode.value === 'batch' ? '批量任务' : '图片矢量化'
+  const taskStartedAt = new Date().toISOString()
   const task = {
     id: Date.now(),
     title: taskTitle,
-    time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+    startedAt: taskStartedAt,
+    time: new Date(taskStartedAt).toLocaleTimeString('zh-CN', { hour12: false }),
     status: '运行中',
     mode: mode.value === 'single' ? '单条' : mode.value === 'batch' ? '批量' : '矢量化'
   }
@@ -405,12 +433,27 @@ const startGeneration = async () => {
     let imageName = null
     let stage1Duration = 0
     let stage2Duration = 0
+    let taskInfo = null
 
     // 准备上传图片（仅在 vectorize 模式）
     if (mode.value === 'vectorize' && payload.imageFile) {
       imageBase64 = await fileToDataUrl(payload.imageFile)
       imageName = payload.imageFile.name
       result.original = imageBase64
+      taskInfo = await prepareOutputTask({ mode: 'vectorize', index: 1, text: stripExtension(imageName) || 'uploaded-image', seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: false })
+      await writeTaskArtifacts({
+        outputRoot: taskInfo.outputRoot,
+        taskDir: taskInfo.taskDir,
+        taskName: taskInfo.taskName,
+        paths: taskInfo.paths,
+        artifacts: { original: imageBase64 },
+        metadata: null,
+        runLog: buildRunLog({ task, taskInfo, modeName: 'vectorize', seed: payload.seed, status: 'vectorizing', usesTxt2Img: false }),
+        usesTxt2Img: false
+      })
+      currentTaskDir.value = taskInfo.taskDir
+      currentOutputRoot.value = taskInfo.outputRoot
+      currentTaskPaths.value = taskInfo.paths
     }
 
     if (mode.value === 'single') {
@@ -433,6 +476,21 @@ const startGeneration = async () => {
       result.original = imageBase64
       finishStageProgress('stage1')
 
+      taskInfo = await prepareOutputTask({ mode: 'single', index: 1, text: payload.text.trim(), seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: true })
+      await writeTaskArtifacts({
+        outputRoot: taskInfo.outputRoot,
+        taskDir: taskInfo.taskDir,
+        taskName: taskInfo.taskName,
+        paths: taskInfo.paths,
+        artifacts: { original: imageBase64 },
+        metadata: null,
+        runLog: buildRunLog({ task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, stage1Duration, status: 'vectorizing', usesTxt2Img: true }),
+        usesTxt2Img: true
+      })
+      currentTaskDir.value = taskInfo.taskDir
+      currentOutputRoot.value = taskInfo.outputRoot
+      currentTaskPaths.value = taskInfo.paths
+
       // Stage 2: 矢量化（后端 B）
       startStageProgress('stage2')
       const payloadB = {
@@ -444,11 +502,14 @@ const startGeneration = async () => {
         format: payload.format,
         seed: payload.seed,
         vector: { ...payload.vector },
-        image_base64: imageBase64,
+        __timeoutMs: 120000,
+        generated_image: { file_path: taskInfo.paths.original },
+        image_base64: taskInfo?.paths?.original ? undefined : imageBase64,
         image_name: imageName
       }
       const t2 = Date.now()
-      const respB = await vectorizeArtImage(payloadB)
+      const vectorized = await vectorizeWithPathFallback(payloadB, imageBase64)
+      const respB = vectorized.response
       stage2Duration = Date.now() - t2
 
       result.transparent = respB.transparent_png || ''
@@ -465,16 +526,18 @@ const startGeneration = async () => {
       }
 
       // 构建文件列表
-      const base = getFileNameBase()
-      const files = []
-      if (imageBase64) files.push({ key: 'original', name: `${base}_original.png`, data: imageBase64, isText: false })
-      if (result.transparent) files.push({ key: 'transparent', name: `${base}_transparent.png`, data: result.transparent, isText: false })
-      if (result.preview) files.push({ key: 'preview', name: `${base}_preview.png`, data: result.preview, isText: false })
-      if (result.svg) files.push({ key: 'svg', name: `${base}_vector.svg`, data: result.svg, isText: true })
-      if (result.metadata) files.push({ key: 'metadata', name: `${base}_metadata.json`, data: JSON.stringify(result.metadata, null, 2), isText: true })
-      const logText = `task_id=${task.id}\nmode=single\ntext=${payload.text}\nseed=${payload.seed}\nstage1_ms=${stage1Duration}\nstage2_ms=${stage2Duration}\nstatus=success`
-      files.push({ key: 'log', name: `${base}_log.log`, data: logText, isText: true })
-      currentFiles.value = files
+      const finalMetadata = augmentMetadata(result.metadata, { task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, usesTxt2Img: true })
+      result.metadata = finalMetadata
+      const runLog = buildRunLog({ task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, stage1Duration, stage2Duration, status: 'success', usesTxt2Img: true })
+      const writeResult = await writeCurrentTask({
+        task,
+        taskInfo,
+        artifacts: { original: imageBase64, transparent: result.transparent, preview: result.preview, svg: result.svg },
+        metadata: finalMetadata,
+        runLog,
+        usesTxt2Img: true
+      })
+      currentFiles.value = Object.entries(writeResult.paths || {}).map(([key, value]) => ({ key, name: value, data: value, isPath: true }))
 
     } else if (mode.value === 'vectorize') {
       // 直接调用后端 B
@@ -485,11 +548,14 @@ const startGeneration = async () => {
         format: payload.format,
         seed: payload.seed,
         vector: { ...payload.vector },
-        image_base64: imageBase64,
+        __timeoutMs: 120000,
+        image_path: taskInfo?.paths?.original,
+        image_base64: taskInfo?.paths?.original ? undefined : imageBase64,
         image_name: imageName
       }
       const t2 = Date.now()
-      const respB = await vectorizeArtImage(payloadB)
+      const vectorized = await vectorizeWithPathFallback(payloadB, imageBase64)
+      const respB = vectorized.response
       stage2Duration = Date.now() - t2
 
       result.transparent = respB.transparent_png || ''
@@ -499,16 +565,18 @@ const startGeneration = async () => {
       result.metadata = respB.metadata || null
       finishStageProgress('stage2')
 
-      const base = getFileNameBase()
-      const files = []
-      if (result.original) files.push({ key: 'original', name: `${base}_original.png`, data: result.original, isText: false })
-      if (result.transparent) files.push({ key: 'transparent', name: `${base}_transparent.png`, data: result.transparent, isText: false })
-      if (result.preview) files.push({ key: 'preview', name: `${base}_preview.png`, data: result.preview, isText: false })
-      if (result.svg) files.push({ key: 'svg', name: `${base}_vector.svg`, data: result.svg, isText: true })
-      if (result.metadata) files.push({ key: 'metadata', name: `${base}_metadata.json`, data: JSON.stringify(result.metadata, null, 2), isText: true })
-      const logText = `task_id=${task.id}\nmode=vectorize\nseed=${payload.seed}\nstage2_ms=${stage2Duration}\nstatus=success`
-      files.push({ key: 'log', name: `${base}_log.log`, data: logText, isText: true })
-      currentFiles.value = files
+      const finalMetadata = augmentMetadata(result.metadata, { task, taskInfo, modeName: 'vectorize', seed: payload.seed, usesTxt2Img: false })
+      result.metadata = finalMetadata
+      const runLog = buildRunLog({ task, taskInfo, modeName: 'vectorize', seed: payload.seed, stage2Duration, status: 'success', usesTxt2Img: false })
+      const writeResult = await writeCurrentTask({
+        task,
+        taskInfo,
+        artifacts: { original: result.original, transparent: result.transparent, preview: result.preview, svg: result.svg },
+        metadata: finalMetadata,
+        runLog,
+        usesTxt2Img: false
+      })
+      currentFiles.value = Object.entries(writeResult.paths || {}).map(([key, value]) => ({ key, name: value, data: value, isPath: true }))
 
     } else if (mode.value === 'batch') {
       // 批量处理：逐条执行，支持进度展示和单条错误容错
@@ -519,6 +587,13 @@ const startGeneration = async () => {
       batchProgress.completed = 0
       batchProgress.failed = 0
       selectedBatchIndex.value = -1
+
+      const batchTaskInfo = await prepareOutputTask({ mode: 'batch-batch', index: 0, text: 'batch-run', seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: false })
+      const batchSummaryDir = batchTaskInfo.taskDir
+      currentTaskDir.value = batchTaskInfo.taskDir
+      currentOutputRoot.value = batchTaskInfo.outputRoot
+      currentTaskPaths.value = { ...batchTaskInfo.paths, summary: path.join(batchSummaryDir, 'batch_summary.csv') }
+      const batchSummaryPath = path.join(batchSummaryDir, 'batch_summary.csv')
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]
@@ -549,6 +624,17 @@ const startGeneration = async () => {
           const t1 = Date.now()
           const respA = await generateArtBitmap(payloadA)
           const s1Ms = Date.now() - t1
+          const itemTaskInfo = await prepareOutputTask({ mode: 'batch', index: i + 1, text: text || `item-${i + 1}`, seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: true, summaryDir: batchSummaryDir })
+          await writeTaskArtifacts({
+            outputRoot: itemTaskInfo.outputRoot,
+            taskDir: itemTaskInfo.taskDir,
+            taskName: itemTaskInfo.taskName,
+            paths: itemTaskInfo.paths,
+            artifacts: { original: respA.png },
+            metadata: null,
+            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, status: 'vectorizing', usesTxt2Img: true }),
+            usesTxt2Img: true
+          })
 
           // Stage 2: 矢量化
           const payloadB = {
@@ -556,11 +642,14 @@ const startGeneration = async () => {
             negative: payload.negative || '',
             resolution: payload.resolution, format: payload.format, seed: payload.seed,
             vector: { ...payload.vector },
-            image_base64: respA.png,
+            __timeoutMs: 120000,
+            generated_image: { file_path: itemTaskInfo.paths.original },
+            image_base64: itemTaskInfo?.paths?.original ? undefined : respA.png,
             image_name: respA.image_name || `${safeName(text || 'batch')}-orig.png`
           }
           const t2 = Date.now()
-          const respB = await vectorizeArtImage(payloadB)
+          const vectorized = await vectorizeWithPathFallback(payloadB, respA.png)
+          const respB = vectorized.response
           const s2Ms = Date.now() - t2
 
           // 更新条目结果
@@ -573,10 +662,26 @@ const startGeneration = async () => {
           item.metadata = respB.metadata || null
           item.stage1Ms = s1Ms
           item.stage2Ms = s2Ms
+          item.taskDir = itemTaskInfo.taskDir
+          item.outputRoot = itemTaskInfo.outputRoot
+          item.taskName = itemTaskInfo.taskName
+          item.paths = itemTaskInfo.paths
           if (item.metadata) {
             item.metadata.generation = item.metadata.generation || {}
             item.metadata.generation.duration_ms = s1Ms
           }
+          item.metadata = augmentMetadata(item.metadata, { task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, usesTxt2Img: true })
+          await writeTaskArtifacts({
+            outputRoot: itemTaskInfo.outputRoot,
+            taskDir: itemTaskInfo.taskDir,
+            taskName: itemTaskInfo.taskName,
+            paths: itemTaskInfo.paths,
+            artifacts: { original: item.original, transparent: item.transparent, preview: item.preview, svg: item.svg },
+            metadata: item.metadata,
+            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, stage2Duration: s2Ms, status: 'success', usesTxt2Img: true }),
+            usesTxt2Img: true,
+            summaryRow: { ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: 'success', text, prompt, seed: payload.seed }), summary_path: batchSummaryPath }
+          })
 
           batchProgress.completed++
 
@@ -588,29 +693,39 @@ const startGeneration = async () => {
           result.image = item.preview
           result.svg = item.svg
           result.metadata = item.metadata
+          currentTaskDir.value = item.taskDir || ''
+          currentOutputRoot.value = item.outputRoot || ''
+          currentTaskPaths.value = item.paths || null
         } catch (itemErr) {
           // 单条失败不中断整批
           const item = batchItems.value[i]
           item.status = 'failed'
           item.error = itemErr?.message || '生成失败'
+          if (item.taskDir) {
+            const failedInfo = { taskDir: item.taskDir, outputRoot: item.outputRoot, taskName: item.taskName, paths: { ...item.paths, summary: batchSummaryPath, summaryDir: batchSummaryDir } }
+            await writeFailedTask({
+              task,
+              taskInfo: failedInfo,
+              modeName: 'batch',
+              text,
+              prompt,
+              seed: payload.seed,
+              errorMessage: item.error,
+              usesTxt2Img: true,
+              stage1Duration: item.stage1Ms || 0,
+              stage2Duration: item.stage2Ms || 0
+            })
+          }
           batchProgress.failed++
         }
       }
 
-      // 构建文件列表（汇总所有成功条目）
-      const base = getFileNameBase()
+      // 构建文件列表（汇总所有成功条目的任务目录）
       const files = []
       const successItems = batchItems.value.filter(b => b.status === 'success')
       successItems.forEach((b, idx) => {
-        const suffix = successItems.length > 1 ? `_item${idx + 1}` : ''
-        if (b.original) files.push({ key: `original${suffix}`, name: `${base}${suffix}_original.png`, data: b.original, isText: false })
-        if (b.transparent) files.push({ key: `transparent${suffix}`, name: `${base}${suffix}_transparent.png`, data: b.transparent, isText: false })
-        if (b.preview) files.push({ key: `preview${suffix}`, name: `${base}${suffix}_preview.png`, data: b.preview, isText: false })
-        if (b.svg) files.push({ key: `svg${suffix}`, name: `${base}${suffix}_vector.svg`, data: b.svg, isText: true })
-        if (b.metadata) files.push({ key: `metadata${suffix}`, name: `${base}${suffix}_metadata.json`, data: JSON.stringify(b.metadata, null, 2), isText: true })
+        files.push({ key: `task${idx + 1}`, name: b.taskName || `task_${idx + 1}`, data: b.taskDir || '', isPath: true })
       })
-      const logText = `task_id=${task.id}\nmode=batch\ntotal=${lines.length}\ncompleted=${batchProgress.completed}\nfailed=${batchProgress.failed}\nstatus=completed`
-      files.push({ key: 'log', name: `${base}_log.log`, data: logText, isText: true })
       currentFiles.value = files
 
       // 设置最终任务状态
@@ -628,25 +743,21 @@ const startGeneration = async () => {
       task.status = '完成'
     }
 
-    // 持久化结果到 IndexedDB + 生成缩略图
-    // 注意：IndexedDB 无法克隆 Vue 响应式对象(Proxy)，需要转为普通对象
+    // 持久化任务目录路径到 localStorage + IndexedDB（双保险）
+    // 任务目录是真正的产物源；历史恢复时直接从文件读取即可。
     try {
+      console.log('[save] currentTaskDir=', currentTaskDir.value, 'paths=', currentTaskPaths.value)
+      let dirRecord = null
       if (mode.value === 'batch') {
         const successItems = batchItems.value.filter(b => b.status === 'success')
         if (successItems.length > 0) {
           const lastItem = successItems[successItems.length - 1]
           task.thumb = await makeThumbnail(lastItem.preview || lastItem.original)
-          console.log('[save] 保存批量结果到 IndexedDB, task.id:', task.id, '类型:', typeof task.id)
-          await saveResultToDB(task.id, {
-            batchMode: true,
-            items: JSON.parse(JSON.stringify(batchItems.value.map(b => ({
-              index: b.index, text: b.text, prompt: b.prompt,
-              status: b.status, error: b.error,
-              original: b.original, transparent: b.transparent,
-              preview: b.preview, svg: b.svg, metadata: b.metadata,
-              stage1Ms: b.stage1Ms, stage2Ms: b.stage2Ms
-            })))),
-            // 保存批量模式的全局输入参数
+          dirRecord = {
+            taskDir: currentTaskDir.value,
+            outputRoot: currentOutputRoot.value,
+            taskName: task.taskName || (currentTaskDir.value ? path.basename(currentTaskDir.value) : ''),
+            paths: currentTaskPaths.value,
             inputParams: {
               mode: 'batch',
               batch: payload.batch,
@@ -656,18 +767,15 @@ const startGeneration = async () => {
               seed: payload.seed,
               vector: JSON.parse(JSON.stringify(payload.vector))
             }
-          })
+          }
         }
       } else {
         task.thumb = await makeThumbnail(result.preview || result.original)
-        console.log('[save] 保存单条结果到 IndexedDB, task.id:', task.id, '类型:', typeof task.id)
-        await saveResultToDB(task.id, {
-          original: result.original,
-          transparent: result.transparent,
-          preview: result.preview,
-          svg: result.svg,
-          metadata: JSON.parse(JSON.stringify(result.metadata)),
-          // 保存输入参数，用于恢复输入面板
+        dirRecord = {
+          taskDir: currentTaskDir.value,
+          outputRoot: currentOutputRoot.value,
+          taskName: task.taskName || (currentTaskDir.value ? path.basename(currentTaskDir.value) : ''),
+          paths: currentTaskPaths.value,
           inputParams: {
             mode: mode.value,
             text: payload.text,
@@ -678,17 +786,39 @@ const startGeneration = async () => {
             seed: payload.seed,
             vector: JSON.parse(JSON.stringify(payload.vector))
           }
-        })
+        }
+      }
+
+      if (dirRecord && dirRecord.taskDir && dirRecord.paths) {
+        setHistoryDir(task.id, dirRecord)
+      } else {
+        console.warn('[save] 跳过持久化：taskDir 或 paths 为空')
       }
     } catch (storageErr) {
       console.error('结果持久化失败:', storageErr)
       error.value = `结果保存失败: ${storageErr.message}`
     }
 
-    await saveHistoryAndCleanup()
+    persistHistory()
   } catch (err) {
     error.value = err?.message || '生成失败，请稍后重试。'
     task.status = '失败'
+    try {
+      await writeFailedTask({
+        task,
+        taskInfo,
+        modeName: mode.value,
+        text: payload.text,
+        prompt: payload.prompt,
+        seed: payload.seed,
+        errorMessage: error.value,
+        usesTxt2Img: mode.value !== 'vectorize',
+        stage1Duration,
+        stage2Duration
+      })
+    } catch (logErr) {
+      console.error('失败日志写入失败:', logErr)
+    }
     saveHistory()
   } finally {
     running.value = false
@@ -704,6 +834,165 @@ const fileToDataUrl = (file) =>
     reader.onerror = () => reject(new Error('图片读取失败，请重试'))
     reader.readAsDataURL(file)
   })
+
+const pathToDataUrl = async (filePath, mime = 'image/png') => {
+  if (!filePath) return ''
+  try {
+    return await readOutputFile({ filePath, encoding: 'dataUrl', mime })
+  } catch (err) {
+    console.warn('读取本地文件失败:', err)
+    return ''
+  }
+}
+
+const readTextPath = async (filePath) => {
+  if (!filePath) return ''
+  try {
+    return await readOutputFile({ filePath, encoding: 'text' })
+  } catch (err) {
+    console.warn('读取本地文本失败:', err)
+    return ''
+  }
+}
+
+const buildRunLog = ({ task, taskInfo, modeName, text = '', prompt = '', seed = 0, stage1Duration = 0, stage2Duration = 0, status = 'success', error = '', usesTxt2Img = false }) => {
+  const paths = taskInfo?.paths || {}
+  return [
+    `task_id=${task?.id || ''}`,
+    `task_name=${taskInfo?.taskName || ''}`,
+    `mode=${modeName}`,
+    `text=${text}`,
+    `prompt=${prompt}`,
+    `seed=${seed}`,
+    `stage1_ms=${stage1Duration}`,
+    `stage2_ms=${stage2Duration}`,
+    `uses_txt2img=${usesTxt2Img}`,
+    `task_dir=${taskInfo?.taskDir || ''}`,
+    `original_path=${paths.original || ''}`,
+    `transparent_path=${paths.transparent || ''}`,
+    `result_svg_path=${paths.svg || ''}`,
+    `preview_path=${paths.preview || ''}`,
+    `metadata_path=${paths.metadata || ''}`,
+    `status=${status}`,
+    error ? `error=${error}` : ''
+  ].filter(Boolean).join('\n')
+}
+
+const augmentMetadata = (metadata, { task, taskInfo, modeName, text = '', prompt = '', seed = 0, usesTxt2Img = false }) => ({
+  ...(metadata || {}),
+  schema_version: metadata?.schema_version || 1,
+  task_id: String(task?.id || ''),
+  task_name: taskInfo?.taskName || '',
+  mode: modeName,
+  output_dir: taskInfo?.taskDir || '',
+  generation: {
+    ...(metadata?.generation || {}),
+    text: metadata?.generation?.text || text,
+    prompt: metadata?.generation?.prompt || prompt,
+    seed: metadata?.generation?.seed ?? seed
+  },
+  paths: taskInfo?.paths
+    ? {
+        original: taskInfo.paths.original,
+        transparent: taskInfo.paths.transparent,
+        svg: taskInfo.paths.svg,
+        preview: taskInfo.paths.preview,
+        metadata: taskInfo.paths.metadata,
+        log: taskInfo.paths.log
+      }
+    : {
+        original: 'original.png',
+        transparent: 'transparent.png',
+        svg: 'result.svg',
+        preview: 'preview.png',
+        metadata: 'metadata.json',
+        log: 'run.log'
+      },
+  workflow_paths: usesTxt2Img
+    ? {
+        workflow_api: 'workflows/workflow_api.json',
+        nodes: 'workflows/nodes.md',
+        model_dependencies: 'workflows/model_dependencies.json'
+      }
+    : null
+})
+
+const writeCurrentTask = async ({ task, taskInfo, artifacts, metadata, runLog, usesTxt2Img, summaryRow }) => {
+  const writeResult = await writeTaskArtifacts({
+    outputRoot: taskInfo.outputRoot,
+    taskDir: taskInfo.taskDir,
+    taskName: taskInfo.taskName,
+    paths: taskInfo.paths,
+    artifacts,
+    metadata,
+    runLog,
+    usesTxt2Img,
+    summaryRow
+  })
+  currentTaskDir.value = writeResult.taskDir
+  currentOutputRoot.value = writeResult.outputRoot
+  currentTaskPaths.value = writeResult.paths
+  task.outputDir = writeResult.outputRoot
+  task.taskDir = writeResult.taskDir
+  task.taskName = writeResult.taskName
+  task.summaryPath = writeResult.paths?.summary
+  return writeResult
+}
+
+const vectorizeWithPathFallback = async (payloadB, fallbackImageBase64) => {
+  try {
+    const response = await vectorizeArtImage(payloadB)
+    return { response, usedFallback: false, pathError: '' }
+  } catch (pathErr) {
+    if (!fallbackImageBase64) throw pathErr
+
+    console.warn('[vectorize] 路径通信失败，回退到 base64：', pathErr)
+    const fallbackPayload = {
+      ...payloadB,
+      image_path: undefined,
+      generated_image: undefined,
+      image_base64: fallbackImageBase64
+    }
+    const response = await vectorizeArtImage(fallbackPayload)
+    return { response, usedFallback: true, pathError: pathErr?.message || String(pathErr) }
+  }
+}
+
+const writeFailedTask = async ({ task, taskInfo, modeName, text = '', prompt = '', seed = 0, errorMessage = '', usesTxt2Img = false, stage1Duration = 0, stage2Duration = 0 }) => {
+  if (!taskInfo) return
+  const metadata = augmentMetadata({ error: errorMessage }, { task, taskInfo, modeName, text, prompt, seed, usesTxt2Img })
+  const summaryTarget = modeName === 'batch' ? taskInfo?.paths?.summary : null
+  await writeTaskArtifacts({
+    outputRoot: taskInfo.outputRoot,
+    taskDir: taskInfo.taskDir,
+    taskName: taskInfo.taskName,
+    paths: taskInfo.paths,
+    artifacts: {},
+    metadata,
+    runLog: buildRunLog({ task, taskInfo, modeName, text, prompt, seed, stage1Duration, stage2Duration, status: 'failed', error: errorMessage, usesTxt2Img }),
+    usesTxt2Img,
+    summaryRow: { ...buildSummaryRow({ task, taskInfo, modeName, status: 'failed', text, prompt, seed, error: errorMessage }), summary_path: summaryTarget }
+  })
+}
+
+const buildSummaryRow = ({ task, taskInfo, modeName, status = 'success', text = '', prompt = '', seed = 0, error = '' }) => ({
+  task_id: String(task?.id || ''),
+  task_name: taskInfo?.taskName || '',
+  mode: modeName,
+  status,
+  text,
+  prompt,
+  seed,
+  resolution: payload.resolution,
+  task_dir: taskInfo?.taskDir || '',
+  original_path: taskInfo?.paths?.original || '',
+  transparent_path: taskInfo?.paths?.transparent || '',
+  result_svg_path: taskInfo?.paths?.svg || '',
+  preview_path: taskInfo?.paths?.preview || '',
+  metadata_path: taskInfo?.paths?.metadata || '',
+  run_log_path: taskInfo?.paths?.log || '',
+  error
+})
 
 const downloadFile = (filename, blob) => {
   const url = URL.createObjectURL(blob)
@@ -839,6 +1128,9 @@ const resetForm = () => {
   result.original = ''
   result.preview = ''
   result.transparent = ''
+  currentTaskDir.value = ''
+  currentOutputRoot.value = ''
+  currentTaskPaths.value = null
   batchItems.value = []
   batchProgress.current = 0
   batchProgress.total = 0
@@ -858,12 +1150,9 @@ const selectBatchItem = (index) => {
   result.image = item.preview || ''
   result.svg = item.svg || ''
   result.metadata = item.metadata || null
-}
-
-const exportHistory = () => {
-  const data = JSON.stringify(logs.value, null, 2)
-  const blob = new Blob([data], { type: 'application/json;charset=utf-8' })
-  downloadFile('art-text-history.json', blob)
+  currentTaskDir.value = item.taskDir || ''
+  currentOutputRoot.value = item.outputRoot || ''
+  currentTaskPaths.value = item.paths || null
 }
 
 const saveAllResults = async () => {
@@ -915,109 +1204,136 @@ const saveAllResults = async () => {
   }
 }
 
+const openOutputDirectory = async () => {
+  if (currentTaskDir.value) {
+    await openPath(currentTaskDir.value)
+    return
+  }
+
+  if (!result.original && !result.transparent && !result.preview && !result.svg && !result.metadata) {
+    error.value = '当前没有可打开的输出目录。'
+    return
+  }
+
+  try {
+    const fallbackTask = { id: Date.now() }
+    const taskInfo = await prepareOutputTask({ mode: mode.value, index: 1, text: payload.text || getFileNameBase(), seed: payload.seed, startedAt: new Date().toISOString(), usesTxt2Img: mode.value !== 'vectorize' })
+    const metadata = augmentMetadata(result.metadata || {}, { task: fallbackTask, taskInfo, modeName: mode.value, text: payload.text, prompt: payload.prompt, seed: payload.seed, usesTxt2Img: mode.value !== 'vectorize' })
+    const writeResult = await writeTaskArtifacts({
+      outputRoot: taskInfo.outputRoot,
+      taskDir: taskInfo.taskDir,
+      taskName: taskInfo.taskName,
+      paths: taskInfo.paths,
+      artifacts: { original: result.original, transparent: result.transparent, preview: result.preview || result.image, svg: result.svg },
+      metadata,
+      runLog: buildRunLog({ task: fallbackTask, taskInfo, modeName: mode.value, text: payload.text, prompt: payload.prompt, seed: payload.seed, status: 'restored-export', usesTxt2Img: mode.value !== 'vectorize' }),
+      usesTxt2Img: mode.value !== 'vectorize',
+      summaryRow: buildSummaryRow({ task: fallbackTask, taskInfo, modeName: mode.value, status: 'restored-export', text: payload.text, prompt: payload.prompt, seed: payload.seed })
+    })
+    currentTaskDir.value = writeResult.taskDir
+    currentOutputRoot.value = writeResult.outputRoot
+    currentTaskPaths.value = writeResult.paths
+    await openPath(writeResult.taskDir)
+  } catch (err) {
+    error.value = err?.message || '打开输出目录失败。'
+  }
+}
+
 const deleteHistoryItem = async (id) => {
-  logs.value = logs.value.filter((item) => item.id !== id)
-  await deleteResultFromDB(id)
-  await saveHistoryAndCleanup()
+  const item = logs.value.find(l => l.id === id)
+  // 删除任务输出目录（如果存在）
+  const dirInfo = getHistoryDir(id)
+  const targetDir = dirInfo?.taskDir || item?.taskDir || null
+  if (targetDir) {
+    try {
+      await deleteOutputDir(targetDir)
+    } catch (err) {
+      console.warn('[history] 删除任务目录失败:', err)
+    }
+  }
+  logs.value = logs.value.filter((entry) => entry.id !== id)
+  deleteHistoryDir(id)
+  persistHistory()
 }
 
 const restoreHistoryItem = async (id) => {
   const item = logs.value.find(l => l.id === id)
   if (!item || item.status === '运行中') return
 
-  console.log('[restore] 尝试恢复记录:', { id, idType: typeof id, item })
-
-  const saved = await loadResultFromDB(id)
-  console.log('[restore] IndexedDB 返回:', saved ? '有数据' : '无数据', saved)
-
-  if (!saved) {
-    if (!item.thumb) {
-      // 旧记录（功能上线前创建的），从未存储过结果数据
-      error.value = '该记录创建于历史恢复功能上线前，无可用数据。请重新生成。'
-    } else {
-      // 有缩略图但结果数据丢失——异常情况
-      error.value = '该记录的结果数据已丢失，无法恢复。请重新生成。'
-    }
+  const saved = getHistoryDir(id)
+  if (!saved || !saved.taskDir || !saved.paths) {
+    error.value = '该记录的结果数据已丢失，请重新生成。'
     return
   }
 
-  // 恢复批量模式
-  if (saved.batchMode && saved.items) {
-    mode.value = 'batch'
-    batchItems.value = saved.items.map(b => ({ ...b }))
-    batchProgress.total = saved.items.length
-    batchProgress.completed = saved.items.filter(b => b.status === 'success').length
-    batchProgress.failed = saved.items.filter(b => b.status === 'failed').length
-    batchProgress.current = saved.items.length
+  const restoredMode = saved.inputParams?.mode || (item.mode === '矢量化' ? 'vectorize' : 'single')
 
-    const lastSuccess = [...saved.items].reverse().find(b => b.status === 'success')
-    if (lastSuccess) {
-      selectedBatchIndex.value = lastSuccess.index
-      result.original = lastSuccess.original || ''
-      result.transparent = lastSuccess.transparent || ''
-      result.preview = lastSuccess.preview || ''
-      result.image = lastSuccess.preview || ''
-      result.svg = lastSuccess.svg || ''
-      result.metadata = lastSuccess.metadata || null
-    }
+  // 新数据：{ taskDir, paths, inputParams } —— 任务目录是真正的产物源
+  if (saved.taskDir && saved.paths) {
+    try {
+      mode.value = restoredMode === 'vectorize' ? 'vectorize' : restoredMode === 'batch' ? 'batch' : 'single'
+      result.original = await pathToDataUrl(saved.paths.original)
+      result.transparent = await pathToDataUrl(saved.paths.transparent)
+      result.preview = await pathToDataUrl(saved.paths.preview)
+      result.image = result.preview
+      result.svg = await readTextPath(saved.paths.svg)
+      const metadataText = await readTextPath(saved.paths.metadata)
+      result.metadata = metadataText ? safeJsonParse(metadataText) : null
 
-    // 恢复批量模式的全局输入参数
-    if (saved.inputParams) {
-      payload.batch = saved.inputParams.batch || ''
-      payload.negative = saved.inputParams.negative || ''
-      payload.resolution = saved.inputParams.resolution || '1024 x 1024'
-      payload.format = saved.inputParams.format || 'PNG'
-      payload.seed = saved.inputParams.seed || 0
-      if (saved.inputParams.vector) {
-        Object.assign(payload.vector, saved.inputParams.vector)
-      }
-    }
-  } else {
-    // 恢复单条/矢量化模式
-    mode.value = item.mode === '矢量化' ? 'vectorize' : 'single'
-    result.original = saved.original || ''
-    result.transparent = saved.transparent || ''
-    result.preview = saved.preview || ''
-    result.image = saved.preview || ''
-    result.svg = saved.svg || ''
-    result.metadata = saved.metadata || null
-    batchItems.value = []
-    selectedBatchIndex.value = -1
+      currentTaskDir.value = saved.taskDir
+      currentOutputRoot.value = saved.outputRoot || ''
+      currentTaskPaths.value = saved.paths
 
-    // 恢复输入参数
-    if (saved.inputParams) {
-      payload.text = saved.inputParams.text || ''
-      payload.prompt = saved.inputParams.prompt || ''
-      payload.negative = saved.inputParams.negative || ''
-      payload.resolution = saved.inputParams.resolution || '1024 x 1024'
-      payload.format = saved.inputParams.format || 'PNG'
-      payload.seed = saved.inputParams.seed || 0
-      if (saved.inputParams.vector) {
-        Object.assign(payload.vector, saved.inputParams.vector)
-      }
-    } else {
-      // 兼容旧数据：从 metadata 中恢复部分信息
-      if (saved.metadata?.generation) {
-        payload.text = saved.metadata.generation.text || ''
-        payload.prompt = saved.metadata.generation.prompt || ''
-        payload.negative = saved.metadata.generation.negative || ''
-        payload.resolution = saved.metadata.generation.resolution || '1024 x 1024'
-        payload.seed = saved.metadata.generation.seed || 0
-      }
-      if (saved.metadata?.params) {
-        Object.assign(payload.vector, {
-          preset: saved.metadata.params.preset || 'balanced',
-          color_precision: saved.metadata.params.color_precision || vectorPresets.balanced.color_precision,
-          filter_speckle: saved.metadata.params.filter_speckle || vectorPresets.balanced.filter_speckle,
-          corner_threshold: saved.metadata.params.corner_threshold || vectorPresets.balanced.corner_threshold,
-          length_threshold: saved.metadata.params.length_threshold || vectorPresets.balanced.length_threshold,
-          layer_difference: saved.metadata.params.layer_difference || vectorPresets.balanced.layer_difference,
-          scale: saved.metadata.params.scale || 2
-        })
-      }
+      applyInputParamsToForm(saved.inputParams, restoredMode)
+      activeTab.value = 'output'
+      return
+    } catch (err) {
+      error.value = `恢复失败：${err?.message || '任务目录文件无法访问'}`
+      return
     }
   }
 
-  activeTab.value = 'output'
+  // 兜底（极少见）：老历史记录里仍有 base64 缓存 —— 把缓存填回 result，但任务目录不可用
+  if (saved.original || saved.transparent || saved.preview || saved.svg) {
+    mode.value = restoredMode === 'vectorize' ? 'vectorize' : restoredMode === 'batch' ? 'batch' : 'single'
+    result.original = saved.original || ''
+    result.transparent = saved.transparent || ''
+    result.preview = saved.preview || ''
+    result.image = result.preview
+    result.svg = saved.svg || ''
+    result.metadata = saved.metadata || null
+    currentTaskDir.value = ''
+    currentTaskPaths.value = null
+    applyInputParamsToForm(saved.inputParams, restoredMode)
+    activeTab.value = 'output'
+    return
+  }
+
+  error.value = '该记录的结果数据已丢失，请重新生成。'
+}
+
+const applyInputParamsToForm = (inputParams, mode) => {
+  if (!inputParams) return
+  if (mode === 'batch') {
+    payload.batch = inputParams.batch || ''
+    payload.negative = inputParams.negative || ''
+    payload.resolution = inputParams.resolution || '1024 x 1024'
+    payload.format = inputParams.format || 'PNG'
+    payload.seed = inputParams.seed || 0
+  } else {
+    payload.text = inputParams.text || ''
+    payload.prompt = inputParams.prompt || ''
+    payload.negative = inputParams.negative || ''
+    payload.resolution = inputParams.resolution || '1024 x 1024'
+    payload.format = inputParams.format || 'PNG'
+    payload.seed = inputParams.seed || 0
+  }
+  if (inputParams.vector) {
+    Object.assign(payload.vector, inputParams.vector)
+  }
+}
+
+const safeJsonParse = (text) => {
+  try { return JSON.parse(text) } catch { return null }
 }
 </script>

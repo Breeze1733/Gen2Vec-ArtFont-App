@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 // Exposed Electron API for renderer. Keep stable method names here and
 // document them in docs/electron-ipc.md.
-const API_VERSION = '1.0.0'
+const API_VERSION = '1.1.0'
 const API_METHODS = [
   'getPlatform',
   'getAppVersion',
@@ -11,6 +11,11 @@ const API_METHODS = [
   'generate',
   'saveFile',
   'saveResults',
+  'prepareOutputTask',
+  'writeTaskArtifacts',
+  'readOutputFile',
+  'deleteOutputDir',
+  'openPath',
   'notify',
   'openExternal'
 ]
@@ -37,6 +42,11 @@ contextBridge.exposeInMainWorld('artTextApp', {
   // File helpers
   saveFile: (options) => ipcRenderer.invoke('art-text/save-file', options),
   saveResults: (options) => ipcRenderer.invoke('art-text/save-results', options),
+  prepareOutputTask: (options) => ipcRenderer.invoke('art-text/prepare-output-task', options),
+  writeTaskArtifacts: (options) => ipcRenderer.invoke('art-text/write-task-artifacts', options),
+  readOutputFile: (options) => ipcRenderer.invoke('art-text/read-output-file', options),
+  deleteOutputDir: (targetPath) => ipcRenderer.invoke('art-text/delete-output-dir', targetPath),
+  openPath: (targetPath) => ipcRenderer.invoke('art-text/open-path', targetPath),
 
   // Misc
   notify: (options) => ipcRenderer.invoke('art-text/notify', options),

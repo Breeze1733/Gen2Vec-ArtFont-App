@@ -70,9 +70,9 @@
 
       <!-- 右栏：选中条目详情 -->
       <div class="batch-detail" v-if="selectedBatchIndex >= 0 && batchItems[selectedBatchIndex]?.status === 'success'">
+        <p class="section-kicker">Result #{{ selectedBatchIndex + 1 }}</p>
         <div class="result-header">
           <div>
-            <p class="section-kicker">Result #{{ selectedBatchIndex + 1 }}</p>
             <div class="title-row">
               <h2>{{ batchItems[selectedBatchIndex].text || '生成结果' }}</h2>
               <div class="bg-toggle">
@@ -90,12 +90,7 @@
             </div>
           </div>
           <div class="download-actions">
-            <button class="secondary-button small" type="button" :disabled="!result.original" @click="$emit('download', 'original')">原始图像</button>
-            <button class="secondary-button small" type="button" :disabled="!result.transparent" @click="$emit('download', 'transparent')">透明化图像</button>
-            <button class="secondary-button small" type="button" :disabled="!result.preview && !result.image" @click="$emit('download', 'preview')">矢量化预览</button>
-            <button class="secondary-button small" type="button" :disabled="!result.svg" @click="$emit('download', 'svg')">SVG</button>
-            <button class="secondary-button small" type="button" :disabled="!result.metadata" @click="$emit('download', 'json')">JSON</button>
-            <button class="primary-button small" type="button" :disabled="!hasResultContent" @click="$emit('save-all')">打包下载</button>
+            <button class="primary-button small" type="button" :disabled="!hasResultContent" @click="$emit('open-output-dir')">打开输出目录</button>
           </div>
         </div>
 
@@ -115,7 +110,6 @@
         </div>
 
         <div class="metrics-block" v-if="result.metadata">
-          <h3>处理指标</h3>
           <div class="metrics-grid">
             <table class="metrics-table">
               <thead><tr><th>耗时统计</th><th>数值</th></tr></thead>
@@ -164,9 +158,9 @@
 
     <!-- 非批量模式：原有单条布局 -->
     <template v-if="!isBatch">
+      <p class="section-kicker">Result</p>
       <div class="result-header">
         <div>
-          <p class="section-kicker">Result</p>
           <div class="title-row">
             <h2>生成结果</h2>
             <div class="bg-toggle">
@@ -184,12 +178,7 @@
           </div>
         </div>
         <div class="download-actions">
-          <button class="secondary-button small" type="button" :disabled="!result.original" @click="$emit('download', 'original')">原始图像</button>
-          <button class="secondary-button small" type="button" :disabled="!result.transparent" @click="$emit('download', 'transparent')">透明化图像</button>
-          <button class="secondary-button small" type="button" :disabled="!result.preview && !result.image" @click="$emit('download', 'preview')">矢量化预览</button>
-          <button class="secondary-button small" type="button" :disabled="!result.svg" @click="$emit('download', 'svg')">SVG</button>
-          <button class="secondary-button small" type="button" :disabled="!result.metadata" @click="$emit('download', 'json')">JSON</button>
-          <button class="primary-button small" type="button" :disabled="!hasResultContent" @click="$emit('save-all')">打包下载</button>
+          <button class="primary-button small" type="button" :disabled="!hasResultContent" @click="$emit('open-output-dir')">打开输出目录</button>
         </div>
       </div>
 
@@ -230,7 +219,6 @@
       </div>
 
       <div class="metrics-block" v-if="result.metadata">
-        <h3>处理指标</h3>
         <div class="metrics-grid">
           <table class="metrics-table">
             <thead><tr><th>耗时统计</th><th>数值</th></tr></thead>
@@ -285,7 +273,7 @@ const props = defineProps({
   stageProgress: { type: Object, default: () => ({ stage1: { active: false, percent: 0 }, stage2: { active: false, percent: 0 } }) }
 })
 
-const emit = defineEmits(['download', 'save-all', 'open-svg', 'select-batch-item'])
+const emit = defineEmits(['open-output-dir', 'open-svg', 'select-batch-item'])
 
 const previewBg = ref('white')  // 'white' | 'black'
 
@@ -320,6 +308,27 @@ const shouldShowPreviewGrid = computed(() => {
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
+  display: flex;
+  flex-direction: column;
+  height: 622px;
+  overflow: hidden;
+}
+
+.result-panel > * {
+  flex-shrink: 0;
+}
+
+.result-panel .preview-grid,
+.result-panel .result-stats,
+.result-panel .download-actions,
+.result-panel .result-header {
+  flex-shrink: 0;
+}
+
+.result-panel > div:last-of-type {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .result-header {

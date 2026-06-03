@@ -25,15 +25,32 @@ app.add_middleware(
 )
 
 
+def _read_image_path(file_path: str, channel: str, image_name: str | None = None) -> tuple[bytes, str | None, str]:
+    # Read bitmap bytes from a local path. Desktop/CLI use this path-first handoff
+    # to avoid sending large base64 payloads between generation and vectorization.
+    path = Path(file_path).expanduser()
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=400, detail=f"{channel} does not exist or is not a file.")
+    try:
+        return path.read_bytes(), image_name or path.name, channel
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to read {channel}: {exc}") from exc
+
+
 def _resolve_vectorize_image(payload: VectorizeRequest) -> tuple[bytes, str | None, str]:
     # Resolve bitmap bytes from either user upload or generated-pipeline source.
     if payload.source_type == "upload":
+        if payload.image_path:
+            return _read_image_path(payload.image_path, "upload:image_path", payload.image_name)
         if not payload.image_base64:
-            raise HTTPException(status_code=400, detail="source_type=upload requires image_base64.")
+            raise HTTPException(status_code=400, detail="source_type=upload requires image_base64 or image_path.")
         try:
             return decode_base64_image(payload.image_base64), payload.image_name, "upload:image_base64"
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid image_base64: {exc}") from exc
+
+    if payload.image_path:
+        return _read_image_path(payload.image_path, "generated:image_path", payload.image_name)
 
     if payload.image_base64:
         try:
@@ -63,13 +80,11 @@ def _resolve_vectorize_image(payload: VectorizeRequest) -> tuple[bytes, str | No
             raise HTTPException(status_code=400, detail=f"Invalid generated.image_base64: {exc}") from exc
 
     if generated.file_path:
-        path = Path(generated.file_path).expanduser()
-        if not path.exists() or not path.is_file():
-            raise HTTPException(status_code=400, detail="generated.file_path does not exist or is not a file.")
-        try:
-            return path.read_bytes(), payload.image_name or path.name, "generated:file_path"
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Failed to read generated.file_path: {exc}") from exc
+        return _read_image_path(
+            generated.file_path,
+            "generated:file_path",
+            payload.image_name or generated.artifact_id,
+        )
 
     if generated.artifact_id:
         raise HTTPException(

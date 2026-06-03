@@ -125,7 +125,7 @@ defineEmits(['update:vector', 'preset-change', 'submit'])
 
 <style scoped>
 .panel {
-  height: 615px;
+  height: 622px;
   display: flex;
   flex-direction: column;
 }
