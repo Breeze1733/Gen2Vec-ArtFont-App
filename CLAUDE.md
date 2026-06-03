@@ -166,7 +166,7 @@ vectorizer-api 和 desktop 目前尚无测试。
 | `AUTO_START_COMFYUI` | txt2img-api | 是否自动启动 ComfyUI | `1` |
 | `WORKFLOW_PATH` | txt2img-api | 自定义工作流 JSON 路径 | — |
 | `COMFYUI_HOST` | txt2img-api | ComfyUI 地址 | `http://127.0.0.1:8188` |
-| `COMFYUI_POLL_TIMEOUT` | txt2img-api | ComfyUI 轮询超时（秒） | `120` |
+| `COMFYUI_POLL_TIMEOUT` | txt2img-api | ComfyUI 轮询超时（秒） | `500` |
 
 ## 矢量化预设
 

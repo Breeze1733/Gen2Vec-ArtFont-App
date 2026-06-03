@@ -127,7 +127,7 @@ uv run pytest
 |------|--------|------|
 | `AUTO_START_COMFYUI` | `"1"` | 设为 `"0"` 禁用 ComfyUI 自动启动 |
 | `COMFYUI_HOST` | `"http://127.0.0.1:8188"` | ComfyUI 服务地址 |
-| `COMFYUI_POLL_TIMEOUT` | `"120"` | 轮询 ComfyUI 结果的最大等待秒数 |
+| `COMFYUI_POLL_TIMEOUT` | `"500"` | 轮询 ComfyUI 结果的最大等待秒数 |
 | `COMFYUI_POLL_INTERVAL` | `"1.0"` | 轮询间隔（秒） |
 | `WORKFLOW_PATH` | — | 完全指定工作流 JSON 的绝对路径，***会覆盖*** `workflow` 请求字段 |
 
