@@ -184,7 +184,7 @@ const fileToDataUrl = (file) => new Promise((resolve, reject) => {
 .main-panel {
   display: flex;
   flex-direction: column;
-  height: 615px;
+  height: 622px;
 }
 
 .panel-header {

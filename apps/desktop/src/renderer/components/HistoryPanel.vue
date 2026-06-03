@@ -2,8 +2,7 @@
   <aside class="sidebar">
     <div class="sidebar-header">
       <p class="section-kicker">History</p>
-      <h2>运行记录</h2>
-      <button class="secondary-button small" type="button" @click="$emit('export-history')">导出日志</button>
+      <h2>历史任务</h2>
     </div>
 
     <div class="sidebar-content">
@@ -33,34 +32,35 @@
 <script setup>
 const props = defineProps({ logs: Array, currentFiles: { type: Array, required: false } })
 
-const emit = defineEmits(['export-history', 'delete-history', 'restore-history'])
+const emit = defineEmits(['delete-history', 'restore-history'])
 </script>
 
 <style scoped>
 .sidebar {
   width: 100%;
-  height: 615px;
+  height: 622px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: var(--shadow-soft);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar-header {
   padding: 16px;
   border-bottom: 1px solid var(--border);
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .sidebar-header h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
 }
 
 .sidebar-content {

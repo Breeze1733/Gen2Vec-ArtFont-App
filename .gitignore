@@ -44,6 +44,7 @@ __pycache__/
 !services/vectorizer-api/models/rembg/*.bat
 
 # Runtime outputs
+outputs/
 logs/
 *.log
 services/txt2img-api/input/

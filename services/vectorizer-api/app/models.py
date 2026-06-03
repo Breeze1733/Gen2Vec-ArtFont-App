@@ -38,6 +38,7 @@ class VectorizeRequest(BaseModel):
     seed: int = 0
     vector: VectorConfig = Field(default_factory=VectorConfig)
     image_base64: Optional[str] = None
+    image_path: Optional[str] = None
     image_name: Optional[str] = None
     generated_image: Optional[GeneratedImageRef] = None
 

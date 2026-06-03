@@ -61,28 +61,50 @@ export async function openExternal(url) {
   return window.artTextApp.openExternal(url)
 }
 
+async function fetchJsonWithTimeout(url, payload, timeoutMs = 120000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}))
+      throw new Error(errBody.detail || `后端返回 ${response.status}`)
+    }
+
+    return response.json()
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`后端请求超时（${Math.round(timeoutMs / 1000)} 秒）`)
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /**
- * Call the vectorize pipeline. If running in Electron this proxies to main,
- * otherwise it falls back to the local vectorizer HTTP endpoint.
+ * Call the vectorize pipeline. It uses direct local HTTP first because large
+ * vectorization responses can hang in Electron net proxy on some Windows setups.
  * @param {Object} payload - See docs/electron-ipc.md for schema
  */
 export async function vectorizeArtImage(payload) {
-  if (window.artTextApp?.vectorize) {
-    return window.artTextApp.vectorize(payload)
+  const { __timeoutMs = 120000, ...body } = payload || {}
+  try {
+    return await fetchJsonWithTimeout(VECTORIZER_URL, body, __timeoutMs)
+  } catch (fetchErr) {
+    // Keep Electron proxy as a fallback for environments where direct HTTP is blocked.
+    if (window.artTextApp?.vectorize) {
+      return window.artTextApp.vectorize(payload)
+    }
+    throw fetchErr
   }
-
-  const response = await fetch(VECTORIZER_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-
-  if (!response.ok) {
-    const errBody = await response.json().catch(() => ({}))
-    throw new Error(errBody.detail || `后端返回 ${response.status}`)
-  }
-
-  return response.json()
 }
 
 /**
@@ -166,6 +188,59 @@ export async function saveFile(data, defaultName, filters = []) {
 export async function saveResults(results, fileBase) {
   ensureElectronApi('saveResults')
   return window.artTextApp.saveResults({ results, fileBase })
+}
+
+/**
+ * Prepare a standard outputs/task_xxx directory in the Electron main process.
+ * @param {{mode?:string,index?:number,text?:string,seed?:number,outputRoot?:string,usesTxt2Img?:boolean}} options
+ */
+export async function prepareOutputTask(options) {
+  ensureElectronApi('prepareOutputTask')
+  return window.artTextApp.prepareOutputTask(options)
+}
+
+function toIpcPlainObject(value) {
+  // ipcRenderer.invoke uses the structured clone algorithm. Vue proxies and a few
+  // browser-native objects can trigger "An object could not be cloned", so normalize
+  // payloads before sending them to Electron main.
+  return JSON.parse(JSON.stringify(value ?? {}))
+}
+
+/**
+ * Write fixed-name task artifacts and update batch_summary.csv.
+ * @param {Object} options
+ */
+export async function writeTaskArtifacts(options) {
+  ensureElectronApi('writeTaskArtifacts')
+  return window.artTextApp.writeTaskArtifacts(toIpcPlainObject(options))
+}
+
+/**
+ * Read a generated output file through Electron main process.
+ * @param {{filePath:string,encoding?:'dataUrl'|'text',mime?:string}} options
+ */
+export async function readOutputFile(options) {
+  ensureElectronApi('readOutputFile')
+  return window.artTextApp.readOutputFile(options)
+}
+
+/**
+ * Delete an output directory through the Electron main process.
+ * Only directories under the configured outputs root are allowed.
+ * @param {string} targetPath
+ */
+export async function deleteOutputDir(targetPath) {
+  ensureElectronApi('deleteOutputDir')
+  return window.artTextApp.deleteOutputDir(targetPath)
+}
+
+/**
+ * Open a local file-system path with the operating system.
+ * @param {string} targetPath
+ */
+export async function openPath(targetPath) {
+  ensureElectronApi('openPath')
+  return window.artTextApp.openPath(targetPath)
 }
 
 /**
