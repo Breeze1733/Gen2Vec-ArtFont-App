@@ -435,7 +435,9 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
 # ── Local stub (fallback) ──
 
 
-def _local_stub_generate(request: GenerationRequest) -> GenerationArtifact:
+def _local_stub_generate(
+    request: GenerationRequest, attempted_workflows: list[str] | None = None
+) -> GenerationArtifact:
     from hashlib import sha256
 
     w, h = _parse_resolution(request.resolution)
@@ -481,6 +483,9 @@ def _local_stub_generate(request: GenerationRequest) -> GenerationArtifact:
         "canvas": {"width": w, "height": h},
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "artifact": {"image_name": image_name, "byte_length": len(png_bytes)},
+        "fallback_tier": -1,
+        "workflow_used": "",
+        "attempted_workflows": attempted_workflows or [],
     }
 
     return GenerationArtifact(image_base64=image_base64, image_name=image_name, metadata=metadata)
@@ -585,14 +590,17 @@ def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
     else:
         workflows_to_try = list(_ENGLISH_FALLBACK)
 
-    for name in workflows_to_try:
+    for idx, name in enumerate(workflows_to_try):
         try:
             workflow_path = _resolve_workflow_path(name)
             workflow = _load_workflow(workflow_path)
             patched = _patch_workflow(workflow, request)
             result = _call_comfyui_api(request, patched)
             if result is not None:
-                logger.info("Workflow '%s' succeeded", name)
+                logger.info("Workflow '%s' succeeded (tier=%d)", name, idx)
+                result.metadata["fallback_tier"] = idx
+                result.metadata["workflow_used"] = name
+                result.metadata["attempted_workflows"] = workflows_to_try
                 model_deps = _extract_model_dependencies(patched, workflow_name=name)
                 return GenerationArtifact(
                     image_base64=result.image_base64,
@@ -606,4 +614,4 @@ def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
             logger.warning("Workflow '%s' failed: %s", name, exc)
             continue
 
-    return _local_stub_generate(request)
+    return _local_stub_generate(request, attempted_workflows=workflows_to_try)

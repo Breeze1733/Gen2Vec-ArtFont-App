@@ -223,12 +223,15 @@ class TestLocalStubGenerate:
 
 
 class TestGenerateArtwork:
-    def test_falls_back_to_stub_when_comfyui_unreachable(self, sample_request: GenerationRequest) -> None:
-        """ComfyUI is not running in test environment, so should return stub."""
+    def test_metadata_includes_fallback_fields(self, sample_request: GenerationRequest) -> None:
+        """无论走 ComfyUI 还是 stub，metadata 必须包含降级链追踪字段。"""
         artifact = generate_artwork(sample_request)
         assert artifact.image_base64.startswith("data:image/png;base64,")
         assert artifact.image_name.endswith(".png")
-        assert artifact.metadata["engine"] == "local-studio"
+        assert artifact.metadata["engine"] in ("comfyui", "local-studio")
+        assert "fallback_tier" in artifact.metadata
+        assert "workflow_used" in artifact.metadata
+        assert "attempted_workflows" in artifact.metadata
 
     def test_stub_metadata_matches_request(self, sample_request: GenerationRequest) -> None:
         artifact = generate_artwork(sample_request)

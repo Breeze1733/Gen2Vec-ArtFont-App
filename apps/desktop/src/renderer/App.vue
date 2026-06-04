@@ -482,6 +482,7 @@ const startGeneration = async () => {
       }
 
       taskInfo = await prepareOutputTask({ mode: 'single', index: 1, text: payload.text.trim(), seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: true })
+      const stage1Engine = respA.metadata?.engine || ''
       await writeTaskArtifacts({
         outputRoot: taskInfo.outputRoot,
         taskDir: taskInfo.taskDir,
@@ -489,7 +490,7 @@ const startGeneration = async () => {
         paths: taskInfo.paths,
         artifacts: { original: imageBase64 },
         metadata: null,
-        runLog: buildRunLog({ task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, stage1Duration, status: 'vectorizing', usesTxt2Img: true }),
+        runLog: buildRunLog({ task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, stage1Duration, status: 'vectorizing', usesTxt2Img: true, engine: stage1Engine }),
         usesTxt2Img: true,
         workflowArtifacts: workflowArtifactsData
       })
@@ -534,7 +535,9 @@ const startGeneration = async () => {
       // 构建文件列表
       const finalMetadata = augmentMetadata(result.metadata, { task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, usesTxt2Img: true })
       result.metadata = finalMetadata
-      const runLog = buildRunLog({ task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, stage1Duration, stage2Duration, status: 'success', usesTxt2Img: true })
+      const stage1Engine = respA.metadata?.engine || ''
+      const stage1Status = resolveStatus(respA.metadata)
+      const runLog = buildRunLog({ task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, stage1Duration, stage2Duration, status: stage1Status, usesTxt2Img: true, engine: stage1Engine })
       const writeResult = await writeCurrentTask({
         task,
         taskInfo,
@@ -574,7 +577,7 @@ const startGeneration = async () => {
 
       const finalMetadata = augmentMetadata(result.metadata, { task, taskInfo, modeName: 'vectorize', seed: payload.seed, usesTxt2Img: false })
       result.metadata = finalMetadata
-      const runLog = buildRunLog({ task, taskInfo, modeName: 'vectorize', seed: payload.seed, stage2Duration, status: 'success', usesTxt2Img: false })
+      const runLog = buildRunLog({ task, taskInfo, modeName: 'vectorize', seed: payload.seed, stage2Duration, status: 'success', usesTxt2Img: false, engine: '' })
       const writeResult = await writeCurrentTask({
         task,
         taskInfo,
@@ -636,6 +639,7 @@ const startGeneration = async () => {
             modelDependencies: respA.model_dependencies || null,
           }
           const itemTaskInfo = await prepareOutputTask({ mode: 'batch', index: i + 1, text: text || `item-${i + 1}`, seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: true, summaryDir: batchSummaryDir })
+          const batchEngine = respA.metadata?.engine || ''
           await writeTaskArtifacts({
             outputRoot: itemTaskInfo.outputRoot,
             taskDir: itemTaskInfo.taskDir,
@@ -643,7 +647,7 @@ const startGeneration = async () => {
             paths: itemTaskInfo.paths,
             artifacts: { original: respA.png },
             metadata: null,
-            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, status: 'vectorizing', usesTxt2Img: true }),
+            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, status: 'vectorizing', usesTxt2Img: true, engine: batchEngine }),
             usesTxt2Img: true,
             workflowArtifacts: batchWorkflowArtifacts
           })
@@ -682,6 +686,8 @@ const startGeneration = async () => {
             item.metadata.generation = item.metadata.generation || {}
             item.metadata.generation.duration_ms = s1Ms
           }
+          const batchEngine = respA.metadata?.engine || ''
+          const batchStatus = resolveStatus(respA.metadata)
           item.metadata = augmentMetadata(item.metadata, { task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, usesTxt2Img: true })
           await writeTaskArtifacts({
             outputRoot: itemTaskInfo.outputRoot,
@@ -690,9 +696,9 @@ const startGeneration = async () => {
             paths: itemTaskInfo.paths,
             artifacts: { original: item.original, transparent: item.transparent, preview: item.preview, svg: item.svg },
             metadata: item.metadata,
-            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, stage2Duration: s2Ms, status: 'success', usesTxt2Img: true }),
+            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, stage2Duration: s2Ms, status: batchStatus, usesTxt2Img: true, engine: batchEngine }),
             usesTxt2Img: true,
-            summaryRow: { ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: 'success', text, prompt, seed: payload.seed }), summary_path: batchSummaryPath },
+            summaryRow: { ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: batchStatus, text, prompt, seed: payload.seed }), summary_path: batchSummaryPath },
             workflowArtifacts: batchWorkflowArtifacts
           })
 
@@ -868,7 +874,14 @@ const readTextPath = async (filePath) => {
   }
 }
 
-const buildRunLog = ({ task, taskInfo, modeName, text = '', prompt = '', seed = 0, stage1Duration = 0, stage2Duration = 0, status = 'success', error = '', usesTxt2Img = false }) => {
+const resolveStatus = (metadata) => {
+  if (!metadata) return 'success'
+  if (metadata.engine === 'local-studio') return 'stub'
+  if (metadata.fallback_tier > 0) return 'degraded'
+  return 'success'
+}
+
+const buildRunLog = ({ task, taskInfo, modeName, text = '', prompt = '', seed = 0, stage1Duration = 0, stage2Duration = 0, status = 'success', error = '', usesTxt2Img = false, engine = '' }) => {
   const paths = taskInfo?.paths || {}
   return [
     `task_id=${task?.id || ''}`,
@@ -880,6 +893,7 @@ const buildRunLog = ({ task, taskInfo, modeName, text = '', prompt = '', seed = 
     `stage1_ms=${stage1Duration}`,
     `stage2_ms=${stage2Duration}`,
     `uses_txt2img=${usesTxt2Img}`,
+    `engine=${engine}`,
     `task_dir=${taskInfo?.taskDir || ''}`,
     `original_path=${paths.original || ''}`,
     `transparent_path=${paths.transparent || ''}`,
