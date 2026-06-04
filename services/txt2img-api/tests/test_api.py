@@ -1,3 +1,9 @@
+import os
+
+# Test environment: skip the per-request wait for ComfyUI readiness so
+# tests don't hang for 5 min when no ComfyUI is running.
+os.environ.setdefault("COMFYUI_READY_WAIT_SECONDS", "0")
+
 from fastapi.testclient import TestClient
 
 from app.main import app

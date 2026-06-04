@@ -40,10 +40,12 @@ _ENV_COMFYUI_HOST = "COMFYUI_HOST"
 _ENV_POLL_TIMEOUT = "COMFYUI_POLL_TIMEOUT"
 _ENV_POLL_INTERVAL = "COMFYUI_POLL_INTERVAL"
 _ENV_WORKFLOW_PATH = "WORKFLOW_PATH"
+_ENV_READY_WAIT_SECONDS = "COMFYUI_READY_WAIT_SECONDS"
 
 _DEFAULT_COMFYUI_HOST = "http://127.0.0.1:8188"
 _DEFAULT_POLL_TIMEOUT = 500
 _DEFAULT_POLL_INTERVAL = 1.0
+_DEFAULT_READY_WAIT_SECONDS = 300.0
 
 
 @dataclass(frozen=True)
@@ -329,6 +331,51 @@ def warmup_comfyui_connection() -> None:
 # ── ComfyUI API interaction ──
 
 
+def _is_port_open(host: str, port: int, timeout: float = 0.5) -> bool:
+    """Return True if ``host:port`` accepts a TCP connection within ``timeout``."""
+    import socket  # local import keeps module import cheap
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def _wait_for_comfyui_ready(
+    host: str = "127.0.0.1",
+    port: int = 8188,
+    timeout: float = _DEFAULT_READY_WAIT_SECONDS,
+    poll_interval: float = 2.0,
+) -> bool:
+    """Block until ComfyUI accepts connections, or ``timeout`` elapses.
+
+    Returns True if ComfyUI is ready within ``timeout`` seconds, False
+    otherwise. Used by request handlers to wait for a freshly-spawned
+    ComfyUI to finish initializing before submitting a prompt, so the
+    client does not see a fast local-stub fallback when the server is
+    merely still booting.
+
+    Only one info-level line is logged on success; a warning is logged
+    on timeout. Polling itself is silent.
+    """
+    deadline = time.monotonic() + timeout
+    attempt = 0
+    while time.monotonic() < deadline:
+        if _is_port_open(host, port, timeout=0.5):
+            logger.info(
+                "ComfyUI is ready at %s:%d (waited %d polls, ~%.1fs)",
+                host, port, attempt, time.monotonic() - (deadline - timeout),
+            )
+            return True
+        attempt += 1
+        time.sleep(poll_interval)
+    logger.warning(
+        "ComfyUI not ready at %s:%d after %ss; will fall back to local stub",
+        host, port, timeout,
+    )
+    return False
+
+
 def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[GenerationArtifact]:
     """Submit patched workflow to ComfyUI, poll for result, return artifact.
 
@@ -554,7 +601,34 @@ def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
     - 用户显式指定了 workflow → 只尝试那一个
     - 中文为主 → Qwen-Image → Z-Image
     - 英文/其他 → Flux → Z-Image
+
+    在尝试 ComfyUI 之前先等待其就绪（最多 COMFYUI_READY_WAIT_SECONDS 秒）。
+    等待超时后才继续走降级链并最终落到本地 stub。这避免了 ComfyUI 还在
+    加载模型时请求方收到一个"快速 stub 降级"。
     """
+    # Parse host/port from COMFYUI_HOST (e.g. http://127.0.0.1:8188)
+    from urllib.parse import urlparse
+    comfyui_host = os.environ.get(_ENV_COMFYUI_HOST, _DEFAULT_COMFYUI_HOST)
+    parsed = urlparse(comfyui_host)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8188
+
+    # Wait for ComfyUI to be ready (no-op if already up).
+    try:
+        ready_timeout = float(os.environ.get(
+            _ENV_READY_WAIT_SECONDS, str(_DEFAULT_READY_WAIT_SECONDS)
+        ))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid %s=%r, falling back to %s",
+            _ENV_READY_WAIT_SECONDS,
+            os.environ.get(_ENV_READY_WAIT_SECONDS),
+            _DEFAULT_READY_WAIT_SECONDS,
+        )
+        ready_timeout = _DEFAULT_READY_WAIT_SECONDS
+
+    _wait_for_comfyui_ready(host, port, timeout=ready_timeout)
+
     workflows_to_try: list[str]
     if request.workflow:
         workflows_to_try = [request.workflow]

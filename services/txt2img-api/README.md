@@ -129,6 +129,7 @@ uv run pytest
 | `COMFYUI_LAUNCHER_BAT` | — | 直接指定 .bat 启动器**绝对路径**（最高优先级，绕过其他所有发现逻辑） |
 | `COMFYUI_PORTABLE_ROOT` | — | 指向 ComfyUI 便携发行版**外层目录**（如 `D:/ai/comfyui-portable`），需包含 `ComfyUI_windows_portable/` 子目录 |
 | `COMFYUI_HOST` | `"http://127.0.0.1:8188"` | ComfyUI 服务地址 |
+| `COMFYUI_READY_WAIT_SECONDS` | `"300"` | 请求进入时等 ComfyUI 就绪的最长秒数（超时就 fallback stub） |
 | `COMFYUI_POLL_TIMEOUT` | `"500"` | 轮询 ComfyUI 结果的最大等待秒数 |
 | `COMFYUI_POLL_INTERVAL` | `"1.0"` | 轮询间隔（秒） |
 | `WORKFLOW_PATH` | — | 完全指定工作流 JSON 的绝对路径，***会覆盖*** `workflow` 请求字段 |
@@ -153,7 +154,29 @@ services/txt2img-api/
             └── ComfyUI/main.py         ← 自动启动
 ```
 
-启动参数为 `--fast fp16_accumulation`，输出定向到 `DEVNULL`，不显示控制台窗口。
+启动参数为 `--fast fp16_accumulation`，**输出写入 `comfyui-launcher.log`（不刷控制台）**。
+
+### 启动日志
+
+ComfyUI 启动器的 stdout/stderr 写入 `comfyui-launcher.log`（与 EXE 同级或 `services/txt2img-api/comfyui-launcher.log`），**不刷控制台**。
+
+```bash
+# bash
+tail -f services/txt2img-api/comfyui-launcher.log
+
+# PowerShell
+Get-Content services/txt2img-api/comfyui-launcher.log -Wait
+```
+
+### 启动时序
+
+`uv run txt2img-api` 启动后：
+
+1. 1-2 秒：Uvicorn 监听 9001，`/healthz` 即可用
+2. 后台异步：spawn `run_nvidia_gpu_fast_fp16_accumulation.bat`，ComfyUI 开始初始化
+3. 1-3 分钟：ComfyUI 真正监听 8188（**首跑需加载 12GB+ flux 模型**）
+4. 期间发来的请求：**自动等待 ComfyUI 就绪**（最多 `COMFYUI_READY_WAIT_SECONDS` 秒，默认 300s）
+5. 超时还没就绪：fallback 到本地 stub（看 `comfyui-launcher.log` 排查）
 
 ### 自定义 ComfyUI 安装位置
 

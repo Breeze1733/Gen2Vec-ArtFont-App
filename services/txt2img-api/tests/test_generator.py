@@ -226,14 +226,23 @@ class TestLocalStubGenerate:
 
 
 class TestGenerateArtwork:
-    def test_falls_back_to_stub_when_comfyui_unreachable(self, sample_request: GenerationRequest) -> None:
+    def test_falls_back_to_stub_when_comfyui_unreachable(
+        self, sample_request: GenerationRequest, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """ComfyUI is not running in test environment, so should return stub."""
+        # Skip the per-request 5-min wait for ComfyUI readiness in this
+        # test environment; we explicitly want to exercise the fallback.
+        monkeypatch.setenv("COMFYUI_READY_WAIT_SECONDS", "0")
         artifact = generate_artwork(sample_request)
         assert artifact.image_base64.startswith("data:image/png;base64,")
         assert artifact.image_name.endswith(".png")
         assert artifact.metadata["engine"] == "local-studio"
 
-    def test_stub_metadata_matches_request(self, sample_request: GenerationRequest) -> None:
+    def test_stub_metadata_matches_request(
+        self, sample_request: GenerationRequest, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Skip the 5-min ComfyUI ready wait; we want the stub.
+        monkeypatch.setenv("COMFYUI_READY_WAIT_SECONDS", "0")
         artifact = generate_artwork(sample_request)
         assert artifact.metadata["prompt"] == "晨曦之城"
         assert artifact.metadata["seed"] == 42
@@ -412,3 +421,98 @@ class TestComfyUiErrorHandling:
 
         assert result is None
         assert elapsed < 1.0  # fail-fast, not 5s timeout
+
+
+class TestWaitForComfyuiReady:
+    """Synchronous wait for ComfyUI to accept connections."""
+
+    def test_returns_true_when_port_already_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If 8188 is already open, no wait."""
+        from app.generator import _wait_for_comfyui_ready
+
+        with patch("app.generator._is_port_open", return_value=True):
+            start = time.monotonic()
+            result = _wait_for_comfyui_ready(timeout=60.0, poll_interval=0.01)
+            elapsed = time.monotonic() - start
+        assert result is True
+        assert elapsed < 0.5  # no wait
+
+    def test_waits_then_returns_true(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Port opens after a few failed polls → return True."""
+        from app.generator import _wait_for_comfyui_ready
+
+        # 2 fails, then 1 success
+        with patch("app.generator._is_port_open", side_effect=[False, False, True]):
+            result = _wait_for_comfyui_ready(timeout=60.0, poll_interval=0.01)
+        assert result is True
+
+    def test_times_out_returns_false(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Port never opens → return False within timeout."""
+        from app.generator import _wait_for_comfyui_ready
+
+        with patch("app.generator._is_port_open", return_value=False):
+            start = time.monotonic()
+            result = _wait_for_comfyui_ready(timeout=0.5, poll_interval=0.05)
+            elapsed = time.monotonic() - start
+        assert result is False
+        assert 0.4 < elapsed < 1.0  # waited the full timeout
+
+
+class TestGenerateArtworkWaitsForComfyui:
+    """generate_artwork must wait for ComfyUI before falling back to stub."""
+
+    def test_falls_back_to_stub_after_wait_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ComfyUI never comes up → wait full timeout, then stub."""
+        from app.generator import generate_artwork
+        from app.models import GenerationRequest
+
+        monkeypatch.setenv("COMFYUI_READY_WAIT_SECONDS", "0.5")
+
+        with patch("app.generator._is_port_open", return_value=False), \
+             patch("app.generator._call_comfyui_api", return_value=None) as mock_call:
+            req = GenerationRequest(prompt="test", text="hello")
+            start = time.monotonic()
+            result = generate_artwork(req)
+            elapsed = time.monotonic() - start
+
+        # Should have waited, then tried at least one workflow, then stub
+        assert mock_call.call_count >= 1
+        assert result.metadata["engine"] == "local-studio"
+        assert elapsed >= 0.4  # honored the wait timeout
+
+    def test_uses_comfyui_when_ready(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ComfyUI is already up → no wait, use it directly."""
+        from app.generator import generate_artwork
+        from app.models import GenerationRequest
+
+        monkeypatch.setenv("COMFYUI_READY_WAIT_SECONDS", "5.0")
+
+        # ComfyUI ready immediately
+        with patch("app.generator._is_port_open", return_value=True), \
+             patch("app.generator._call_comfyui_api") as mock_call:
+            # Simulate first workflow succeeding
+            def fake_call(req, wf):
+                from app.generator import _local_stub_generate
+                return _local_stub_generate(req)
+            mock_call.side_effect = fake_call
+
+            req = GenerationRequest(prompt="test", text="hello")
+            start = time.monotonic()
+            result = generate_artwork(req)
+            elapsed = time.monotonic() - start
+
+        assert mock_call.called
+        # No wait happened
+        assert elapsed < 1.0
+        # First workflow in chain succeeded, so result returned
+        assert result is not None

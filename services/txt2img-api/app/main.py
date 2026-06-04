@@ -40,6 +40,12 @@ _PORTABLE_OUTER_NAMES = (
     "ComfyUI_portable",
 )
 
+# Module-level state for the spawned ComfyUI subprocess, so the lifespan
+# shutdown hook can terminate it cleanly. The lock guards concurrent
+# access from the background thread and the request thread.
+_comfyui_proc: subprocess.Popen | None = None
+_comfyui_proc_lock = threading.Lock()
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -217,14 +223,23 @@ def _pick_comfyui_launcher_bat() -> Path:
 def _start_comfyui_background(
     host: str = "127.0.0.1",
     port: int = 8188,
-    timeout: float = 120.0,
 ) -> None:
-    """Launch ComfyUI in a hidden process and wait for it to be ready.
+    """Launch the ComfyUI .bat launcher in a hidden background process.
 
-    The bundled ``.bat`` launcher is preferred because it sets up the
-    embedded Python path, environment variables, and fp16 fast-mode flags
-    that match the portable distribution's expectations.
+    The launcher's own stdout/stderr is redirected to ``comfyui-launcher.log``
+    so the user can ``tail -f`` it for progress without console spam.
+
+    Skips spawning entirely if ``host:port`` is already accepting
+    connections (a manual or orphan ComfyUI is already running); in that
+    case ``_comfyui_proc`` is left as ``None`` so the lifespan shutdown
+    hook does not terminate someone else's process.
+
+    Does NOT wait for the server to be ready; request handlers should
+    use ``_wait_for_comfyui_ready`` (in :mod:`app.generator`) before
+    submitting a prompt.
     """
+    global _comfyui_proc
+
     try:
         bat = _pick_comfyui_launcher_bat()
     except FileNotFoundError as exc:
@@ -232,24 +247,51 @@ def _start_comfyui_background(
         return
 
     def _runner():
+        global _comfyui_proc
         try:
+            # Pre-flight: if port already accepts connections, someone
+            # else is serving ComfyUI. Don't spawn a duplicate, and don't
+            # save the proc handle (so _stop_comfyui doesn't kill
+            # someone else's process).
+            if _is_port_open(host, port, timeout=0.5):
+                logger.info(
+                    "ComfyUI already running at %s:%d, skipping auto-start",
+                    host, port,
+                )
+                return
+
+            # Capture launcher output to a log file (NOT console). The
+            # user can tail -f this file to see model-loading progress.
+            log_path = _get_executable_dir() / "comfyui-launcher.log"
+            log_file = open(log_path, "ab", buffering=0)  # unbuffered append
+
             logger.info("Starting ComfyUI via launcher: %s", bat)
-            proc = subprocess.Popen(
-                [str(bat)],
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-            )
+            logger.info("Launcher output: %s", log_path)
 
-            start = time.monotonic()
-            while time.monotonic() - start < timeout:
-                if _is_port_open(host, port, timeout=0.6):
-                    logger.info("ComfyUI is ready at %s:%d (pid %d)", host, port, proc.pid)
-                    return
+            with _comfyui_proc_lock:
+                _comfyui_proc = subprocess.Popen(
+                    [str(bat)],
+                    shell=True,
+                    stdout=log_file,
+                    stderr=log_file,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                )
+                proc = _comfyui_proc
+
+            # Quick health check: if the process dies within 5s, surface
+            # the error immediately. Otherwise assume it's still booting
+            # and let _wait_for_comfyui_ready handle the wait.
+            for _ in range(5):
                 time.sleep(1.0)
-
-            logger.warning("Timed out waiting for ComfyUI at %s:%d", host, port)
+                if proc.poll() is not None:
+                    logger.error(
+                        "ComfyUI process exited prematurely with code %s. "
+                        "See %s for details.",
+                        proc.returncode, log_path,
+                    )
+                    with _comfyui_proc_lock:
+                        _comfyui_proc = None
+                    return
         except Exception:
             logger.exception("Failed to start ComfyUI")
 

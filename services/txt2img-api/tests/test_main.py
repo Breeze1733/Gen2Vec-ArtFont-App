@@ -1,6 +1,8 @@
 """Tests for app/main.py launcher resolution."""
 from __future__ import annotations
 
+import subprocess
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -126,3 +128,55 @@ class TestPickComfyuiLauncherBat:
         msg = str(exc_info.value)
         assert _ENV_COMFYUI_PORTABLE_ROOT in msg
         assert _PORTABLE_OUTER_NAMES[0] in msg
+
+
+class TestStartComfyuiSilent:
+    """_start_comfyui_background should write launcher output to a file
+    (not DEVNULL) and skip spawning when ComfyUI is already up."""
+
+    def test_spawns_proc_with_log_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """stdout/stderr should be redirected to a log file."""
+        from unittest.mock import MagicMock, mock_open, patch
+
+        from app import main
+        from app.main import _start_comfyui_background
+
+        fake_bat = MagicMock()
+        with patch.object(main, "_pick_comfyui_launcher_bat", return_value=fake_bat), \
+             patch.object(main, "_is_port_open", return_value=False), \
+             patch.object(main, "_get_executable_dir", return_value=tmp_path), \
+             patch("builtins.open", mock_open()), \
+             patch("app.main.subprocess.Popen") as mock_popen:
+            main._comfyui_proc = None  # reset state
+            _start_comfyui_background()
+            time.sleep(0.3)
+            assert mock_popen.called
+            kwargs = mock_popen.call_args.kwargs
+            # stdout/stderr should be a file handle, not DEVNULL
+            assert kwargs["stdout"] is not subprocess.DEVNULL
+            assert kwargs["stderr"] is not subprocess.DEVNULL
+
+        # cleanup
+        main._comfyui_proc = None
+
+    def test_skips_spawn_when_port_already_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pre-flight: if 8188 is open, do nothing and don't set _comfyui_proc."""
+        from unittest.mock import MagicMock, patch
+
+        from app import main
+        from app.main import _start_comfyui_background
+
+        with patch.object(main, "_pick_comfyui_launcher_bat", return_value=MagicMock()), \
+             patch.object(main, "_is_port_open", return_value=True), \
+             patch("app.main.subprocess.Popen") as mock_popen:
+            main._comfyui_proc = None
+            _start_comfyui_background()
+            time.sleep(0.3)
+            mock_popen.assert_not_called()
+            # Critical: must NOT set _comfyui_proc, so _stop_comfyui
+            # doesn't kill someone else's process.
+            assert main._comfyui_proc is None
