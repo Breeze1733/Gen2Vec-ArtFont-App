@@ -535,7 +535,6 @@ const startGeneration = async () => {
       // 构建文件列表
       const finalMetadata = augmentMetadata(result.metadata, { task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, usesTxt2Img: true })
       result.metadata = finalMetadata
-      const stage1Engine = respA.metadata?.engine || ''
       const stage1Status = resolveStatus(respA.metadata)
       const runLog = buildRunLog({ task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, stage1Duration, stage2Duration, status: stage1Status, usesTxt2Img: true, engine: stage1Engine })
       const writeResult = await writeCurrentTask({
@@ -686,7 +685,6 @@ const startGeneration = async () => {
             item.metadata.generation = item.metadata.generation || {}
             item.metadata.generation.duration_ms = s1Ms
           }
-          const batchEngine = respA.metadata?.engine || ''
           const batchStatus = resolveStatus(respA.metadata)
           item.metadata = augmentMetadata(item.metadata, { task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, usesTxt2Img: true })
           await writeTaskArtifacts({
