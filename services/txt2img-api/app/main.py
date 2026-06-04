@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -23,15 +24,41 @@ logger = logging.getLogger(__name__)
 # the service checkout root (dev). Keeping it out of `_MEIPASS` lets users
 # drop a 60 GB bundle next to the EXE without bloating the frozen binary.
 _ENV_COMFYUI_LAUNCHER_BAT = "COMFYUI_LAUNCHER_BAT"
-_COMFYUI_PORTABLE_DIRNAME = "ComfyUI_windows_portable_nvidia"
+# Operator override: point this at the outer directory of a ComfyUI portable
+# distribution whose structure is:
+#   <root>/ComfyUI_windows_portable/<launcher>.bat
+# Useful when the bundle lives somewhere other than next to the EXE.
+_ENV_COMFYUI_PORTABLE_ROOT = "COMFYUI_PORTABLE_ROOT"
 _COMFYUI_PORTABLE_INNER = "ComfyUI_windows_portable"
 _GPU_BAT = "run_nvidia_gpu_fast_fp16_accumulation.bat"
 _CPU_BAT = "run_cpu.bat"
+# Outer directory names we recognise for auto-discovery. Different
+# distributions use slightly different folder names.
+_PORTABLE_OUTER_NAMES = (
+    "ComfyUI_windows_portable_nvidia",
+    "ComfyUI_windows_portable",
+    "ComfyUI_portable",
+)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """FastAPI lifespan handler: launch ComfyUI and warm up the connection."""
+    if os.environ.get("AUTO_START_COMFYUI", "1") == "1":
+        _start_comfyui_background()
+
+    # Pre-warm: try connecting to an already-running ComfyUI so the
+    # first generate call doesn't pay the cold-start penalty.
+    warmup_comfyui_connection()
+    yield
+    # Shutdown hook could be added here (e.g. terminate spawned ComfyUI).
+
 
 app = FastAPI(
     title="txt2img-api",
     version="0.1.0",
     description="Text-to-image generation backend for the Development-Training workspace.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -101,23 +128,36 @@ def _has_nvidia_gpu() -> bool:
         return False
 
 
-def _find_embedded_python() -> Path | None:
-    """Locate the embedded Python bundled with the ComfyUI portable release.
+def _resolve_portable_root() -> Path | None:
+    """Find the outer directory of a ComfyUI portable distribution.
 
-    Kept as a fallback path: when the user has the ``python_embeded`` layout
-    but not the ``.bat`` launchers, we can still spawn ComfyUI via
-    ``python.exe -s main.py`` directly.
+    Priority:
+      1. ``COMFYUI_PORTABLE_ROOT`` env var (operator override)
+      2. Auto-discovery: scan ``_get_executable_dir()`` for any
+         name in ``_PORTABLE_OUTER_NAMES``; first match wins.
+
+    Returns the outer directory (containing ``ComfyUI_windows_portable/``),
+    or ``None`` if nothing found.
     """
-    candidates = [
-        _get_executable_dir()
-        / _COMFYUI_PORTABLE_DIRNAME
-        / _COMFYUI_PORTABLE_INNER
-        / "python_embeded"
-        / "python.exe",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
+    # 1. Env var override
+    env_root = os.environ.get(_ENV_COMFYUI_PORTABLE_ROOT, "").strip()
+    if env_root:
+        root = Path(env_root).expanduser().resolve()
+        if root.is_dir():
+            return root
+        logger.warning(
+            "%s=%s does not exist or is not a directory; falling back to auto-discovery",
+            _ENV_COMFYUI_PORTABLE_ROOT,
+            root,
+        )
+
+    # 2. Auto-discovery
+    exedir = _get_executable_dir()
+    for name in _PORTABLE_OUTER_NAMES:
+        candidate = exedir / name
+        if candidate.is_dir():
+            return candidate
+
     return None
 
 
@@ -125,39 +165,52 @@ def _pick_comfyui_launcher_bat() -> Path:
     """Choose the ComfyUI ``.bat`` launcher to spawn.
 
     Resolution order:
-      1. ``COMFYUI_LAUNCHER_BAT`` env var (operator override, absolute path)
-      2. NVIDIA GPU detected → ``run_nvidia_gpu_fast_fp16_accumulation.bat``
-      3. Otherwise            → ``run_cpu.bat``
+      1. ``COMFYUI_LAUNCHER_BAT`` env var (operator override, absolute .bat path)
+      2. ``COMFYUI_PORTABLE_ROOT`` env var → ``<root>/ComfyUI_windows_portable/<bat>``
+      3. Auto-discover: scan ``_get_executable_dir()`` for any
+         ``_PORTABLE_OUTER_NAMES``; use first match
+      4. Raise ``FileNotFoundError`` with a helpful message
+
+    Within (2)/(3) the GPU launcher is preferred when an NVIDIA GPU is
+    detected; otherwise fall back to the CPU launcher.
     """
+    # 1. Operator override (absolute .bat path)
     override = os.environ.get(_ENV_COMFYUI_LAUNCHER_BAT, "").strip()
     if override:
         bat_path = Path(override).expanduser().resolve()
         if bat_path.exists():
             return bat_path
         raise FileNotFoundError(
-            f"COMFYUI_LAUNCHER_BAT is set to {bat_path!s} but the file does not exist"
+            f"{_ENV_COMFYUI_LAUNCHER_BAT}={bat_path} does not exist"
         )
 
-    portable_dir = (
-        _get_executable_dir() / _COMFYUI_PORTABLE_DIRNAME / _COMFYUI_PORTABLE_INNER
-    )
-    if not portable_dir.is_dir():
+    # 2 & 3. Find the portable install root
+    portable_root = _resolve_portable_root()
+    if portable_root is None:
         raise FileNotFoundError(
-            f"ComfyUI portable bundle not found at {portable_dir!s}. "
-            f"Place the {_COMFYUI_PORTABLE_DIRNAME}/ folder next to the running EXE "
-            f"(or set {_ENV_COMFYUI_LAUNCHER_BAT} to a custom .bat)."
+            f"ComfyUI portable bundle not found. Set {_ENV_COMFYUI_PORTABLE_ROOT} "
+            f"to a directory containing '{_COMFYUI_PORTABLE_INNER}/', or place one of "
+            f"{_PORTABLE_OUTER_NAMES} next to the running EXE. "
+            f"Searched: {_get_executable_dir()!s}."
+        )
+
+    # 4. Look for the launcher under portable_root/<inner>/
+    portable_inner = portable_root / _COMFYUI_PORTABLE_INNER
+    if not portable_inner.is_dir():
+        raise FileNotFoundError(
+            f"{portable_root} found but missing '{_COMFYUI_PORTABLE_INNER}/' subdir"
         )
 
     if _has_nvidia_gpu():
-        bat = portable_dir / _GPU_BAT
+        bat = portable_inner / _GPU_BAT
         if bat.exists():
             return bat
         logger.warning("NVIDIA GPU detected but %s missing — falling back to CPU", bat)
-    bat = portable_dir / _CPU_BAT
+    bat = portable_inner / _CPU_BAT
     if bat.exists():
         return bat
     raise FileNotFoundError(
-        f"Neither {_GPU_BAT} nor {_CPU_BAT} found under {portable_dir!s}"
+        f"Neither {_GPU_BAT} nor {_CPU_BAT} found under {portable_inner}"
     )
 
 
@@ -202,13 +255,3 @@ def _start_comfyui_background(
 
     thread = threading.Thread(target=_runner, daemon=True, name="comfyui-launcher")
     thread.start()
-
-
-@app.on_event("startup")
-def _on_startup() -> None:
-    if os.environ.get("AUTO_START_COMFYUI", "1") == "1":
-        _start_comfyui_background()
-
-    # Pre-warm: try connecting to an already-running ComfyUI so the
-    # first generate call doesn't pay the cold-start penalty.
-    warmup_comfyui_connection()

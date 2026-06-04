@@ -126,6 +126,8 @@ uv run pytest
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `AUTO_START_COMFYUI` | `"1"` | 设为 `"0"` 禁用 ComfyUI 自动启动 |
+| `COMFYUI_LAUNCHER_BAT` | — | 直接指定 .bat 启动器**绝对路径**（最高优先级，绕过其他所有发现逻辑） |
+| `COMFYUI_PORTABLE_ROOT` | — | 指向 ComfyUI 便携发行版**外层目录**（如 `D:/ai/comfyui-portable`），需包含 `ComfyUI_windows_portable/` 子目录 |
 | `COMFYUI_HOST` | `"http://127.0.0.1:8188"` | ComfyUI 服务地址 |
 | `COMFYUI_POLL_TIMEOUT` | `"500"` | 轮询 ComfyUI 结果的最大等待秒数 |
 | `COMFYUI_POLL_INTERVAL` | `"1.0"` | 轮询间隔（秒） |
@@ -152,6 +154,33 @@ services/txt2img-api/
 ```
 
 启动参数为 `--fast fp16_accumulation`，输出定向到 `DEVNULL`，不显示控制台窗口。
+
+### 自定义 ComfyUI 安装位置
+
+如果 ComfyUI 不在 EXE 同级目录，可通过环境变量指定：
+
+- **`COMFYUI_PORTABLE_ROOT`**：指向 ComfyUI 便携发行版**外层目录**（含 `ComfyUI_windows_portable/` 子目录的目录）。例如装在 D 盘：
+
+  ```bash
+  export COMFYUI_PORTABLE_ROOT=D:/ai/comfyui-portable
+  uv run txt2img-api
+  ```
+
+- **`COMFYUI_LAUNCHER_BAT`**：直接指定 .bat 启动器的绝对路径（绕过所有发现逻辑，最高优先级）。
+
+启动器解析顺序：
+
+1. `COMFYUI_LAUNCHER_BAT`（如设置）→ 立即使用
+2. `COMFYUI_PORTABLE_ROOT`（如设置且目录存在）→ `<root>/ComfyUI_windows_portable/<bat>`
+3. **自动发现**：在 EXE 同级目录扫描以下任一名称（按顺序）：
+
+   ```
+   ComfyUI_windows_portable_nvidia
+   ComfyUI_windows_portable
+   ComfyUI_portable
+   ```
+
+4. 都没找到 → 抛 `FileNotFoundError` 并提示
 
 ### 交互流程
 

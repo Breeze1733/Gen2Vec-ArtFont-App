@@ -58,9 +58,10 @@ class TestResolveWorkflowPath:
         assert path.exists(), f"Workflow file should exist at {path}"
         assert path.suffix == ".json"
 
-    def test_default_without_name_uses_txt2img_api(self) -> None:
+    def test_default_without_name_uses_flux_schnell(self) -> None:
         path = _resolve_workflow_path()
-        assert path.name == "txt2img_api.json"
+        assert path.name == "flux_schnell.json"
+        assert path.exists(), "default fallback workflow must actually exist"
 
     def test_appends_json_extension(self) -> None:
         path = _resolve_workflow_path("my_workflow")
