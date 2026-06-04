@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -34,3 +34,5 @@ class GenerationResponse(BaseModel):
     image_base64: str
     image_name: str
     metadata: dict
+    workflow_api: Optional[dict] = None
+    model_dependencies: Optional[dict] = None

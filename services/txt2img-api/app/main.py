@@ -55,6 +55,8 @@ def generate(payload: GenerationRequest) -> GenerationResponse:
         image_base64=artifact.image_base64,
         image_name=artifact.image_name,
         metadata=artifact.metadata,
+        workflow_api=artifact.workflow_api,
+        model_dependencies=artifact.model_dependencies,
     )
 
 

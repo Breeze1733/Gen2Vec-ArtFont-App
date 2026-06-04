@@ -476,6 +476,11 @@ const startGeneration = async () => {
       result.original = imageBase64
       finishStageProgress('stage1')
 
+      const workflowArtifactsData = {
+        workflowApi: respA.workflow_api || null,
+        modelDependencies: respA.model_dependencies || null,
+      }
+
       taskInfo = await prepareOutputTask({ mode: 'single', index: 1, text: payload.text.trim(), seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: true })
       await writeTaskArtifacts({
         outputRoot: taskInfo.outputRoot,
@@ -485,7 +490,8 @@ const startGeneration = async () => {
         artifacts: { original: imageBase64 },
         metadata: null,
         runLog: buildRunLog({ task, taskInfo, modeName: 'single', text: payload.text.trim(), prompt: payload.prompt.trim(), seed: payload.seed, stage1Duration, status: 'vectorizing', usesTxt2Img: true }),
-        usesTxt2Img: true
+        usesTxt2Img: true,
+        workflowArtifacts: workflowArtifactsData
       })
       currentTaskDir.value = taskInfo.taskDir
       currentOutputRoot.value = taskInfo.outputRoot
@@ -535,7 +541,8 @@ const startGeneration = async () => {
         artifacts: { original: imageBase64, transparent: result.transparent, preview: result.preview, svg: result.svg },
         metadata: finalMetadata,
         runLog,
-        usesTxt2Img: true
+        usesTxt2Img: true,
+        workflowArtifacts: workflowArtifactsData
       })
       currentFiles.value = Object.entries(writeResult.paths || {}).map(([key, value]) => ({ key, name: value, data: value, isPath: true }))
 
@@ -624,6 +631,10 @@ const startGeneration = async () => {
           const t1 = Date.now()
           const respA = await generateArtBitmap(payloadA)
           const s1Ms = Date.now() - t1
+          const batchWorkflowArtifacts = {
+            workflowApi: respA.workflow_api || null,
+            modelDependencies: respA.model_dependencies || null,
+          }
           const itemTaskInfo = await prepareOutputTask({ mode: 'batch', index: i + 1, text: text || `item-${i + 1}`, seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: true, summaryDir: batchSummaryDir })
           await writeTaskArtifacts({
             outputRoot: itemTaskInfo.outputRoot,
@@ -633,7 +644,8 @@ const startGeneration = async () => {
             artifacts: { original: respA.png },
             metadata: null,
             runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, status: 'vectorizing', usesTxt2Img: true }),
-            usesTxt2Img: true
+            usesTxt2Img: true,
+            workflowArtifacts: batchWorkflowArtifacts
           })
 
           // Stage 2: 矢量化
@@ -680,7 +692,8 @@ const startGeneration = async () => {
             metadata: item.metadata,
             runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, stage2Duration: s2Ms, status: 'success', usesTxt2Img: true }),
             usesTxt2Img: true,
-            summaryRow: { ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: 'success', text, prompt, seed: payload.seed }), summary_path: batchSummaryPath }
+            summaryRow: { ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: 'success', text, prompt, seed: payload.seed }), summary_path: batchSummaryPath },
+            workflowArtifacts: batchWorkflowArtifacts
           })
 
           batchProgress.completed++
@@ -917,7 +930,7 @@ const augmentMetadata = (metadata, { task, taskInfo, modeName, text = '', prompt
     : null
 })
 
-const writeCurrentTask = async ({ task, taskInfo, artifacts, metadata, runLog, usesTxt2Img, summaryRow }) => {
+const writeCurrentTask = async ({ task, taskInfo, artifacts, metadata, runLog, usesTxt2Img, summaryRow, workflowArtifacts }) => {
   const writeResult = await writeTaskArtifacts({
     outputRoot: taskInfo.outputRoot,
     taskDir: taskInfo.taskDir,
@@ -927,7 +940,8 @@ const writeCurrentTask = async ({ task, taskInfo, artifacts, metadata, runLog, u
     metadata,
     runLog,
     usesTxt2Img,
-    summaryRow
+    summaryRow,
+    workflowArtifacts
   })
   currentTaskDir.value = writeResult.taskDir
   currentOutputRoot.value = writeResult.outputRoot
