@@ -505,7 +505,16 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
 
             return GenerationArtifact(image_base64=image_base64, image_name=image_name, metadata=metadata)
 
+    except httpx.ConnectError as exc:
+        # ComfyUI is not accepting connections — expected when the
+        # launcher is still booting, was stopped, or 8188 is occupied.
+        # Log at info level; _wait_for_comfyui_ready should normally
+        # gate this, but a TOCTOU window is still possible.
+        logger.info("ComfyUI at %s unreachable: %s", host, exc)
+        return None
     except Exception:
+        # Real bug (KeyError, JSONDecodeError, HTTP 5xx, etc.) —
+        # preserve full traceback for postmortem.
         logger.exception("ComfyUI generation failed")
         return None
 

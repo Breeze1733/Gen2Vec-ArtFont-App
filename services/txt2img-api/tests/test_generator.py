@@ -230,9 +230,13 @@ class TestGenerateArtwork:
         self, sample_request: GenerationRequest, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """ComfyUI is not running in test environment, so should return stub."""
-        # Skip the per-request 5-min wait for ComfyUI readiness in this
-        # test environment; we explicitly want to exercise the fallback.
+        # Skip the per-request 5-min wait and point at an unreachable
+        # port so the test is deterministic regardless of whether the
+        # developer happens to have ComfyUI running locally.
         monkeypatch.setenv("COMFYUI_READY_WAIT_SECONDS", "0")
+        monkeypatch.setenv("COMFYUI_HOST", "http://127.0.0.1:1")
+        monkeypatch.setenv("COMFYUI_POLL_TIMEOUT", "1")
+        monkeypatch.setenv("COMFYUI_POLL_INTERVAL", "0.01")
         artifact = generate_artwork(sample_request)
         assert artifact.image_base64.startswith("data:image/png;base64,")
         assert artifact.image_name.endswith(".png")
@@ -516,3 +520,84 @@ class TestGenerateArtworkWaitsForComfyui:
         assert elapsed < 1.0
         # First workflow in chain succeeded, so result returned
         assert result is not None
+
+
+class TestComfyuiErrorLogLevel:
+    """ComfyUI connection failures should log at INFO, not EXCEPTION."""
+
+    def test_connect_error_logs_at_info_level(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """httpx.ConnectError must NOT produce a stack trace in logs."""
+        import logging
+
+        from app.generator import (
+            _call_comfyui_api,
+            _load_workflow,
+            _resolve_workflow_path,
+        )
+        from app.models import GenerationRequest
+
+        monkeypatch.setenv("COMFYUI_POLL_TIMEOUT", "1")
+        monkeypatch.setenv("COMFYUI_POLL_INTERVAL", "0.01")
+        # Point at a port that refuses connections immediately
+        monkeypatch.setenv("COMFYUI_HOST", "http://127.0.0.1:1")
+
+        workflow = _load_workflow(_resolve_workflow_path("test_z_image_turbo"))
+        req = GenerationRequest(prompt="test")
+
+        with caplog.at_level(logging.INFO):
+            result = _call_comfyui_api(req, workflow)
+
+        assert result is None
+        # Should have an info line about unreachable
+        info_records = [
+            r for r in caplog.records
+            if r.levelno == logging.INFO and "unreachable" in r.message.lower()
+        ]
+        assert info_records, (
+            f"expected an INFO 'unreachable' log, got: "
+            f"{[r.message for r in caplog.records]}"
+        )
+        # Should NOT have exception records (which would dump traceback)
+        exc_records = [r for r in caplog.records if r.exc_info is not None]
+        assert not exc_records, (
+            f"ConnectError must not produce exc_info; got: "
+            f"{[r.message for r in exc_records]}"
+        )
+
+    def test_other_exception_still_logs_traceback(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Non-ConnectError exceptions must still preserve the stack trace."""
+        import logging
+        from unittest.mock import MagicMock, patch
+
+        from app.generator import (
+            _call_comfyui_api,
+            _load_workflow,
+            _resolve_workflow_path,
+        )
+        from app.models import GenerationRequest
+
+        monkeypatch.setenv("COMFYUI_POLL_TIMEOUT", "1")
+
+        workflow = _load_workflow(_resolve_workflow_path("test_z_image_turbo"))
+        req = GenerationRequest(prompt="test")
+
+        # Make httpx.Client.post raise a non-ConnectError exception
+        fake_inner = MagicMock()
+        fake_inner.post = MagicMock(side_effect=RuntimeError("ComfyUI protocol mismatch"))
+        fake_client = MagicMock()
+        fake_client.__enter__ = MagicMock(return_value=fake_inner)
+        fake_client.__exit__ = MagicMock(return_value=False)
+
+        with patch("httpx.Client", return_value=fake_client), \
+             caplog.at_level(logging.ERROR):
+            result = _call_comfyui_api(req, workflow)
+
+        assert result is None
+        # Should have an exception record (preserves traceback)
+        exc_records = [r for r in caplog.records if r.exc_info is not None]
+        assert exc_records, "RuntimeError should still log with exc_info (traceback)"
+        assert any("ComfyUI generation failed" in r.message for r in exc_records)

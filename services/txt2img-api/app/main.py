@@ -271,6 +271,11 @@ def _start_comfyui_background(
             with _comfyui_proc_lock:
                 _comfyui_proc = subprocess.Popen(
                     [str(bat)],
+                    # Run the .bat from its own directory so its relative
+                    # paths (".\python_embeded\python.exe") resolve
+                    # correctly. Without this, Windows error 0x3 (path not
+                    # found) kills the launcher before python starts.
+                    cwd=bat.parent,
                     shell=True,
                     stdout=log_file,
                     stderr=log_file,

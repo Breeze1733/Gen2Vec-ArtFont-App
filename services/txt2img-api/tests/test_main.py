@@ -134,16 +134,21 @@ class TestStartComfyuiSilent:
     """_start_comfyui_background should write launcher output to a file
     (not DEVNULL) and skip spawning when ComfyUI is already up."""
 
-    def test_spawns_proc_with_log_file(
+    def test_spawns_proc_with_log_file_and_correct_cwd(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """stdout/stderr should be redirected to a log file."""
-        from unittest.mock import MagicMock, mock_open, patch
+        """stdout/stderr → log file; cwd → .bat's own directory (so
+        relative paths like '.\\\\python_embeded\\\\python.exe' resolve)."""
+        from unittest.mock import mock_open, patch
 
         from app import main
         from app.main import _start_comfyui_background
 
-        fake_bat = MagicMock()
+        # Use a real Path so .parent returns a real path (not a Mock).
+        fake_bat = tmp_path / "fake_comfyui" / "ComfyUI_windows_portable" / "run.bat"
+        fake_bat.parent.mkdir(parents=True, exist_ok=True)
+        fake_bat.write_text("@echo off\n")
+
         with patch.object(main, "_pick_comfyui_launcher_bat", return_value=fake_bat), \
              patch.object(main, "_is_port_open", return_value=False), \
              patch.object(main, "_get_executable_dir", return_value=tmp_path), \
@@ -157,6 +162,9 @@ class TestStartComfyuiSilent:
             # stdout/stderr should be a file handle, not DEVNULL
             assert kwargs["stdout"] is not subprocess.DEVNULL
             assert kwargs["stderr"] is not subprocess.DEVNULL
+            # CRITICAL: cwd must be the .bat's own dir so its relative
+            # paths (".\python_embeded\python.exe") resolve.
+            assert kwargs["cwd"] == fake_bat.parent
 
         # cleanup
         main._comfyui_proc = None
