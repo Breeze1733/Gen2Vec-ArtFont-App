@@ -336,8 +336,29 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
     so the caller can fall back to the local stub.
     """
     host = os.environ.get(_ENV_COMFYUI_HOST, _DEFAULT_COMFYUI_HOST).rstrip("/")
-    timeout = int(os.environ.get(_ENV_POLL_TIMEOUT, str(_DEFAULT_POLL_TIMEOUT)))
-    interval = float(os.environ.get(_ENV_POLL_INTERVAL, str(_DEFAULT_POLL_INTERVAL)))
+
+    # Env-driven polling knobs; defensive parsing so a typo like
+    # COMFYUI_POLL_TIMEOUT=abc doesn't 500 the first request.
+    try:
+        timeout = int(os.environ.get(_ENV_POLL_TIMEOUT, str(_DEFAULT_POLL_TIMEOUT)))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid %s=%r, falling back to %s",
+            _ENV_POLL_TIMEOUT,
+            os.environ.get(_ENV_POLL_TIMEOUT),
+            _DEFAULT_POLL_TIMEOUT,
+        )
+        timeout = _DEFAULT_POLL_TIMEOUT
+    try:
+        interval = float(os.environ.get(_ENV_POLL_INTERVAL, str(_DEFAULT_POLL_INTERVAL)))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid %s=%r, falling back to %s",
+            _ENV_POLL_INTERVAL,
+            os.environ.get(_ENV_POLL_INTERVAL),
+            _DEFAULT_POLL_INTERVAL,
+        )
+        interval = _DEFAULT_POLL_INTERVAL
 
     try:
         with httpx.Client(timeout=30.0) as client:
@@ -363,9 +384,21 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
                 if hist_resp.status_code == 200:
                     data = hist_resp.json()
                     entry = data.get(prompt_id)
-                    if entry and entry.get("status", {}).get("completed"):
-                        history = entry
-                        break
+                    if entry:
+                        status = entry.get("status", {})
+                        if status.get("completed"):
+                            history = entry
+                            break
+                        # ComfyUI may report execution errors via status_str;
+                        # bail out immediately instead of waiting for the
+                        # full timeout window.
+                        if status.get("status_str") == "error":
+                            logger.warning(
+                                "ComfyUI reported error for prompt %s: %s",
+                                prompt_id[:8],
+                                status.get("messages", []),
+                            )
+                            return None
                 time.sleep(interval)
 
             if history is None:
@@ -425,8 +458,8 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
 
             return GenerationArtifact(image_base64=image_base64, image_name=image_name, metadata=metadata)
 
-    except Exception as exc:
-        logger.warning("ComfyUI generation failed: %s", exc)
+    except Exception:
+        logger.exception("ComfyUI generation failed")
         return None
 
 

@@ -46,7 +46,7 @@
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `prompt` | string | — | **必填**，文本提示词 |
+| `prompt` | string | `""` | 文本提示词，可选（默认空字符串，由 `style` 决定渲染方向） |
 | `negative_prompt` | string | `""` | 负面提示词 |
 | `resolution` | string | `"1024 x 1024"` | 格式 `宽 x 高`，如 `2048x1024` |
 | `seed` | int | `0` | 随机种子，`0` 表示不指定（由 ComfyUI 决定） |
@@ -54,7 +54,7 @@
 | `format` | string | `"PNG"` | 仅支持 `"PNG"` 或 `"PNG + SVG"` |
 | `workflow` | string | `""` | 工作流文件名（不含路径和扩展名），对应 `workflows/{name}.json` |
 
-如果 `workflow` 为空，默认使用 `workflows/txt2img_api.json`。也可通过 `WORKFLOW_PATH` 环境变量完全覆盖。
+如果 `workflow` 为空，默认使用 `workflows/flux_schnell.json`。也可通过 `WORKFLOW_PATH` 环境变量完全覆盖。
 
 #### 响应
 
@@ -107,7 +107,7 @@ uv run txt2img-api
 或直接用 uvicorn：
 
 ```bash
-uv run uvicorn app.main:app --host 0.0.0.0 --port 9001 --app-dir src
+uv run uvicorn app.main:app --host 0.0.0.0 --port 9001
 ```
 
 服务默认监听 `0.0.0.0:9001`。
@@ -207,7 +207,7 @@ cd services/txt2img-api/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable
 
 ```
 services/txt2img-api/
-├── src/app/
+├── app/
 │   ├── main.py          FastAPI 应用、路由、ComfyUI 生命周期管理
 │   ├── models.py        Pydantic 请求/响应模型
 │   └── generator.py     核心生成逻辑（ComfyUI 客户端 + 本地 stub）
@@ -219,5 +219,5 @@ services/txt2img-api/
 
 ## 与 monorepo 的关联
 
-- 桌面端前端通过 HTTP 直接调用本服务 `http://127.0.0.1:9001/api/v1/generate`
+- 桌面端前端通过 HTTP 直接调用本服务 `http://127.0.0.1:9001/api/v1/txt2img`
 - 生成的 PNG 位图可后续发送到 `vectorizer-api`（端口 8000）进行矢量化

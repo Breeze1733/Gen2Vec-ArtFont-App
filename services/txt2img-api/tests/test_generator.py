@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -348,3 +350,64 @@ class TestBackgroundSuppressConstants:
     def test_zimage_bg_suppress_is_string(self) -> None:
         assert isinstance(_ZIMAGE_BG_SUPPRESS, str)
         assert len(_ZIMAGE_BG_SUPPRESS) > 0
+
+
+class TestEnvVarParsing:
+    """Defensive env-var parsing must not 500 on garbage values."""
+
+    def test_invalid_poll_timeout_does_not_500(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Garbage COMFYUI_POLL_TIMEOUT must not raise; should warn + use default."""
+        monkeypatch.setenv("COMFYUI_POLL_TIMEOUT", "abc")
+        # Point at a port that refuses connections so we exit the polling
+        # loop quickly without needing a live ComfyUI.
+        monkeypatch.setenv("COMFYUI_HOST", "http://127.0.0.1:1")
+
+        workflow = _load_workflow(_resolve_workflow_path("test_z_image_turbo"))
+        req = GenerationRequest(prompt="test")
+
+        # Should not raise ValueError; returns None because connection refused.
+        result = _call_comfyui_api(req, workflow)
+        assert result is None
+
+
+class TestComfyUiErrorHandling:
+    """ComfyUI execution errors must be detected and short-circuited."""
+
+    def test_error_status_returns_none_immediately(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """status_str='error' must return None within ~1s, not spin for 500s."""
+        monkeypatch.setenv("COMFYUI_POLL_TIMEOUT", "5")
+        monkeypatch.setenv("COMFYUI_POLL_INTERVAL", "0.01")
+
+        workflow = _load_workflow(_resolve_workflow_path("test_z_image_turbo"))
+        req = GenerationRequest(prompt="test")
+
+        with patch("httpx.Client") as MockClient:
+            client = MockClient.return_value.__enter__.return_value
+
+            submit = MagicMock(status_code=200, is_error=False)
+            submit.json.return_value = {"prompt_id": "abc123"}
+
+            history = MagicMock(status_code=200)
+            history.json.return_value = {
+                "abc123": {
+                    "status": {
+                        "completed": False,
+                        "status_str": "error",
+                        "messages": ["bad input"],
+                    }
+                }
+            }
+
+            client.post.return_value = submit
+            client.get.return_value = history
+
+            start = time.monotonic()
+            result = _call_comfyui_api(req, workflow)
+            elapsed = time.monotonic() - start
+
+        assert result is None
+        assert elapsed < 1.0  # fail-fast, not 5s timeout
