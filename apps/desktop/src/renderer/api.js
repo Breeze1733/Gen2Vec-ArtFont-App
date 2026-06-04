@@ -134,6 +134,8 @@ export async function generateArtBitmap(payload) {
       image_name: data.image_name || '',
       svg: '',
       metadata: data.metadata || null,
+      workflow_api: data.workflow_api || null,
+      model_dependencies: data.model_dependencies || null,
     }
   }
 
@@ -166,6 +168,8 @@ export async function generateArtBitmap(payload) {
     png: data.image_base64 || '',
     svg: '',
     metadata: data.metadata || null,
+    workflow_api: data.workflow_api || null,
+    model_dependencies: data.model_dependencies || null,
   }
 }
 

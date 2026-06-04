@@ -50,6 +50,8 @@ export async function generateArtBitmap(options) {
   return {
     png: data.image_base64 || '',
     metadata: data.metadata || null,
+    workflow_api: data.workflow_api || null,
+    model_dependencies: data.model_dependencies || null,
   }
 }
 

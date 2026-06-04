@@ -53,6 +53,8 @@ class GenerationArtifact:
     image_base64: str
     image_name: str
     metadata: dict
+    workflow_api: Optional[dict] = None
+    model_dependencies: Optional[dict] = None
 
 
 # ── Workflow helpers ──
@@ -604,6 +606,59 @@ def _is_primarily_chinese(text: str) -> bool:
     return cn > 0 and cn >= len(text.strip()) * 0.5
 
 
+def _extract_model_dependencies(workflow: dict, workflow_name: str = "") -> dict:
+    """Scan loader nodes in a patched workflow and extract model file references."""
+    models: dict[str, list[str]] = {
+        "checkpoints": [],
+        "unets": [],
+        "clip": [],
+        "vae": [],
+        "loras": [],
+    }
+
+    # Class-type → input-field mapping for known loader nodes
+    LOADER_FIELDS: dict[str, str] = {
+        "CheckpointLoaderSimple": "ckpt_name",
+        "UNETLoader": "unet_name",
+        "UnetLoaderGGUF": "unet_name",
+        "CLIPLoader": "clip_name",
+        "DualCLIPLoader": "clip_name1",  # primary model; clip_name2 also captured
+        "VAELoader": "vae_name",
+        "LoraLoaderModelOnly": "lora_name",
+    }
+
+    for node in workflow.values():
+        ct = node.get("class_type", "")
+        field = LOADER_FIELDS.get(ct)
+        if field:
+            model_name = node.get("inputs", {}).get(field, "")
+            if model_name and isinstance(model_name, str):
+                if ct == "DualCLIPLoader":
+                    models["clip"].append(model_name)
+                    clip2 = node.get("inputs", {}).get("clip_name2", "")
+                    if clip2 and isinstance(clip2, str):
+                        models["clip"].append(clip2)
+                elif ct == "LoraLoaderModelOnly":
+                    models["loras"].append(model_name)
+                elif ct in ("UNETLoader", "UnetLoaderGGUF", "CheckpointLoaderSimple"):
+                    target = "unets" if ct != "CheckpointLoaderSimple" else "checkpoints"
+                    models[target].append(model_name)
+                elif ct == "VAELoader":
+                    models["vae"].append(model_name)
+                elif ct == "CLIPLoader":
+                    models["clip"].append(model_name)
+
+    return {
+        "checkpoints": sorted(set(models["checkpoints"])),
+        "unets": sorted(set(models["unets"])),
+        "clip": sorted(set(models["clip"])),
+        "vae": sorted(set(models["vae"])),
+        "loras": sorted(set(models["loras"])),
+        "workflow_name": workflow_name,
+        "note": "运行时模型依赖快照；请结合交付文档中的模型清单核验。",
+    }
+
+
 def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
     """依次尝试工作流降级链，全部失败则用本地 Pillow stub。
 
@@ -650,10 +705,18 @@ def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
         try:
             workflow_path = _resolve_workflow_path(name)
             workflow = _load_workflow(workflow_path)
-            result = _call_comfyui_api(request, workflow)
+            patched = _patch_workflow(workflow, request)
+            result = _call_comfyui_api(request, patched)
             if result is not None:
                 logger.info("Workflow '%s' succeeded", name)
-                return result
+                model_deps = _extract_model_dependencies(patched, workflow_name=name)
+                return GenerationArtifact(
+                    image_base64=result.image_base64,
+                    image_name=result.image_name,
+                    metadata=result.metadata,
+                    workflow_api=patched,
+                    model_dependencies=model_deps,
+                )
             logger.warning("Workflow '%s' returned None, trying next", name)
         except Exception as exc:
             logger.warning("Workflow '%s' failed: %s", name, exc)

@@ -202,7 +202,28 @@ function inferLegacyExt(key, data) {
   return 'bin'
 }
 
-function buildWorkflowArtifacts({ metadata = {}, taskName = '', seed = 0, mode = 'single' }) {
+function buildWorkflowArtifacts({ metadata = {}, taskName = '', seed = 0, mode = 'single', workflowApi = null, modelDependencies = null }) {
+  if (workflowApi || modelDependencies) {
+    return {
+      workflowApi: workflowApi || {
+        task_name: taskName,
+        mode,
+        seed,
+        workflow: metadata?.generation?.workflow || metadata?.workflow || metadata?.engine || 'local-runtime',
+        prompt: metadata?.generation?.prompt || metadata?.prompt || '',
+        text: metadata?.generation?.text || '',
+        resolution: metadata?.generation?.resolution || '',
+        captured_at: new Date().toISOString()
+      },
+      workflowNodes: `# 工作流节点说明\n\n- 任务：${taskName}\n- 模式：${mode}\n- 文生图：生成位图 original.png\n- 矢量化：生成 transparent.png、result.svg、preview.png\n\n> 当前文件为桌面端运行快照；后续可由 txt2img-api 返回完整 ComfyUI 节点清单。\n`,
+      modelDependencies: modelDependencies || {
+        engine: metadata?.engine || metadata?.generation?.engine || 'unknown',
+        workflow: metadata?.workflow || metadata?.generation?.workflow || null,
+        style: metadata?.style || metadata?.generation?.style || null,
+        note: '运行时模型依赖快照；请结合交付文档中的模型清单核验。'
+      }
+    }
+  }
   return {
     workflowApi: {
       task_name: taskName,
@@ -416,7 +437,12 @@ ipcMain.handle('art-text/write-task-artifacts', async (event, options) => {
   }
 
   if (usesTxt2Img) {
-    const workflow = workflowArtifacts || buildWorkflowArtifacts({ metadata: metadataPayload || {}, taskName, seed: metadataPayload?.generation?.seed, mode: metadataPayload?.mode })
+    const wfApi = workflowArtifacts?.workflowApi || workflowArtifacts?.workflow_api
+    const wfDeps = workflowArtifacts?.modelDependencies || workflowArtifacts?.model_dependencies
+    const hasRealData = wfApi && typeof wfApi === 'object' && Object.keys(wfApi).length > 2
+    const workflow = hasRealData
+      ? workflowArtifacts
+      : buildWorkflowArtifacts({ metadata: metadataPayload || {}, taskName, seed: metadataPayload?.generation?.seed, mode: metadataPayload?.mode })
     const wfSaved = await writeArtifactFile(targetPaths.workflowApi, workflow.workflowApi || workflow.workflow_api || {}, true)
     const nodesSaved = await writeArtifactFile(targetPaths.workflowNodes, workflow.workflowNodes || workflow.nodes || '', true)
     const depsSaved = await writeArtifactFile(targetPaths.modelDependencies, workflow.modelDependencies || workflow.model_dependencies || {}, true)
