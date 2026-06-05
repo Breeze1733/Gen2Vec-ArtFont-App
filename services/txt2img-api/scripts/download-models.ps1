@@ -170,7 +170,7 @@ foreach ($model in $Models) {
     $downloaded = $false
     for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
         try {
-            Invoke-WebRequest -Uri $model.Url -OutFile $destFile -Resume -ErrorAction Stop
+            Invoke-WebRequest -Uri $model.Url -OutFile $destFile -ErrorAction Stop
 
             $actualSize = "{0:F2} GB" -f ((Get-Item $destFile).Length / 1GB)
             Emit "DONE" "$($model.Filename):$($model.Subdir):$actualSize"
