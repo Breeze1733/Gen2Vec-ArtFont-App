@@ -12,8 +12,11 @@ apps/cli/
 │   ├── commands/
 │   │   ├── generate.mjs         # generate 命令
 │   │   ├── vectorize.mjs        # vectorize 命令
-│   │   └── pipeline.mjs         # pipeline 命令
-│   └── utils/file.mjs           # 文件读写
+│   │   ├── pipeline.mjs         # pipeline 命令
+│   │   └── batch.mjs            # batch 命令
+│   └── utils/
+│       ├── file.mjs             # 文件读写
+│       └── output.mjs           # desktop-compatible 任务产物
 └── README.md
 ```
 
@@ -35,7 +38,7 @@ build-gen2vec-cli.ps1 启动
   ├─ 3. 检查/下载 AI 模型
   ├─ 4. spawn txt2img-backend + vectorizer-backend
   ├─ 5. 轮询 healthz → 就绪
-  ├─ 6. 执行用户命令 (generate / vectorize / pipeline)
+  ├─ 6. 执行用户命令 (generate / vectorize / pipeline / batch)
   └─ 7. 退出时 → POST /shutdown → kill 子进程
 ```
 
@@ -118,6 +121,7 @@ $ gen2vec shutdown
 $ gen2vec generate --text "你好"     # 冷启动 ~30s（含引擎解压/后端启动）
 $ gen2vec generate --text "世界"     # 热启动 <1s（后端已在线，跳过步骤 1-4）
 $ gen2vec vectorize --input a.png   # 热启动 <1s
+$ gen2vec batch --input-file batch.txt --output-dir outputs/batch-run
 $ gen2vec shutdown                  # 手动关闭后端
 ```
 

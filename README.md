@@ -96,7 +96,7 @@ node apps/cli/bin/gen2vec.mjs vectorize --input artwork.png --preset detailed --
 #### 完整流水线（文本 → SVG）
 
 ```powershell
-node apps/cli/bin/gen2vec.mjs pipeline --text "Hello" --prompt "赛博朋克" --vector-preset ultra
+node apps/cli/bin/gen2vec.mjs pipeline --text "Hello" --prompt "赛博朋克" --vector-preset ultra --output-dir ./outputs
 ```
 
 | 参数 | 简写 | 说明 |
@@ -107,7 +107,26 @@ node apps/cli/bin/gen2vec.mjs pipeline --text "Hello" --prompt "赛博朋克" --
 | `--resolution` | `-r` | 分辨率 |
 | `--seed` | `-s` | 随机种子 |
 | `--vector-preset` | | 矢量化预设 |
-| `--output-dir` | | 输出目录 |
+| `--output-dir` | | 输出目录，默认 `./outputs` |
+
+#### 批量生成（文本 → SVG）
+
+```powershell
+node apps/cli/bin/gen2vec.mjs batch `
+  --input-file testdata/art_text_prompts_150.txt `
+  --output-dir ./outputs/cli-batch-150 `
+  --resolution "1024 x 1024" `
+  --seed 20260605 `
+  --vector-preset balanced
+```
+
+批量输入支持 TXT / CSV / JSON。TXT 与桌面端批量输入框一致，每行：
+
+```text
+文本 | 风格提示词
+```
+
+CLI 默认写出与桌面端一致的任务目录：`original.png`、`transparent.png`、`result.svg`、`preview.png`、`metadata.json`、`run.log`、`workflows/*`；批量模式额外生成 `batch_summary.csv`。
 
 #### 环境变量
 
@@ -115,4 +134,5 @@ node apps/cli/bin/gen2vec.mjs pipeline --text "Hello" --prompt "赛博朋克" --
 |------|------|--------|
 | `TXT2IMG_BACKEND_URL` | 文生图服务地址 | `http://127.0.0.1:9001` |
 | `VECTORIZER_BACKEND_URL` | 矢量化服务地址 | `http://127.0.0.1:8000` |
-| `TXT2IMG_WORKFLOW` | ComfyUI 工作流名称 | `test_z_image_turbo` |
+| `TXT2IMG_WORKFLOW` | ComfyUI 工作流名称 | 空字符串，使用后端降级链 |
+| `ART_TEXT_OUTPUT_ROOT` | 默认输出根目录 | `./outputs` |

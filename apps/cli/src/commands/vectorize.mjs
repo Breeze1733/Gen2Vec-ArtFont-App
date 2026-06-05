@@ -4,6 +4,8 @@
 
 import { vectorizeImage } from '../api.mjs'
 import { readFileAsBase64, saveSvgToFile, saveBase64ToFile } from '../utils/file.mjs'
+import { augmentMetadata, buildRunLog, createCliTask, prepareOutputTask, writeTaskArtifacts } from '../utils/output.mjs'
+import path from 'node:path'
 
 /**
  * 矢量化位图
@@ -15,28 +17,70 @@ import { readFileAsBase64, saveSvgToFile, saveBase64ToFile } from '../utils/file
  * @returns {Promise<{svgPath: string, metadata: Object}>}
  */
 export async function run(args) {
-  const { input, output, preset = 'balanced', preview = false } = args
+  const { input, output, preset = 'balanced', preview = false, outputDir = 'outputs', vector = {} } = args
 
   console.log(`正在矢量化: ${input}...`)
+
+  const startedAt = new Date().toISOString()
+  const task = createCliTask({ title: path.basename(input), mode: 'vectorize', startedAt })
+  const taskInfo = await prepareOutputTask({ mode: 'vectorize', index: 1, seed: 0, startedAt, outputRoot: outputDir })
 
   // 读取输入文件
   const imageBase64 = await readFileAsBase64(input)
 
-  // 调用矢量化 API
-  const result = await vectorizeImage({
-    imageBase64,
-    imageName: input.split(/[\\/]/).pop(),
-    vector: { preset },
+  let result
+  const t2 = Date.now()
+  try {
+    result = await vectorizeImage({
+      imagePath: input,
+      imageName: path.basename(input),
+      sourceType: 'upload',
+      vector: { preset, ...vector },
+      timeoutMs: 120000,
+    })
+  } catch (pathErr) {
+    console.warn(`  路径读取失败，回退 base64: ${pathErr.message}`)
+    result = await vectorizeImage({
+      imageBase64,
+      imageName: path.basename(input),
+      sourceType: 'upload',
+      vector: { preset, ...vector },
+      timeoutMs: 120000,
+    })
+  }
+  const stage2Duration = Date.now() - t2
+
+  const metadata = augmentMetadata(result.metadata, { task, taskInfo, modeName: 'vectorize', seed: 0, usesTxt2Img: false })
+  await writeTaskArtifacts({
+    outputRoot: taskInfo.outputRoot,
+    taskDir: taskInfo.taskDir,
+    taskName: taskInfo.taskName,
+    paths: taskInfo.paths,
+    artifacts: {
+      original: imageBase64,
+      transparent: result.transparent_png,
+      preview: result.preview_png || result.png,
+      svg: result.svg,
+    },
+    metadata,
+    runLog: buildRunLog({ task, taskInfo, modeName: 'vectorize', stage2Duration, status: 'success', usesTxt2Img: false }),
+    usesTxt2Img: false,
   })
 
-  // 保存 SVG
-  const svgPath = output || input.replace(/\.[^.]+$/, '.svg')
-  await saveSvgToFile(result.svg, svgPath)
-  console.log(`✓ SVG 已保存: ${svgPath}`)
+  console.log(`✓ 任务目录: ${taskInfo.taskDir}`)
+  console.log(`  SVG: ${taskInfo.paths.svg}`)
+  console.log(`  preview: ${taskInfo.paths.preview}`)
+
+  if (output) {
+    await saveSvgToFile(result.svg, output)
+    console.log(`✓ 额外 SVG 已保存: ${output}`)
+  }
 
   // 可选：保存预览 PNG
   if (preview && result.preview_png) {
-    const previewPath = svgPath.replace(/\.svg$/, '-preview.png')
+    const previewPath = output
+      ? (/\.svg$/i.test(output) ? output.replace(/\.svg$/i, '-preview.png') : `${output}-preview.png`)
+      : taskInfo.paths.preview
     await saveBase64ToFile(result.preview_png, previewPath)
     console.log(`✓ 预览已保存: ${previewPath}`)
   }
@@ -48,5 +92,5 @@ export async function run(args) {
     console.log(`  颜色数量: ${q.color_count || 'N/A'}`)
   }
 
-  return { svgPath, metadata: result.metadata }
+  return { svgPath: taskInfo.paths.svg, taskDir: taskInfo.taskDir, metadata }
 }
