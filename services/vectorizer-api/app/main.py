@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -105,6 +107,23 @@ def _resolve_vectorize_image(payload: VectorizeRequest) -> tuple[bytes, str | No
 def healthz() -> dict:
     # Health probe for desktop startup checks.
     return {"ok": True, "service": "vectorizer-api"}
+
+
+@app.post("/shutdown")
+def shutdown() -> dict:
+    """优雅关闭服务。
+
+    Electron / 启动管理器在退出前调用此接口，确保后端进程正常终止。
+    在独立线程中延迟退出，以便 HTTP 响应能先返回给调用方。
+    """
+
+    def _shutdown() -> None:
+        import time as _time
+        _time.sleep(0.2)  # 等待 HTTP 响应发送完成
+        os._exit(0)
+
+    threading.Thread(target=_shutdown, daemon=True, name="shutdown").start()
+    return {"ok": True, "message": "Shutting down..."}
 
 
 @app.post("/api/v1/vectorize", response_model=VectorizeResponse)
