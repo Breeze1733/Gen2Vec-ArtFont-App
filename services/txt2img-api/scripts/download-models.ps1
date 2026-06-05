@@ -1,4 +1,4 @@
-# download-models.ps1 — AI 模型下载脚本
+﻿# download-models.ps1 — AI 模型下载脚本
 <#
 .SYNOPSIS
   下载 10 个 AI 模型文件到 ComfyUI 便携版的 models/ 目录。
@@ -84,6 +84,10 @@ if (-not (Test-Path $ComfyUIDir)) {
     if (-not $Electron) {
         Write-Host "`n❌ 错误：未找到 ComfyUI 引擎！" -ForegroundColor Red
         Write-Host "   请先双击 ComfyUI-Engine.exe 解压引擎到当前目录。" -ForegroundColor Yellow
+    }
+    if (-not $Electron) {
+        Write-Host ""
+        Read-Host "按 Enter 键退出"
     }
     exit 2
 }
@@ -198,7 +202,7 @@ foreach ($model in $Models) {
 }
 
 # 完成
-Emit "COMPLETE" "$okCount:$skipCount:$failCount"
+Emit "COMPLETE" "${okCount}:${skipCount}:${failCount}"
 
 if (-not $Electron) {
     Write-Host ""
@@ -214,4 +218,8 @@ if (-not $Electron) {
 }
 
 # exit code: 0 = 全部成功或只有跳过；非零 = 有失败
+if (-not $Electron) {
+    Write-Host ""
+    Read-Host "按 Enter 键退出"
+}
 if ($failCount -gt 0) { exit 1 } else { exit 0 }
