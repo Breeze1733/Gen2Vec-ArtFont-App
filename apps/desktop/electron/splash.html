@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>矢量艺术字生成器 - 启动中</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(135deg, rgba(236,253,245,0.95) 0%, rgba(255,247,237,0.9) 100%), #f7f3ea;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+
+    .splash-container {
+      width: 460px;
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04);
+      padding: 40px 36px 32px;
+      -webkit-app-region: no-drag;
+    }
+
+    .logo-area {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .logo-icon {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 12px;
+      background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      color: #fff;
+    }
+
+    .logo-area h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1a1a2e;
+      letter-spacing: 0.5px;
+    }
+
+    .logo-area .subtitle {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+
+    /* Steps indicator */
+    .steps {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      margin-bottom: 24px;
+    }
+
+    .step-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+    }
+
+    .step-circle {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      transition: all 0.4s ease;
+      border: 2px solid #e2e8f0;
+      background: #f8fafc;
+      color: #94a3b8;
+    }
+
+    .step-label {
+      font-size: 11px;
+      color: #94a3b8;
+      white-space: nowrap;
+      transition: color 0.4s ease;
+    }
+
+    .step-connector {
+      width: 40px;
+      height: 2px;
+      background: #e2e8f0;
+      margin: 0 4px;
+      margin-bottom: 20px;
+      transition: background 0.4s ease;
+      border-radius: 1px;
+    }
+
+    .step-item.active .step-circle {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(15, 118, 110, 0.3);
+    }
+
+    .step-item.active .step-label {
+      color: #0f766e;
+      font-weight: 600;
+    }
+
+    .step-item.done .step-circle {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #fff;
+    }
+
+    .step-item.done .step-label {
+      color: #0f766e;
+    }
+
+    .step-item.error .step-circle {
+      background: #ef4444;
+      border-color: #ef4444;
+      color: #fff;
+    }
+
+    .step-item.error .step-label {
+      color: #ef4444;
+    }
+
+    .step-connector.done {
+      background: #0f766e;
+    }
+
+    /* Status message */
+    .status-message {
+      text-align: center;
+      font-size: 14px;
+      color: #475569;
+      min-height: 40px;
+      line-height: 1.6;
+      margin-bottom: 16px;
+      transition: color 0.3s ease;
+    }
+
+    .status-message.error {
+      color: #ef4444;
+    }
+
+    .status-message.success {
+      color: #0f766e;
+    }
+
+    /* Progress bar */
+    .progress-bar-container {
+      width: 100%;
+      height: 6px;
+      background: #f1f5f9;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #0f766e, #14b8a6);
+      border-radius: 3px;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .progress-bar.indeterminate {
+      width: 40%;
+      animation: indeterminate 1.5s ease-in-out infinite;
+    }
+
+    @keyframes indeterminate {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
+
+    /* Action buttons */
+    .action-buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    .btn {
+      padding: 10px 24px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+      -webkit-app-region: no-drag;
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+    }
+
+    .btn-primary {
+      background: #0f766e;
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: #0d6b63;
+    }
+
+    .btn-primary:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #fff;
+      color: #475569;
+      border: 1.5px solid #e2e8f0;
+    }
+
+    .btn-secondary:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
+
+    .btn-danger {
+      background: #fff;
+      color: #ef4444;
+      border: 1.5px solid #fecaca;
+    }
+
+    .btn-danger:hover {
+      background: #fef2f2;
+    }
+
+    /* Download detail */
+    .download-detail {
+      font-size: 12px;
+      color: #94a3b8;
+      text-align: center;
+      margin-top: 8px;
+      min-height: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="splash-container">
+    <div class="logo-area">
+      <div class="logo-icon">🎨</div>
+      <h1>矢量艺术字生成器</h1>
+      <div class="subtitle">AI 驱动 · 本地优先</div>
+    </div>
+
+    <div class="steps">
+      <div class="step-item" id="step1">
+        <div class="step-circle">1</div>
+        <span class="step-label">推理引擎</span>
+      </div>
+      <div class="step-connector" id="conn1"></div>
+      <div class="step-item" id="step2">
+        <div class="step-circle">2</div>
+        <span class="step-label">AI 模型</span>
+      </div>
+      <div class="step-connector" id="conn2"></div>
+      <div class="step-item" id="step3">
+        <div class="step-circle">3</div>
+        <span class="step-label">启动服务</span>
+      </div>
+      <div class="step-connector" id="conn3"></div>
+      <div class="step-item" id="step4">
+        <div class="step-circle">4</div>
+        <span class="step-label">完成</span>
+      </div>
+    </div>
+
+    <div class="status-message" id="status">正在准备...</div>
+    <div class="progress-bar-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="action-buttons" id="actionButtons" style="display:none">
+      <button class="btn btn-secondary" id="btnSkip">跳过</button>
+      <button class="btn btn-primary" id="btnDownload">开始下载</button>
+    </div>
+    <div class="download-detail" id="downloadDetail"></div>
+  </div>
+
+  <script>
+    (function () {
+      // ── DOM refs ──
+      const stepEls = [1, 2, 3, 4].map(n => document.getElementById('step' + n))
+      const connEls = [1, 2, 3].map(n => document.getElementById('conn' + n))
+      const statusEl = document.getElementById('status')
+      const progressBar = document.getElementById('progressBar')
+      const actionButtons = document.getElementById('actionButtons')
+      const btnSkip = document.getElementById('btnSkip')
+      const btnDownload = document.getElementById('btnDownload')
+      const downloadDetail = document.getElementById('downloadDetail')
+
+      let currentStep = 0
+      let userActionResolved = false
+
+      // ── Step helpers ──
+      function updateSteps(step, phase) {
+        for (let i = 0; i < 4; i++) {
+          const el = stepEls[i]
+          el.classList.remove('active', 'done', 'error')
+          if (i + 1 < step) el.classList.add('done')
+          else if (i + 1 === step) {
+            if (phase === 'error') el.classList.add('error')
+            else el.classList.add('active')
+          }
+        }
+        for (let i = 0; i < 3; i++) {
+          if (i + 1 < step) connEls[i].classList.add('done')
+          else connEls[i].classList.remove('done')
+        }
+        currentStep = step
+      }
+
+      function setProgress(percent) {
+        if (percent < 0) {
+          // indeterminate
+          progressBar.style.width = '40%'
+          progressBar.classList.add('indeterminate')
+        } else {
+          progressBar.classList.remove('indeterminate')
+          progressBar.style.width = Math.min(100, Math.max(0, percent)) + '%'
+        }
+      }
+
+      function setStatus(message, type) {
+        statusEl.textContent = message
+        statusEl.className = 'status-message'
+        if (type) statusEl.classList.add(type)
+      }
+
+      function showButtons(show) {
+        actionButtons.style.display = show ? 'flex' : 'none'
+        userActionResolved = false
+      }
+
+      function setDownloadDetail(text) {
+        downloadDetail.textContent = text || ''
+      }
+
+      // ── Button handlers ──
+      btnSkip.addEventListener('click', () => {
+        if (userActionResolved) return
+        userActionResolved = true
+        btnSkip.disabled = true
+        btnDownload.disabled = true
+        if (window.artTextApp?.sendSplashAction) {
+          window.artTextApp.sendSplashAction({ action: 'skip-models' })
+        }
+      })
+
+      btnDownload.addEventListener('click', () => {
+        if (userActionResolved) return
+        userActionResolved = true
+        btnSkip.disabled = true
+        btnDownload.disabled = true
+        setStatus('正在准备下载...')
+        setProgress(-1)
+        if (window.artTextApp?.sendSplashAction) {
+          window.artTextApp.sendSplashAction({ action: 'download-models' })
+        }
+      })
+
+      // ── IPC listener ──
+      if (window.artTextApp?.onSplashProgress) {
+        window.artTextApp.onSplashProgress(handleProgress)
+      }
+
+      function handleProgress(data) {
+        if (!data || typeof data !== 'object') return
+
+        const { step, phase, message, percent, fileIndex, totalFiles, fileName, fileSize } = data
+
+        if (step) updateSteps(step, phase)
+        if (message) setStatus(message, phase === 'error' ? 'error' : phase === 'done' || phase === 'complete' ? 'success' : '')
+        if (percent !== undefined) setProgress(percent)
+
+        // Handle model download prompt
+        if (phase === 'prompt') {
+          showButtons(true)
+          btnSkip.disabled = false
+          btnDownload.disabled = false
+          userActionResolved = false
+          setDownloadDetail(totalFiles ? `需要下载 ${totalFiles} 个模型文件 (约 58 GB)` : '')
+          setProgress(0)
+        }
+
+        // Handle download progress
+        if (phase === 'downloading' && fileIndex !== undefined && totalFiles) {
+          showButtons(false)
+          const pct = totalFiles > 0 ? Math.round((fileIndex / totalFiles) * 100) : -1
+          setProgress(pct)
+          setDownloadDetail(fileName ? `当前: ${fileName}  (${fileIndex}/${totalFiles})` : `${fileIndex}/${totalFiles}`)
+        }
+
+        // Handle download summary
+        if (phase === 'complete' && data.result) {
+          const { ok = 0, skip = 0, fail = 0 } = data.result
+          setDownloadDetail(fail > 0 ? `${ok} 成功, ${skip} 跳过, ${fail} 失败` : `全部完成 (${ok} 个文件)`)
+          setProgress(100)
+          setTimeout(() => setProgress(-1), 800)
+        }
+
+        // Handle error
+        if (phase === 'error') {
+          showButtons(true)
+          btnSkip.textContent = '退出'
+          btnSkip.className = 'btn btn-danger'
+          btnDownload.textContent = '重试'
+          btnDownload.className = 'btn btn-primary'
+          btnSkip.disabled = false
+          btnDownload.disabled = false
+          userActionResolved = false
+          setDownloadDetail('')
+
+          // Override skip to mean exit
+          const origSkipHandler = btnSkip.onclick
+          btnSkip.onclick = null
+          btnSkip.addEventListener('click', function exitHandler() {
+            if (userActionResolved) return
+            userActionResolved = true
+            if (window.artTextApp?.sendSplashAction) {
+              window.artTextApp.sendSplashAction({ action: 'exit-app' })
+            }
+          }, { once: true })
+
+          // Override download to mean retry
+          const origDownloadHandler = btnDownload.onclick
+          btnDownload.onclick = null
+          btnDownload.addEventListener('click', function retryHandler() {
+            if (userActionResolved) return
+            userActionResolved = true
+            if (window.artTextApp?.sendSplashAction) {
+              window.artTextApp.sendSplashAction({ action: 'retry-startup' })
+            }
+          }, { once: true })
+        }
+      }
+    })()
+  </script>
+</body>
+</html>

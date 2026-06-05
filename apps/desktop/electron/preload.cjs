@@ -17,7 +17,10 @@ const API_METHODS = [
   'deleteOutputDir',
   'openPath',
   'notify',
-  'openExternal'
+  'openExternal',
+  'getStartupStatus',
+  'downloadModels',
+  'shutdownBackends'
 ]
 
 /**
@@ -51,5 +54,20 @@ contextBridge.exposeInMainWorld('artTextApp', {
   // Misc
   notify: (options) => ipcRenderer.invoke('art-text/notify', options),
   openExternal: (url) => ipcRenderer.invoke('art-text/open-external', url),
-  shutdownBackends: () => ipcRenderer.invoke('art-text/shutdown-backends')
+  shutdownBackends: () => ipcRenderer.invoke('art-text/shutdown-backends'),
+
+  // Startup & model management (生产打包模式)
+  getStartupStatus: () => ipcRenderer.invoke('art-text/get-startup-status'),
+  downloadModels: () => ipcRenderer.invoke('art-text/download-models'),
+
+  // Splash / progress events (send/on 模式，非 invoke)
+  onSplashProgress: (callback) => {
+    ipcRenderer.on('splash:progress', (_event, data) => callback(data))
+  },
+  removeSplashProgressListener: () => {
+    ipcRenderer.removeAllListeners('splash:progress')
+  },
+  sendSplashAction: (action) => {
+    ipcRenderer.send('splash:action', action)
+  }
 })

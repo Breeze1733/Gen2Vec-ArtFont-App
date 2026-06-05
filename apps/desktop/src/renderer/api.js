@@ -268,3 +268,42 @@ export async function shutdownBackends() {
   ensureElectronApi('shutdownBackends')
   return window.artTextApp.shutdownBackends()
 }
+
+/**
+ * 获取启动状态。
+ * @returns {Promise<{ready: boolean, modelsReady: boolean, backendsRunning: boolean, modelsSkipped: boolean}>}
+ */
+export async function getStartupStatus() {
+  if (!window.artTextApp?.getStartupStatus) return { ready: true, modelsReady: true, backendsRunning: true, modelsSkipped: false }
+  return window.artTextApp.getStartupStatus()
+}
+
+/**
+ * 触发模型下载（生产打包模式）。
+ * @returns {Promise<{ok: boolean, fail: number}>}
+ */
+export async function downloadModels() {
+  if (!window.artTextApp?.downloadModels) {
+    throw new Error('模型下载仅在生产打包版本中可用')
+  }
+  return window.artTextApp.downloadModels()
+}
+
+/**
+ * 监听启动/下载进度事件。
+ * @param {Function} callback - 接收进度数据对象
+ */
+export function onSplashProgress(callback) {
+  if (window.artTextApp?.onSplashProgress) {
+    window.artTextApp.onSplashProgress(callback)
+  }
+}
+
+/**
+ * 移除启动/下载进度监听器。
+ */
+export function removeSplashProgressListener() {
+  if (window.artTextApp?.removeSplashProgressListener) {
+    window.artTextApp.removeSplashProgressListener()
+  }
+}

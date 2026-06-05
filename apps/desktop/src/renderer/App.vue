@@ -41,6 +41,21 @@
         <div v-if="gpuTier === 'none'" class="gpu-warning">
           <p>仅限图片矢量化模式</p>
         </div>
+        <!-- 模型未下载提示 -->
+        <div v-if="modelsSkipped" class="gpu-warning" style="background: #fffbeb; color: #92400e; border: 1px solid #fcd34d;">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <span>⚠️ AI 模型未下载，文生图使用本地降级引擎</span>
+            <button
+              v-if="!downloadingModels"
+              type="button"
+              @click="startModelDownload"
+              style="padding:4px 12px;border-radius:6px;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;cursor:pointer;font-size:12px;font-weight:600"
+            >下载模型</button>
+            <span v-else style="font-size:12px;color:#92400e">
+              下载中... {{ modelDownloadProgress.current }}/{{ modelDownloadProgress.total }}
+            </span>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -108,7 +123,7 @@ import GenerationForm from './components/GenerationForm.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import VectorParams from './components/VectorParams.vue'
-import { generateArtBitmap, openPath, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, vectorizeArtImage, writeTaskArtifacts } from './api'
+import { generateArtBitmap, openPath, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, vectorizeArtImage, writeTaskArtifacts, getStartupStatus, downloadModels, onSplashProgress, removeSplashProgressListener } from './api'
 import { makeThumbnail } from './utils/storage'
 
 // GPU 检测
@@ -184,11 +199,20 @@ const detectGPU = () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   detectGPU()
   // 仅在完全没有 GPU 时默认选择图片矢量化模式
   if (!hasUsableGpu.value) {
     mode.value = 'vectorize'
+  }
+
+  // 检查启动状态（生产打包模式）
+  try {
+    const status = await getStartupStatus()
+    modelsSkipped.value = status.modelsSkipped || false
+    modelsReady.value = status.modelsReady !== false // 默认 true（开发模式）
+  } catch {
+    // 开发模式或无此 API，静默忽略
   }
 })
 
@@ -239,7 +263,10 @@ const HISTORY_DIR_KEY = 'art-text-generator-history-dirs'
 const mode = ref('single')
 const running = ref(false)
 const error = ref('')
-
+const modelsSkipped = ref(false)
+const modelsReady = ref(true)
+const downloadingModels = ref(false)
+const modelDownloadProgress = reactive({ current: 0, total: 0, fileName: '', percent: 0 })
 const payload = reactive({
   text: '',
   prompt: '',
@@ -1164,6 +1191,39 @@ const resetForm = () => {
   batchProgress.failed = 0
   selectedBatchIndex.value = -1
   resetStageProgress()
+}
+
+// ── 模型下载（主窗口触发） ──
+
+const startModelDownload = async () => {
+  if (downloadingModels.value) return
+  downloadingModels.value = true
+  error.value = ''
+
+  try {
+    onSplashProgress((data) => {
+      if (data.phase === 'downloading') {
+        modelDownloadProgress.current = data.fileIndex || 0
+        modelDownloadProgress.total = data.totalFiles || 0
+        modelDownloadProgress.fileName = data.fileName || ''
+        modelDownloadProgress.percent = data.percent || 0
+      }
+    })
+
+    await downloadModels()
+    modelsSkipped.value = false
+    modelsReady.value = true
+    error.value = ''
+  } catch (err) {
+    error.value = `模型下载失败: ${err.message}`
+  } finally {
+    downloadingModels.value = false
+    modelDownloadProgress.current = 0
+    modelDownloadProgress.total = 0
+    modelDownloadProgress.fileName = ''
+    modelDownloadProgress.percent = 0
+    removeSplashProgressListener()
+  }
 }
 
 const selectBatchItem = (index) => {

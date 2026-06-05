@@ -19,7 +19,15 @@
     },
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "electron/splash.html"
+    ],
+    "extraResources": [
+      { "from": "../../services/txt2img-api/dist/txt2img-backend.exe", "to": "backend/txt2img-backend.exe" },
+      { "from": "../../services/txt2img-api/dist/ComfyUI-Engine.exe", "to": "backend/ComfyUI-Engine.exe" },
+      { "from": "../../services/txt2img-api/dist/download-models.ps1", "to": "backend/download-models.ps1" },
+      { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
+      { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" }
     ],
     "win": {
       "target": "nsis"
