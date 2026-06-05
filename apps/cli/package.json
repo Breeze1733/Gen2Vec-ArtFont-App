@@ -1,0 +1,6 @@
+{
+    "main":  "bin/gen2vec.mjs",
+    "private":  true,
+    "name":  "gen2vec-cli",
+    "type":  "module"
+}
