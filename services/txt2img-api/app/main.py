@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 import logging
 import os
 import shutil
@@ -23,10 +24,10 @@ logger = logging.getLogger(__name__)
 # the service checkout root (dev). Keeping it out of `_MEIPASS` lets users
 # drop a 60 GB bundle next to the EXE without bloating the frozen binary.
 _ENV_COMFYUI_LAUNCHER_BAT = "COMFYUI_LAUNCHER_BAT"
+_ENV_COMFYUI_NETWORK_MODE = "COMFYUI_NETWORK_MODE"
+_DEFAULT_NETWORK_MODE = "offline"
 _COMFYUI_PORTABLE_DIRNAME = "ComfyUI_windows_portable_nvidia"
 _COMFYUI_PORTABLE_INNER = "ComfyUI_windows_portable"
-_GPU_BAT = "run_nvidia_gpu_fast_fp16_accumulation.bat"
-_CPU_BAT = "run_cpu.bat"
 
 app = FastAPI(
     title="txt2img-api",
@@ -120,64 +121,102 @@ def _has_nvidia_gpu() -> bool:
         return False
 
 
-def _find_embedded_python() -> Path | None:
-    """Locate the embedded Python bundled with the ComfyUI portable release.
+def _ensure_comfyui_offline_config(portable_dir: Path) -> None:
+    """Set ComfyUI-Manager ``network_mode`` before launch to skip online checks.
 
-    Kept as a fallback path: when the user has the ``python_embeded`` layout
-    but not the ``.bat`` launchers, we can still spawn ComfyUI via
-    ``python.exe -s main.py`` directly.
+    Reads the existing ``config.ini`` (if any), updates only the
+    ``network_mode`` key, and writes it back.  The target mode is controlled
+    by the ``COMFYUI_NETWORK_MODE`` environment variable (default ``"offline"``).
     """
-    candidates = [
-        _get_executable_dir()
-        / _COMFYUI_PORTABLE_DIRNAME
-        / _COMFYUI_PORTABLE_INNER
-        / "python_embeded"
-        / "python.exe",
+    network_mode = os.environ.get(_ENV_COMFYUI_NETWORK_MODE, _DEFAULT_NETWORK_MODE)
+    config_path = portable_dir / "ComfyUI" / "user" / "__manager" / "config.ini"
+
+    config = configparser.ConfigParser()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    if config_path.exists():
+        config.read(str(config_path), encoding="utf-8")
+
+    if not config.has_section("default"):
+        config.add_section("default")
+
+    old = config.get("default", "network_mode", fallback=None)
+    if old != network_mode:
+        config.set("default", "network_mode", network_mode)
+        with open(str(config_path), "w", encoding="utf-8") as f:
+            config.write(f)
+        logger.info(
+            "ComfyUI-Manager network_mode set to %r (was %r)", network_mode, old
+        )
+
+
+def _build_comfyui_command(portable_dir: Path) -> list[str]:
+    """Build the ComfyUI command line using the embedded Python.
+
+    Skips ``.bat`` launchers so we can inject ``--disable-api-nodes`` and
+    other flags directly.
+    """
+    python_exe = portable_dir / "python_embeded" / "python.exe"
+    if not python_exe.exists():
+        raise FileNotFoundError(f"Embedded Python not found: {python_exe}")
+
+    cmd: list[str] = [
+        str(python_exe),
+        "-s",
+        os.path.join("ComfyUI", "main.py"),
+        "--windows-standalone-build",
+        "--disable-api-nodes",
     ]
-    for p in candidates:
-        if p.exists():
-            return p
-    return None
-
-
-def _pick_comfyui_launcher_bat() -> Path:
-    """Choose the ComfyUI ``.bat`` launcher to spawn.
-
-    Resolution order:
-      1. ``COMFYUI_LAUNCHER_BAT`` env var (operator override, absolute path)
-      2. NVIDIA GPU detected → ``run_nvidia_gpu_fast_fp16_accumulation.bat``
-      3. Otherwise            → ``run_cpu.bat``
-    """
-    override = os.environ.get(_ENV_COMFYUI_LAUNCHER_BAT, "").strip()
-    if override:
-        bat_path = Path(override).expanduser().resolve()
-        if bat_path.exists():
-            return bat_path
-        raise FileNotFoundError(
-            f"COMFYUI_LAUNCHER_BAT is set to {bat_path!s} but the file does not exist"
-        )
-
-    portable_dir = (
-        _get_executable_dir() / _COMFYUI_PORTABLE_DIRNAME / _COMFYUI_PORTABLE_INNER
-    )
-    if not portable_dir.is_dir():
-        raise FileNotFoundError(
-            f"ComfyUI portable bundle not found at {portable_dir!s}. "
-            f"Place the {_COMFYUI_PORTABLE_DIRNAME}/ folder next to the running EXE "
-            f"(or set {_ENV_COMFYUI_LAUNCHER_BAT} to a custom .bat)."
-        )
 
     if _has_nvidia_gpu():
-        bat = portable_dir / _GPU_BAT
-        if bat.exists():
-            return bat
-        logger.warning("NVIDIA GPU detected but %s missing — falling back to CPU", bat)
-    bat = portable_dir / _CPU_BAT
-    if bat.exists():
-        return bat
-    raise FileNotFoundError(
-        f"Neither {_GPU_BAT} nor {_CPU_BAT} found under {portable_dir!s}"
-    )
+        cmd.extend(["--fast", "fp16_accumulation"])
+    else:
+        cmd.append("--cpu")
+
+    return cmd
+
+
+def _launch_and_wait(
+    cmd: Path | list[str],
+    host: str,
+    port: int,
+    timeout: float,
+    cwd: Path,
+) -> None:
+    """Spawn ComfyUI subprocess and poll until the API is reachable."""
+    try:
+        if isinstance(cmd, Path):
+            # .bat launcher — needs shell
+            proc = subprocess.Popen(
+                [str(cmd)],
+                shell=True,
+                cwd=str(cwd),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+        else:
+            # Direct command list
+            proc = subprocess.Popen(
+                cmd,
+                shell=False,
+                cwd=str(cwd),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            if _is_port_open(host, port, timeout=0.6):
+                logger.info(
+                    "ComfyUI is ready at %s:%d (pid %d)", host, port, proc.pid
+                )
+                return
+            time.sleep(1.0)
+
+        logger.warning("Timed out waiting for ComfyUI at %s:%d", host, port)
+    except Exception:
+        logger.exception("Failed to start ComfyUI")
 
 
 def _start_comfyui_background(
@@ -187,39 +226,67 @@ def _start_comfyui_background(
 ) -> None:
     """Launch ComfyUI in a hidden process and wait for it to be ready.
 
-    The bundled ``.bat`` launcher is preferred because it sets up the
-    embedded Python path, environment variables, and fp16 fast-mode flags
-    that match the portable distribution's expectations.
+    * If ``COMFYUI_LAUNCHER_BAT`` is set, that ``.bat`` is used as-is
+      (operator escape hatch).
+    * Otherwise the embedded ``python_embeded/python.exe`` is invoked
+      directly with ``--disable-api-nodes``, and ComfyUI-Manager's
+      ``config.ini`` is patched to ``network_mode = offline`` before
+      launch for fast cold-start.
     """
-    try:
-        bat = _pick_comfyui_launcher_bat()
-    except FileNotFoundError as exc:
-        logger.warning("ComfyUI launcher not found — skipping auto-start (%s)", exc)
+    # ── COMFYUI_LAUNCHER_BAT override (escape hatch) ──
+    override = os.environ.get(_ENV_COMFYUI_LAUNCHER_BAT, "").strip()
+    if override:
+        bat_path = Path(override).expanduser().resolve()
+        if not bat_path.exists():
+            logger.warning(
+                "COMFYUI_LAUNCHER_BAT is set but file not found: %s", bat_path
+            )
+            return
+        logger.info("Starting ComfyUI via override launcher: %s", bat_path)
+        thread = threading.Thread(
+            target=_launch_and_wait,
+            args=(bat_path, host, port, timeout, bat_path.parent),
+            daemon=True,
+            name="comfyui-launcher",
+        )
+        thread.start()
         return
 
-    def _runner():
-        try:
-            logger.info("Starting ComfyUI via launcher: %s", bat)
-            proc = subprocess.Popen(
-                [str(bat)],
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-            )
+    # ── Default: locate portable bundle ──
+    portable_dir = (
+        _get_executable_dir() / _COMFYUI_PORTABLE_DIRNAME / _COMFYUI_PORTABLE_INNER
+    )
+    if not portable_dir.is_dir():
+        logger.warning(
+            "ComfyUI portable bundle not found at %s — skipping auto-start. "
+            "Place the %s/ folder next to the running EXE "
+            "(or set %s to a custom .bat).",
+            portable_dir,
+            _COMFYUI_PORTABLE_DIRNAME,
+            _ENV_COMFYUI_LAUNCHER_BAT,
+        )
+        return
 
-            start = time.monotonic()
-            while time.monotonic() - start < timeout:
-                if _is_port_open(host, port, timeout=0.6):
-                    logger.info("ComfyUI is ready at %s:%d (pid %d)", host, port, proc.pid)
-                    return
-                time.sleep(1.0)
+    # ── Patch ComfyUI-Manager config for fast offline startup ──
+    try:
+        _ensure_comfyui_offline_config(portable_dir)
+    except Exception:
+        logger.exception("Failed to patch ComfyUI-Manager config — continuing anyway")
 
-            logger.warning("Timed out waiting for ComfyUI at %s:%d", host, port)
-        except Exception:
-            logger.exception("Failed to start ComfyUI")
+    # ── Build command line directly (skip .bat for control over flags) ──
+    try:
+        cmd = _build_comfyui_command(portable_dir)
+        logger.info("Starting ComfyUI: %s", " ".join(cmd))
+    except FileNotFoundError as exc:
+        logger.warning("Cannot build ComfyUI command: %s", exc)
+        return
 
-    thread = threading.Thread(target=_runner, daemon=True, name="comfyui-launcher")
+    thread = threading.Thread(
+        target=_launch_and_wait,
+        args=(cmd, host, port, timeout, portable_dir),
+        daemon=True,
+        name="comfyui-launcher",
+    )
     thread.start()
 
 
