@@ -6,7 +6,7 @@
  *
  * 启动流程：
  *   1. 检查同级 backend/ 目录 → 解压引擎 → 下载模型 → 启动后端
- *   2. 执行用户命令 (generate / vectorize / pipeline / health / shutdown)
+ *   2. 执行用户命令 (generate / vectorize / pipeline / batch / health / shutdown)
  *   3. 退出时清理后端进程
  */
 
@@ -40,14 +40,15 @@ Gen2Vec CLI v${VERSION} — 矢量艺术字生成器
   -p, --prompt <prompt>        风格提示词
   -n, --negative <text>        负面提示词
   -r, --resolution <res>       分辨率 (默认: 1024 x 1024)
-  -s, --seed <n>               随机种子（批量模式时每条递增）
+  -s, --seed <n>               随机种子
   -o, --output <path>          输出文件路径
   -i, --input <path>           输入图片路径
       --preset <name>          矢量化预设 (clean|balanced|detailed|ultra)
       --vector-preset <name>   矢量化预设 (pipeline / batch 命令)
-      --output-dir <dir>       输出目录
+      --output-dir <dir>       输出目录 (默认: ./outputs)
       --input-file <path>      批量输入文件（batch 命令）
-      --vectorize              是否矢量化（batch 命令，默认开启）
+      --no-vectorize           批量模式只生成 original.png，不做矢量化
+      --seed-step <n>          批量模式每条 seed 递增步长（默认: 0）
       --preview                保存预览 PNG
       --color-precision <n>    颜色精度 1-16
       --filter-speckle <n>     斑点过滤 1-50
@@ -61,14 +62,16 @@ Gen2Vec CLI v${VERSION} — 矢量艺术字生成器
   gen2vec vectorize --input artwork.png --preset detailed
   gen2vec pipeline --text "Hello" --vector-preset ultra
   gen2vec batch --text "你好|霓虹风格" --vector-preset detailed
-  gen2vec batch --input-file batch.txt --output-dir ./output
+  gen2vec batch --input-file batch.txt --output-dir ./outputs/batch-demo
+  gen2vec batch --input-file testdata/art_text_prompts_150.txt --output-dir ./outputs/cli-batch-150 --seed 20260605 --vector-preset balanced
   gen2vec health
   gen2vec shutdown
 
 环境变量:
   TXT2IMG_BACKEND_URL     txt2img 服务地址 (默认: http://127.0.0.1:9001)
   VECTORIZER_BACKEND_URL  矢量化服务地址 (默认: http://127.0.0.1:8000)
-  TXT2IMG_WORKFLOW        ComfyUI 工作流名称 (默认: test_z_image_turbo)
+  TXT2IMG_WORKFLOW        ComfyUI 工作流名称 (默认: 空，使用后端降级链)
+  ART_TEXT_OUTPUT_ROOT    默认输出根目录 (默认: ./outputs)
 `
 
 // 记录后端是否由我们启动的（退出时需要关闭）
@@ -89,7 +92,16 @@ async function main() {
       input: { type: 'string', short: 'i' },
       preset: { type: 'string' },
       'vector-preset': { type: 'string' },
+      'input-file': { type: 'string' },
+      'no-vectorize': { type: 'boolean' },
+      'seed-step': { type: 'string' },
       preview: { type: 'boolean' },
+      'color-precision': { type: 'string' },
+      'filter-speckle': { type: 'string' },
+      'corner-threshold': { type: 'string' },
+      'length-threshold': { type: 'string' },
+      'layer-difference': { type: 'string' },
+      scale: { type: 'string' },
     },
     allowPositionals: true,
   })
@@ -101,6 +113,33 @@ async function main() {
   }
 
   const command = positionals[0]
+  const parseNumber = (value, name) => {
+    if (value === undefined || value === null || value === '') return undefined
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`${name} 必须是数字`)
+    }
+    return parsed
+  }
+
+  const buildVectorConfig = () => {
+    const vector = {}
+    const preset = values['vector-preset'] || values.preset
+    if (preset) vector.preset = preset
+    const mappings = [
+      ['color-precision', 'colorPrecision'],
+      ['filter-speckle', 'filterSpeckle'],
+      ['corner-threshold', 'cornerThreshold'],
+      ['length-threshold', 'lengthThreshold'],
+      ['layer-difference', 'layerDifference'],
+      ['scale', 'scale'],
+    ]
+    for (const [optionName, apiName] of mappings) {
+      const parsed = parseNumber(values[optionName], `--${optionName}`)
+      if (parsed !== undefined) vector[apiName] = parsed
+    }
+    return vector
+  }
 
   // shutdown 命令不需要启动后端
   if (command === 'shutdown') {
@@ -139,8 +178,9 @@ async function main() {
           prompt: values.prompt,
           negative: values.negative,
           resolution: values.resolution,
-          seed: values.seed ? parseInt(values.seed, 10) : undefined,
+          seed: parseNumber(values.seed, '--seed'),
           output: values.output,
+          outputDir: values['output-dir'] || 'outputs',
         })
         break
       }
@@ -155,6 +195,8 @@ async function main() {
           output: values.output,
           preset: values.preset,
           preview: values.preview,
+          outputDir: values['output-dir'] || 'outputs',
+          vector: buildVectorConfig(),
         })
         break
       }
@@ -169,9 +211,31 @@ async function main() {
           prompt: values.prompt,
           negative: values.negative,
           resolution: values.resolution,
-          seed: values.seed ? parseInt(values.seed, 10) : undefined,
+          seed: parseNumber(values.seed, '--seed'),
           vectorPreset: values['vector-preset'] || values.preset,
-          outputDir: values['output-dir'] || '.',
+          outputDir: values['output-dir'] || 'outputs',
+          output: values.output,
+          vector: buildVectorConfig(),
+        })
+        break
+      }
+
+      case 'batch': {
+        if (!values.text && !values['input-file']) {
+          console.error('错误: batch 命令需要 --text 或 --input-file')
+          process.exit(1)
+        }
+        await runBatch({
+          input: values.text,
+          inputFile: values['input-file'],
+          negative: values.negative,
+          resolution: values.resolution,
+          seed: parseNumber(values.seed, '--seed') ?? 0,
+          seedStep: parseNumber(values['seed-step'], '--seed-step') ?? 0,
+          vectorPreset: values['vector-preset'] || values.preset,
+          vector: buildVectorConfig(),
+          outputDir: values['output-dir'] || 'outputs',
+          vectorize: !values['no-vectorize'],
         })
         break
       }

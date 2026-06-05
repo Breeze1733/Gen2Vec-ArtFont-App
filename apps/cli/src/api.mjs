@@ -5,7 +5,7 @@
 
 const TXT2IMG_URL = process.env.TXT2IMG_BACKEND_URL || 'http://127.0.0.1:9001/api/v1/txt2img'
 const VECTORIZER_URL = process.env.VECTORIZER_BACKEND_URL || 'http://127.0.0.1:8000/api/v1/vectorize'
-const TXT2IMG_WORKFLOW = process.env.TXT2IMG_WORKFLOW || 'test_z_image_turbo'
+const TXT2IMG_WORKFLOW = process.env.TXT2IMG_WORKFLOW || ''
 
 /**
  * 生成艺术字位图
@@ -19,19 +19,16 @@ const TXT2IMG_WORKFLOW = process.env.TXT2IMG_WORKFLOW || 'test_z_image_turbo'
  * @returns {Promise<{png: string, metadata: Object}>}
  */
 export async function generateArtBitmap(options) {
-  const { text, prompt = '', negative = '', resolution = '1024x1024', seed = 0, style = 'default' } = options
-
-  const combinedPrompt = text
-    ? `艺术字文本：${text}，风格：${prompt}`
-    : prompt
+  const { text = '', prompt = '', negative = '', resolution = '1024 x 1024', seed = 0, style = 'default', format = 'PNG' } = options
 
   const body = {
-    prompt: combinedPrompt,
+    text,
+    prompt,
     negative_prompt: negative,
     resolution: resolution.replace(/\s/g, ''),
     seed,
     style,
-    format: 'PNG',
+    format: format === 'SVG Only' ? 'PNG' : 'PNG',
     workflow: TXT2IMG_WORKFLOW,
   }
 
@@ -49,6 +46,7 @@ export async function generateArtBitmap(options) {
   const data = await response.json()
   return {
     png: data.image_base64 || '',
+    image_name: data.image_name || '',
     metadata: data.metadata || null,
     workflow_api: data.workflow_api || null,
     model_dependencies: data.model_dependencies || null,
@@ -66,21 +64,45 @@ export async function generateArtBitmap(options) {
  * @returns {Promise<{svg: string, transparent_png: string, preview_png: string, metadata: Object}>}
  */
 export async function vectorizeImage(options) {
-  const { imageBase64, imageName, vector = {} } = options
+  const {
+    imageBase64,
+    imagePath,
+    imageName,
+    sourceType = 'upload',
+    text = '',
+    prompt = '',
+    negative = '',
+    resolution = '1024 x 1024',
+    format = 'PNG + SVG',
+    seed = 0,
+    generatedImage,
+    timeoutMs,
+    vector = {},
+  } = options
+  const pickVector = (camelName, snakeName) => vector[camelName] ?? vector[snakeName]
 
   const body = {
-    source_type: 'upload',
+    source_type: sourceType,
+    text,
+    prompt,
+    negative,
+    resolution,
+    format,
+    seed,
     image_base64: imageBase64,
+    image_path: imagePath,
     image_name: imageName || 'cli-input',
+    generated_image: generatedImage,
+    ...(timeoutMs != null && { __timeoutMs: timeoutMs }),
     vector: {
       preset: vector.preset || 'balanced',
-      evaluate_quality: vector.evaluateQuality !== false,
-      remove_edge_white_background: vector.removeEdgeWhite !== false,
-      ...(vector.colorPrecision != null && { color_precision: vector.colorPrecision }),
-      ...(vector.filterSpeckle != null && { filter_speckle: vector.filterSpeckle }),
-      ...(vector.cornerThreshold != null && { corner_threshold: vector.cornerThreshold }),
-      ...(vector.lengthThreshold != null && { length_threshold: vector.lengthThreshold }),
-      ...(vector.layerDifference != null && { layer_difference: vector.layerDifference }),
+      evaluate_quality: pickVector('evaluateQuality', 'evaluate_quality') !== false,
+      remove_edge_white_background: pickVector('removeEdgeWhite', 'remove_edge_white_background') !== false,
+      ...(pickVector('colorPrecision', 'color_precision') != null && { color_precision: pickVector('colorPrecision', 'color_precision') }),
+      ...(pickVector('filterSpeckle', 'filter_speckle') != null && { filter_speckle: pickVector('filterSpeckle', 'filter_speckle') }),
+      ...(pickVector('cornerThreshold', 'corner_threshold') != null && { corner_threshold: pickVector('cornerThreshold', 'corner_threshold') }),
+      ...(pickVector('lengthThreshold', 'length_threshold') != null && { length_threshold: pickVector('lengthThreshold', 'length_threshold') }),
+      ...(pickVector('layerDifference', 'layer_difference') != null && { layer_difference: pickVector('layerDifference', 'layer_difference') }),
       ...(vector.scale != null && { scale: vector.scale }),
     },
   }
@@ -116,8 +138,15 @@ export async function pipeline(options) {
 
   // 第二步：矢量化
   const vecResult = await vectorizeImage({
+    sourceType: 'generated',
     imageBase64: genResult.png,
-    imageName: options.text || 'art',
+    imageName: genResult.image_name || options.text || 'art',
+    text: options.text || '',
+    prompt: options.prompt || '',
+    negative: options.negative || '',
+    resolution: options.resolution || '1024 x 1024',
+    format: 'PNG + SVG',
+    seed: options.seed || 0,
     vector: {
       preset: options.vectorPreset || 'balanced',
     },
@@ -125,11 +154,15 @@ export async function pipeline(options) {
 
   return {
     png: genResult.png,
+    transparent_png: vecResult.transparent_png,
+    preview_png: vecResult.preview_png,
     svg: vecResult.svg,
     metadata: {
       generation: genResult.metadata,
       vectorization: vecResult.metadata,
     },
+    workflow_api: genResult.workflow_api || null,
+    model_dependencies: genResult.model_dependencies || null,
   }
 }
 
