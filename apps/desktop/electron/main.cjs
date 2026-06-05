@@ -454,7 +454,7 @@ async function runStartupSequence(splashWin) {
         startupState.modelsSkipped = true
       } else {
         // 等待用户在 splash 中的选择
-        sendProgress({ step: 2, phase: 'prompt', message: '首次运行需要下载 AI 模型 (约 58 GB)', percent: 0, totalFiles: 10 })
+        sendProgress({ step: 2, phase: 'prompt', message: '首次运行需要下载 AI 模型 (约 58 GB)', percent: 0 })
 
         const action = await waitForSplashAction()
         if (action === 'download-models') {
@@ -1161,7 +1161,7 @@ ipcMain.handle('art-text/download-models', async () => {
     }
   }
 
-  sendProgress({ step: 2, phase: 'downloading', message: '正在准备下载...', percent: 0, fileIndex: 0, totalFiles: 10 })
+  sendProgress({ step: 2, phase: 'downloading', message: '正在准备下载...', percent: 0, fileIndex: 0 })
 
   try {
     const result = await downloadModels(backendDir, sendProgress)

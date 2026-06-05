@@ -54,6 +54,7 @@ services/txt2img-api/temp/
 # ComfyUI portable/runtime bundles
 services/txt2img-api/ComfyUI_windows_portable_nvidia/
 services/txt2img-api/ComfyUI_windows_portable/
+services/txt2img-api/ComfyUI_windows_portable_nvidia (2)/
 
 # ComfyUI packaging docs (auto-generated, kept as local reference)
 services/txt2img-api/docs/

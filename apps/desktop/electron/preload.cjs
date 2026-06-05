@@ -1,7 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
-// Exposed Electron API for renderer. Keep stable method names here and
-// document them in docs/electron-ipc.md.
+// Exposed Electron API for renderer.
 const API_VERSION = '1.1.0'
 const API_METHODS = [
   'getPlatform',

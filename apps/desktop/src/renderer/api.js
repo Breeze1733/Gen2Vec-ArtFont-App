@@ -118,6 +118,7 @@ export async function generateArtBitmap(payload) {
     const safeFormat = payload.format === 'SVG Only' ? 'PNG' : 'PNG'
 
     const body = {
+      __timeoutMs: payload.__timeoutMs || undefined,
       text: payload.text || '',
       prompt: payload.prompt || '',
       negative_prompt: payload.negative || '',
@@ -166,6 +167,7 @@ export async function generateArtBitmap(payload) {
   const data = await response.json()
   return {
     png: data.image_base64 || '',
+    image_name: data.image_name || '',
     svg: '',
     metadata: data.metadata || null,
     workflow_api: data.workflow_api || null,

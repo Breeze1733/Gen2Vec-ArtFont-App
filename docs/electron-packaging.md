@@ -225,22 +225,32 @@ await Promise.all([
 ### 4.2 关闭后端
 
 ```javascript
-// 应用退出前
-app.on('will-quit', () => {
-  // 同步发送 /shutdown（fire-and-forget，不阻塞退出）
-  const http = require('http')
-  const shutdown = (port) => {
-    const req = http.request({ hostname: '127.0.0.1', port, path: '/shutdown', method: 'POST' })
+// 应用退出前 — 使用 before-quit + preventDefault 确保 /shutdown 请求发出后再退出
+app.on('before-quit', (event) => {
+  event.preventDefault()   // 阻止默认退出，等待 TCP 包发出
+
+  // 向两个后端 POST /shutdown
+  for (const url of SHUTDOWN_URLS) {
+    const req = net.request({
+      method: 'POST',
+      protocol: 'http:',
+      hostname: '127.0.0.1',
+      port: url.port,
+      path: '/shutdown',
+    })
     req.on('error', () => {})
+    req.setHeader('Content-Type', 'application/json')
+    req.write(JSON.stringify({}))
     req.end()
   }
-  shutdown(9001)
-  shutdown(8000)
 
   // 兜底: 杀掉直接子进程（txt2img-backend.exe, vectorizer-backend.exe）
   // 注意: ComfyUI 是 txt2img-backend 的子进程，会在 /shutdown 中被清理
   txt2imgProc?.kill()
   vectorizerProc?.kill()
+
+  // 延迟 300ms 确保 TCP 包发出后再退出
+  setTimeout(() => { app.exit(0) }, 300)
 })
 ```
 
@@ -271,6 +281,7 @@ async function isPortInUse(port) {
 | `COMFYUI_NETWORK_MODE` | `offline` | 默认离线，阻止 ComfyUI-Manager 网络检查 |
 | `VECTORIZER_BACKEND_URL` | `http://127.0.0.1:8000/api/v1/vectorize` | Electron 负责保证后端已启动 |
 | `TXT2IMG_BACKEND_URL` | `http://127.0.0.1:9001/api/v1/txt2img` | Electron 负责保证后端已启动 |
+| `ART_TEXT_OUTPUT_ROOT` | 开发: 项目根 `outputs/`，打包: `文档/Gen2Vec-ArtFont-App/outputs/` | 可通过环境变量覆盖产物输出目录 |
 
 > **注意**：`/healthz` 返回 200 仅表示 FastAPI 进程已启动，此时 ComfyUI 可能还在后台加载模型。如果用户在 ComfyUI 就绪前发起生成请求，可能会拿到降级的 Pillow stub（`engine: "local-studio"`）。稍后重试即可——ComfyUI 就绪后（通常 30s 内）后续请求会正常使用 GPU 推理。
 
@@ -288,12 +299,12 @@ async function isPortInUse(port) {
     "directories": { "output": "release" },
     "files": ["dist/**/*", "electron/**/*"],
     "extraResources": [
-      { "from": "../services/txt2img-api/dist/txt2img-backend.exe", "to": "backend/txt2img-backend.exe" },
-      { "from": "../services/txt2img-api/dist/ComfyUI-Engine.exe", "to": "backend/ComfyUI-Engine.exe" },
-      { "from": "../services/txt2img-api/dist/download-models.ps1", "to": "backend/download-models.ps1" },
-      { "from": "../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
-      { "from": "../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
-      { "from": "../services/vectorizer-api/dist/models", "to": "backend/models" }
+      { "from": "../../services/txt2img-api/dist/txt2img-backend.exe", "to": "backend/txt2img-backend.exe" },
+      { "from": "../../services/txt2img-api/dist/ComfyUI-Engine.exe", "to": "backend/ComfyUI-Engine.exe" },
+      { "from": "../../services/txt2img-api/dist/download-models.ps1", "to": "backend/download-models.ps1" },
+      { "from": "../../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
+      { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
+      { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" }
     ],
     "win": { "target": "nsis" },
     "nsis": {
@@ -371,14 +382,29 @@ resources\backend\ComfyUI_windows_portable_nvidia\ComfyUI_windows_portable\pytho
 `-Electron` 参数使脚本输出结构化文本，每行以 `MODELDL:` 开头：
 
 ```
+MODELDL:TOTAL|10
+MODELDL:ENGINE_OK
 MODELDL:START|z_image_turbo_bf16|1/10|12.3 GB
-MODELDL:PROGRESS|z_image_turbo_bf16|45.2
 MODELDL:DONE|z_image_turbo_bf16
-MODELDL:ERROR|flux1-schnell|timeout
-MODELDL:SUMMARY|8/10|4 failed
+MODELDL:SKIP|flux1-schnell
+MODELDL:START|qwen_image_2512|2/10|9.0 GB
+MODELDL:ERROR|qwen_image_2512|timeout
+MODELDL:COMPLETE|8|2|0
+MODELDL:READY
 ```
 
-`main.cjs` 逐行解析 `stdout`，提取 `MODELDL:` 行更新进度条。
+| 消息类型 | 格式 | 说明 |
+|----------|------|------|
+| `TOTAL` | `TOTAL\|N` | 模型文件总数 |
+| `ENGINE_OK` | — | 引擎目录已就绪 |
+| `START` | `START\|文件名\|序号/总数\|大小` | 开始下载某个文件 |
+| `DONE` | `DONE\|文件名` | 下载成功（或已存在跳过） |
+| `SKIP` | `SKIP\|文件名` | 文件已存在，跳过 |
+| `ERROR` | `ERROR\|文件名\|原因` | 下载失败 |
+| `COMPLETE` | `COMPLETE\|成功数\|跳过数\|失败数` | 全部完成 |
+| `READY` | — | 模型目录就绪，可开始使用 |
+
+`main.cjs` 逐行解析 `stdout`，提取 `MODELDL:` 行更新进度条。`TOTAL` 到达前不显示文件总数，`COMPLETE` 到达后汇总结果。
 
 ### 7.3 断点续传与重试
 
@@ -443,14 +469,7 @@ npm run electron:build
 
 ## 11. 待实现清单
 
-- [ ] `package.json` 添加 `extraResources` 配置
-- [ ] `main.cjs` 实现 `getBackendDir()` 路径解析
-- [ ] `main.cjs` 实现 ComfyUI-Engine.exe 解压检测与执行
-- [ ] `main.cjs` 实现模型存在性检测
-- [ ] `main.cjs` 实现 `download-models.ps1` spawn 与进度解析
-- [ ] `main.cjs` 实现后端 EXE spawn + healthz 轮询
-- [ ] `main.cjs` 实现应用退出时 `/shutdown` + kill
-- [ ] 启动画面 UI（解压进度 / 下载进度 / 启动进度）
-- [ ] 端口冲突检测与复用
-- [ ] 首次运行模型下载弹窗
-- [ ] "稍后下载模型"菜单入口
+以下均为可选增强项，核心打包流程已全部实现：
+
+- [ ] "稍后下载模型"菜单入口（IPC 接口 `art-text/download-models` 已就绪，缺 UI 菜单项）
+- [ ] 主窗口内嵌模型下载进度组件（配合菜单入口使用）
