@@ -260,7 +260,7 @@ async function requestBackend(apiUrl, payload) {
 
     try {
       const requestUrl = new URL(apiUrl)
-      const { __timeoutMs = 180000, ...backendPayload } = payload || {}
+      const { __timeoutMs = 300000, ...backendPayload } = payload || {}
       request = net.request({
         method: 'POST',
         protocol: requestUrl.protocol,
@@ -272,7 +272,7 @@ async function requestBackend(apiUrl, payload) {
       timer = setTimeout(() => {
         try { request?.abort() } catch {}
         finish(reject, new Error(`后端请求超时（${Math.round(Number(__timeoutMs) / 1000)} 秒）`))
-      }, Number(__timeoutMs) || 180000)
+      }, Number(__timeoutMs) || 300000)
 
       request.setHeader('Content-Type', 'application/json')
 
