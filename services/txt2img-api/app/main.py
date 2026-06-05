@@ -48,6 +48,23 @@ def healthz() -> dict:
     return {"ok": True, "service": "txt2img-api"}
 
 
+@app.post("/shutdown")
+def shutdown() -> dict:
+    """优雅关闭服务。
+
+    Electron / 启动管理器在退出前调用此接口，确保后端进程正常终止。
+    在独立线程中延迟退出，以便 HTTP 响应能先返回给调用方。
+    """
+
+    def _shutdown() -> None:
+        import time as _time
+        _time.sleep(0.2)  # 等待 HTTP 响应发送完成
+        os._exit(0)
+
+    threading.Thread(target=_shutdown, daemon=True, name="shutdown").start()
+    return {"ok": True, "message": "Shutting down..."}
+
+
 @app.post("/api/v1/txt2img", response_model=GenerationResponse)
 def generate(payload: GenerationRequest) -> GenerationResponse:
     artifact = generate_artwork(payload)
