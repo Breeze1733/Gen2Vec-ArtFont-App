@@ -1,0 +1,7 @@
+;!@Install@!UTF-8!
+Title="ComfyUI 引擎 v0.22.0 — 解压到当前目录"
+BeginPrompt="将解压 ComfyUI 引擎 (~30 GB) 到当前目录。包含 Python 运行环境、PyTorch、CUDA 依赖和 ComfyUI 源码（不含模型文件）。继续？"
+ExtractDialogText="正在解压 ComfyUI 引擎..."
+FinishMessage="引擎安装完成。请继续运行 ComfyUI-Models.exe 安装模型包。"
+GUIMode="2"
+;!@InstallEnd@!

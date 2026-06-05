@@ -55,6 +55,9 @@ services/txt2img-api/temp/
 services/txt2img-api/ComfyUI_windows_portable_nvidia/
 services/txt2img-api/ComfyUI_windows_portable/
 
+# ComfyUI packaging docs (auto-generated, kept as local reference)
+services/txt2img-api/docs/
+
 # Local environment
 *.local
 .env

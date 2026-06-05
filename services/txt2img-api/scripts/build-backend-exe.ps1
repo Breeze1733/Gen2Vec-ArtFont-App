@@ -44,15 +44,18 @@ if ($Toolchain -eq "uv") {
   $pyRunArgs = @($PythonExe, "-m", "PyInstaller")
 }
 
-Write-Host "[1/4] Installing build dependencies via $Toolchain..."
+Write-Host "[1/5] Installing build dependencies via $Toolchain..."
 & $Toolchain @pipArgs
 
-Write-Host "[2/4] Cleaning previous build outputs..."
+Write-Host "[2/5] Cleaning previous build outputs..."
+# Only remove PyInstaller artifacts; preserve other dist/ files (e.g. ComfyUI-Engine.exe).
 if (Test-Path "build") { Remove-Item -LiteralPath "build" -Recurse -Force }
-if (Test-Path "dist") { Remove-Item -LiteralPath "dist" -Recurse -Force }
 if (Test-Path "txt2img-backend.spec") {
   Remove-Item -LiteralPath "txt2img-backend.spec" -Force
 }
+# Remove old EXE so PyInstaller does a clean rebuild.
+$oldExe = Join-Path "dist" "txt2img-backend.exe"
+if (Test-Path $oldExe) { Remove-Item -LiteralPath $oldExe -Force }
 
 # Resolve the workflows directory (create it if a file is missing so
 # PyInstaller does not fail the `--add-data` glob at build time).
@@ -68,7 +71,7 @@ foreach ($f in $workflowFiles) {
   $addDataArgs += "$($f.FullName);workflows"
 }
 
-Write-Host "[3/4] Building txt2img-backend.exe with PyInstaller..."
+Write-Host "[3/5] Building txt2img-backend.exe with PyInstaller..."
 $pyinstallerArgs = @(
   "--noconfirm"
   "--clean"
@@ -92,9 +95,41 @@ $pyinstallerArgs = @(
 
 & $Toolchain @pyRunArgs @pyinstallerArgs
 
-Write-Host "[4/4] Done."
-Write-Host "EXE output: $root\dist\txt2img-backend.exe"
+Write-Host "[4/5] Copying distribution files to dist/..."
+
+$distDir = Join-Path $root "dist"
+$scriptsDir = Join-Path $root "scripts"
+
+$distFiles = @(
+    "download-models.ps1"
+)
+
+foreach ($file in $distFiles) {
+    $src = Join-Path $scriptsDir $file
+    $dst = Join-Path $distDir $file
+    if (Test-Path $src) {
+        Copy-Item -Path $src -Destination $dst -Force
+        Write-Host "  OK  $file"
+    }
+    else {
+        Write-Host "  --  $file not found, skipping"
+    }
+}
+
+Write-Host "[5/5] Done."
 Write-Host ""
-Write-Host "Distribution layout (ComfyUI bundle is NOT bundled into the EXE):"
-Write-Host "    dist\txt2img-backend.exe"
-Write-Host "    ComfyUI_windows_portable_nvidia\   <-- place this folder next to the EXE"
+Write-Host "EXE output: $distDir\txt2img-backend.exe"
+Write-Host ""
+Write-Host "Distribution layout (place ComfyUI-Engine.exe in dist/ to complete):"
+Get-ChildItem $distDir | ForEach-Object {
+    $size = if ($_.Length -gt 1GB) {
+        "{0:N1} GB" -f ($_.Length / 1GB)
+    } elseif ($_.Length -gt 1MB) {
+        "{0:N0} MB" -f ($_.Length / 1MB)
+    } else {
+        "{0:N0} KB" -f ($_.Length / 1KB)
+    }
+    Write-Host "    $($_.Name)  ($size)"
+}
+Write-Host ""
+Write-Host "The dist/ directory is the final distribution package. Distribute all files in it to end users."
