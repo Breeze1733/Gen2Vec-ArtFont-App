@@ -35,6 +35,9 @@
 .PARAMETER MaxRetries
   每个文件的最大重试次数（默认 3）。
 
+.PARAMETER Parallel
+  并行下载文件数（默认 3，最大建议不超过 5）。
+
 .EXAMPLE
   # 手动使用
   .\download-models.ps1
@@ -48,7 +51,8 @@ param(
     [string]$DestDir = $PSScriptRoot,
     [switch]$Electron,
     [switch]$NoMirror,
-    [int]$MaxRetries = 3
+    [int]$MaxRetries = 3,
+    [int]$Parallel = 3
 )
 
 $ErrorActionPreference = "Stop"
@@ -140,64 +144,99 @@ $okCount = 0
 $skipCount = 0
 $failCount = 0
 
+# 先处理已存在的文件（跳过），构建待下载列表
+$pending = New-Object System.Collections.ArrayList
 foreach ($model in $Models) {
     $destDir  = Join-Path $ModelsDir $model.Subdir
     $destFile = Join-Path $destDir $model.Filename
 
-    # 已存在 → 跳过
     if (Test-Path $destFile) {
         Emit "SKIP" "$($model.Filename):$($model.Subdir)"
-
         if (-not $Electron) {
             $existingSize = "{0:F2} GB" -f ((Get-Item $destFile).Length / 1GB)
             Write-Host "⏭ $($model.Filename) ($existingSize)" -ForegroundColor DarkGray
         }
-
         $skipCount++
-        continue
+    } else {
+        # 创建子目录
+        New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+        [void]$pending.Add($model)
     }
+}
 
-    # 创建子目录
-    New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+# 下载调度器：维护最多 $Parallel 个后台作业
+$jobs = @{}
+$nextIndex = 0
 
-    # 下载（带重试）
-    Emit "START" "$($model.Filename):$($model.Subdir):$($model.Size)"
+while ($nextIndex -lt $pending.Count -or $jobs.Count -gt 0) {
+    # 检查已完成作业
+    $finishedKeys = @()
+    foreach ($key in $jobs.Keys) {
+        $job = $jobs[$key]
+        if ($job.State -eq 'Completed') {
+            $result = Receive-Job $job
+            Remove-Job $job
+            $finishedKeys += $key
 
-    if (-not $Electron) {
-        Write-Host "⬇ $($model.Subdir)/$($model.Filename) ($($model.Size))" -ForegroundColor Yellow
-    }
+            $parts = $result -split '\|'
+            $type = $parts[0]; $filename = $parts[1]; $subdir = $parts[2]; $detail = $parts[3]
 
-    $downloaded = $false
-    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
-        try {
-            Invoke-WebRequest -Uri $model.Url -OutFile $destFile -ErrorAction Stop
-
-            $actualSize = "{0:F2} GB" -f ((Get-Item $destFile).Length / 1GB)
-            Emit "DONE" "$($model.Filename):$($model.Subdir):$actualSize"
-
-            if (-not $Electron) {
-                Write-Host "   ✅ 完成 ($actualSize)" -ForegroundColor Green
-            }
-
-            $okCount++
-            $downloaded = $true
-            break
-        }
-        catch {
-            if ($attempt -eq $MaxRetries) {
-                $errMsg = $_.Exception.Message -replace "`n|`r", " "
-                Emit "ERROR" "$($model.Filename):$($model.Subdir):$errMsg"
-
-                if (-not $Electron) {
-                    Write-Host "   ❌ 失败: $errMsg" -ForegroundColor Red
+            switch ($type) {
+                'DONE' {
+                    Emit "DONE" "${filename}:${subdir}:${detail}"
+                    if (-not $Electron) { Write-Host "   ✅ 完成 ($detail)" -ForegroundColor Green }
+                    $okCount++
                 }
-
-                $failCount++
+                'ERROR' {
+                    Emit "ERROR" "${filename}:${subdir}:${detail}"
+                    if (-not $Electron) { Write-Host "   ❌ 失败: $detail" -ForegroundColor Red }
+                    $failCount++
+                }
             }
-            else {
-                Start-Sleep -Seconds 5
-            }
+        } elseif ($job.State -eq 'Failed') {
+            Receive-Job $job
+            Remove-Job $job
+            $finishedKeys += $key
+            $failCount++
         }
+    }
+    foreach ($key in $finishedKeys) { $jobs.Remove($key) }
+
+    # 启动新作业直到达到并发上限
+    while ($jobs.Count -lt $Parallel -and $nextIndex -lt $pending.Count) {
+        $model = $pending[$nextIndex]
+        $nextIndex++
+
+        Emit "START" "$($model.Filename):$($model.Subdir):$($model.Size)"
+        if (-not $Electron) {
+            Write-Host "⬇ $($model.Subdir)/$($model.Filename) ($($model.Size))" -ForegroundColor Yellow
+        }
+
+        $job = Start-Job -Name "dl_$nextIndex" -ScriptBlock {
+            param($Url, $DestFile, $MaxRetries, $Filename, $Subdir)
+            $ErrorActionPreference = "Stop"
+            for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+                try {
+                    Invoke-WebRequest -Uri $Url -OutFile $DestFile -ErrorAction Stop
+                    $actualSize = "{0:F2} GB" -f ((Get-Item $DestFile).Length / 1GB)
+                    return "DONE|${Filename}|${Subdir}|${actualSize}"
+                }
+                catch {
+                    if ($attempt -eq $MaxRetries) {
+                        $errMsg = $_.Exception.Message -replace "[\r\n]+", " "
+                        return "ERROR|${Filename}|${Subdir}|${errMsg}"
+                    }
+                    Start-Sleep -Seconds 5
+                }
+            }
+        } -ArgumentList $model.Url, (Join-Path (Join-Path $ModelsDir $model.Subdir) $model.Filename), $MaxRetries, $model.Filename, $model.Subdir
+
+        $jobs["dl_$nextIndex"] = $job
+    }
+
+    # 短暂等待再检查
+    if ($jobs.Count -gt 0) {
+        Start-Sleep -Milliseconds 500
     }
 }
 
