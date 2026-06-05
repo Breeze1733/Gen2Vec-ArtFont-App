@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util'
 import { run as runGenerate } from '../src/commands/generate.mjs'
 import { run as runVectorize } from '../src/commands/vectorize.mjs'
 import { run as runPipeline } from '../src/commands/pipeline.mjs'
-import { healthCheck } from '../src/api.mjs'
+import { healthCheck, shutdownBackends } from '../src/api.mjs'
 
 const HELP = `
 Gen2Vec CLI - 艺术字矢量化工具
@@ -22,11 +22,13 @@ Gen2Vec CLI - 艺术字矢量化工具
   vectorize   将位图矢量化为 SVG
   pipeline    完整流水线（文本 → 位图 → SVG）
   health      检查后端服务状态
+  shutdown    关闭后端服务（txt2img-api + vectorizer-api）
 
 示例:
   gen2vec generate --text "你好" --prompt "霓虹风格"
   gen2vec vectorize --input artwork.png --preset detailed
   gen2vec pipeline --text "Hello" --vector-preset ultra
+  gen2vec shutdown
 
 环境变量:
   TXT2IMG_BACKEND_URL      txt2img 服务地址 (默认: http://127.0.0.1:9001)
@@ -121,6 +123,15 @@ async function main() {
           console.log('  cd services/txt2img-api && uv run txt2img-api')
           console.log('  cd services/vectorizer-api && uvicorn app.main:app --port 8000')
         }
+        break
+      }
+
+      case 'shutdown': {
+        console.log('正在关闭后端服务...')
+        const result = await shutdownBackends()
+        console.log(`txt2img 服务:    ${result.txt2img ? '✓ 已发送关闭请求' : '✗ 失败'}`)
+        console.log(`矢量化服务:     ${result.vectorizer ? '✓ 已发送关闭请求' : '✗ 失败'}`)
+        console.log('\n两个后端服务已关闭。')
         break
       }
 

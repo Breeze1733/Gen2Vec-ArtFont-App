@@ -258,3 +258,13 @@ export function listElectronAPIs() {
     methods: window.artTextApp.listMethods ? window.artTextApp.listMethods() : Object.keys(window.artTextApp)
   }
 }
+
+/**
+ * 关闭两个后端服务（txt2img-api + vectorizer-api）。
+ * 桌面端退出时 Electron 主进程会自动调用，也可通过此函数手动触发。
+ * @returns {Promise<{ok: boolean, message: string}>}
+ */
+export async function shutdownBackends() {
+  ensureElectronApi('shutdownBackends')
+  return window.artTextApp.shutdownBackends()
+}

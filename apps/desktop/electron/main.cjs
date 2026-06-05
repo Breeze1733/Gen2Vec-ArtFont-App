@@ -17,6 +17,21 @@ try {
 const VECTORIZER_BACKEND_URL = process.env.VECTORIZER_BACKEND_URL || 'http://127.0.0.1:8000/api/v1/vectorize'
 const TXT2IMG_BACKEND_URL = process.env.TXT2IMG_BACKEND_URL || 'http://127.0.0.1:9001/api/v1/txt2img'
 
+function deriveShutdownUrl(apiUrl) {
+  try {
+    const u = new URL(apiUrl)
+    u.pathname = '/shutdown'
+    return u.toString()
+  } catch {
+    return null
+  }
+}
+
+const SHUTDOWN_URLS = [
+  deriveShutdownUrl(TXT2IMG_BACKEND_URL),
+  deriveShutdownUrl(VECTORIZER_BACKEND_URL),
+].filter(Boolean)
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1080,
@@ -587,6 +602,32 @@ ipcMain.handle('art-text/save-results', async (event, options) => {
   return { canceled: false, filePaths: savedFiles }
 })
 
+ipcMain.handle('art-text/shutdown-backends', async () => {
+  shutdownBackends()
+  return { ok: true, message: '已向两个后端发送关闭请求' }
+})
+
+function shutdownBackends() {
+  for (const url of SHUTDOWN_URLS) {
+    try {
+      const u = new URL(url)
+      const req = net.request({
+        method: 'POST',
+        protocol: u.protocol,
+        hostname: u.hostname,
+        port: u.port,
+        path: u.pathname,
+      })
+      req.on('error', () => {})
+      req.setHeader('Content-Type', 'application/json')
+      req.write(JSON.stringify({}))
+      req.end()
+    } catch {
+      // 后端可能本来就已关闭，静默忽略
+    }
+  }
+}
+
 app.whenReady().then(() => {
   createWindow()
 
@@ -601,4 +642,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', (event) => {
+  event.preventDefault()
+  shutdownBackends()
+  // 延迟退出，确保 TCP 包被 OS 内核发送
+  setTimeout(() => { app.exit(0) }, 300)
 })

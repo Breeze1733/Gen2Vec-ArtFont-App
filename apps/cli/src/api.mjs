@@ -152,3 +152,28 @@ export async function healthCheck() {
     vectorizer: await check(VECTORIZER_URL),
   }
 }
+
+/**
+ * 关闭两个后端服务。
+ * 发送 POST /shutdown 到两个后端，不等待响应（后端收到后即退出）。
+ * @returns {Promise<{txt2img: boolean, vectorizer: boolean}>}
+ */
+export async function shutdownBackends() {
+  const TXT2IMG_SHUTDOWN = TXT2IMG_URL.replace(/\/api\/v1\/.*/, '/shutdown')
+  const VECTORIZER_SHUTDOWN = VECTORIZER_URL.replace(/\/api\/v1\/.*/, '/shutdown')
+
+  const call = async (url) => {
+    try {
+      await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      return true
+    } catch {
+      // 后端可能本来就已关闭，或收到请求后立即退出导致连接断开
+      return true
+    }
+  }
+
+  return {
+    txt2img: await call(TXT2IMG_SHUTDOWN),
+    vectorizer: await call(VECTORIZER_SHUTDOWN),
+  }
+}

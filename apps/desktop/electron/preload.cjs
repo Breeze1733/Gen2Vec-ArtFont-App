@@ -50,5 +50,6 @@ contextBridge.exposeInMainWorld('artTextApp', {
 
   // Misc
   notify: (options) => ipcRenderer.invoke('art-text/notify', options),
-  openExternal: (url) => ipcRenderer.invoke('art-text/open-external', url)
+  openExternal: (url) => ipcRenderer.invoke('art-text/open-external', url),
+  shutdownBackends: () => ipcRenderer.invoke('art-text/shutdown-backends')
 })
