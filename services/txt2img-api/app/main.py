@@ -164,6 +164,7 @@ def _build_comfyui_command(portable_dir: Path) -> list[str]:
         "-s",
         os.path.join("ComfyUI", "main.py"),
         "--windows-standalone-build",
+        "--disable-auto-launch",
         "--disable-api-nodes",
     ]
 
