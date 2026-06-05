@@ -15,7 +15,7 @@ build/
 **/dist-ssr/
 **/build/
 *.spec
-*.exe
+# *.exe
 *.blockmap
 builder-debug.yml
 builder-effective-config.yaml
