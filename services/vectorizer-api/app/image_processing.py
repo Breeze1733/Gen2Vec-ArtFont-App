@@ -111,14 +111,16 @@ def _load_rembg():
         importlib.import_module("onnxruntime")
     except Exception as exc:
         raise RuntimeError(
-            'onnxruntime is not installed. Please install CPU support with "pip install rembg[cpu]".'
+            'onnxruntime is not available in the running backend. '
+            f"Original error: {type(exc).__name__}: {exc}"
         ) from exc
 
     try:
         rembg_module = importlib.import_module("rembg")
     except Exception as exc:
         raise RuntimeError(
-            'rembg is not available. Please install backend dependencies with "pip install -r requirements.txt".'
+            'rembg is not available in the running backend. '
+            f"Original error: {type(exc).__name__}: {exc}"
         ) from exc
 
     _REMBG_REMOVE = getattr(rembg_module, "remove")

@@ -31,6 +31,12 @@ Write-Host "[3/4] Building backend.exe with PyInstaller..."
   --collect-all cv2 `
   --collect-all rembg `
   --collect-all onnxruntime `
+  --collect-all jsonschema `
+  --collect-all jsonschema_specifications `
+  --collect-all referencing `
+  --collect-all rpds `
+  --collect-all lark `
+  --collect-all rfc3987_syntax `
   --collect-all vtracer `
   --hidden-import uvicorn.logging `
   --hidden-import uvicorn.loops.auto `
