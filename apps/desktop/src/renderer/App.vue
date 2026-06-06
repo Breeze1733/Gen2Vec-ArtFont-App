@@ -126,6 +126,20 @@ import VectorParams from './components/VectorParams.vue'
 import { generateArtBitmap, openPath, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, vectorizeArtImage, writeTaskArtifacts, getStartupStatus, downloadModels, onSplashProgress, removeSplashProgressListener } from './api'
 import { makeThumbnail } from './utils/storage'
 
+// 渲染进程中无法使用 Node.js path 模块，用纯字符串操作替代
+const joinPath = (dir, file) => {
+  if (!dir) return file
+  // 处理 Windows (\\) 和 Unix (/) 两种分隔符
+  const sep = dir.includes('\\') ? '\\' : '/'
+  return dir.endsWith(sep) ? `${dir}${file}` : `${dir}${sep}${file}`
+}
+const basename = (p) => {
+  if (!p) return ''
+  // 同时兼容 Windows 和 Unix 路径分隔符
+  const parts = p.replace(/\\/g, '/').split('/')
+  return parts[parts.length - 1] || ''
+}
+
 // GPU 检测
 const gpuInfo = ref('检测中...')
 const gpuRawRenderer = ref('')
@@ -628,8 +642,8 @@ const startGeneration = async () => {
       const batchSummaryDir = batchTaskInfo.taskDir
       currentTaskDir.value = batchTaskInfo.taskDir
       currentOutputRoot.value = batchTaskInfo.outputRoot
-      currentTaskPaths.value = { ...batchTaskInfo.paths, summary: path.join(batchSummaryDir, 'batch_summary.csv') }
-      const batchSummaryPath = path.join(batchSummaryDir, 'batch_summary.csv')
+      currentTaskPaths.value = { ...batchTaskInfo.paths, summary: joinPath(batchSummaryDir, 'batch_summary.csv') }
+      const batchSummaryPath = joinPath(batchSummaryDir, 'batch_summary.csv')
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]
@@ -800,7 +814,7 @@ const startGeneration = async () => {
           dirRecord = {
             taskDir: currentTaskDir.value,
             outputRoot: currentOutputRoot.value,
-            taskName: task.taskName || (currentTaskDir.value ? path.basename(currentTaskDir.value) : ''),
+            taskName: task.taskName || (currentTaskDir.value ? basename(currentTaskDir.value) : ''),
             paths: currentTaskPaths.value,
             inputParams: {
               mode: 'batch',
@@ -818,7 +832,7 @@ const startGeneration = async () => {
         dirRecord = {
           taskDir: currentTaskDir.value,
           outputRoot: currentOutputRoot.value,
-          taskName: task.taskName || (currentTaskDir.value ? path.basename(currentTaskDir.value) : ''),
+          taskName: task.taskName || (currentTaskDir.value ? basename(currentTaskDir.value) : ''),
           paths: currentTaskPaths.value,
           inputParams: {
             mode: mode.value,
