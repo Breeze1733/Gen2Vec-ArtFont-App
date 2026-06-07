@@ -20,12 +20,39 @@
     }
 
     .splash-container {
+      position: relative;
       width: 460px;
       background: #fff;
       border-radius: 20px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04);
       padding: 40px 36px 32px;
       -webkit-app-region: no-drag;
+    }
+
+    /* Always-visible close button */
+    .close-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: none;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      -webkit-app-region: no-drag;
+      z-index: 10;
+    }
+
+    .close-btn:hover {
+      background: #fee2e2;
+      color: #ef4444;
     }
 
     .logo-area {
@@ -305,6 +332,7 @@
 </head>
 <body>
   <div class="splash-container">
+    <button class="close-btn" id="closeBtn" title="关闭">✕</button>
     <div class="logo-area">
       <div class="logo-icon">🎨</div>
       <h1>矢量艺术字生成器</h1>
@@ -364,6 +392,7 @@
       const downloadStats = document.getElementById('downloadStats')
       const fileProgress = document.getElementById('fileProgress')
       const fileProgressFill = document.getElementById('fileProgressFill')
+      const closeBtn = document.getElementById('closeBtn')
 
       let currentStep = 0
       let userActionResolved = false
@@ -429,6 +458,13 @@
       }
 
       // ── Button handlers ──
+      // Close button — always visible, always kills everything
+      closeBtn.addEventListener('click', () => {
+        if (window.artTextApp?.sendSplashAction) {
+          window.artTextApp.sendSplashAction({ action: 'exit-app' })
+        }
+      })
+
       btnSkip.addEventListener('click', () => {
         if (userActionResolved) return
         userActionResolved = true

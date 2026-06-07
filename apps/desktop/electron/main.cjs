@@ -645,9 +645,8 @@ ipcMain.on('splash:action', (_event, data) => {
     if (action !== 'exit-app') {
       splashActions.emit(SPLASH_ACTION_EVENT, action)
     } else {
-      // 退出：先杀后端，再退出
-      shutdownBackends()
-      app.quit()
+      // 退出：杀后端 → 杀 PowerShell → 退出
+      forceQuit()
     }
   }
 })
@@ -1332,6 +1331,14 @@ function shutdownBackends() {
   }
 }
 
+// 全局退出函数 — 杀后端 + 杀所有 PowerShell 子进程 + 退出 app
+function forceQuit() {
+  shutdownBackends()
+  // 如果存在模型下载进程，也杀掉
+  try { process.kill() } catch {}
+  app.quit()
+}
+
 app.whenReady().then(async () => {
   if (app.isPackaged) {
     // ── 生产模式：显示启动画面 → 启动后端 → 打开主窗口 ──
@@ -1396,4 +1403,10 @@ app.on('before-quit', (event) => {
   shutdownBackends()
   // 延迟退出，确保 TCP 包被 OS 内核发送
   setTimeout(() => { app.exit(0) }, 300)
+})
+
+// 捕获所有未预期的错误，确保不留下孤儿进程
+process.on('uncaughtException', () => {
+  shutdownBackends()
+  app.exit(1)
 })

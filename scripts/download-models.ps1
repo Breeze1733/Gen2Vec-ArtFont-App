@@ -1,11 +1,7 @@
-﻿# download-models.ps1 — AI 模型下载脚本
+# download-models.ps1 — AI 模型下载脚本
 <#
 .SYNOPSIS
   下载 10 个 AI 模型文件到 ComfyUI 便携版的 models/ 目录。
-
-.DESCRIPTION
-  用于手动部署和 Electron 自动调用两种场景。
-  默认使用 hf-mirror.com 国内镜像。
 
 .PARAMETER DestDir
   目标目录（默认：脚本所在目录）。
@@ -58,7 +54,6 @@ function Write-Color {
 if (-not (Test-Path $ComfyUIDir)) {
     Emit "ENGINE_MISSING" $ComfyUIDir
     Write-Color "`n错误：未找到 ComfyUI 引擎！" Red
-    Write-Color "请先双击 ComfyUI-Engine.exe 解压引擎到当前目录。" Yellow
     if (-not $Electron) { Read-Host "按 Enter 键退出" }
     exit 2
 }
@@ -137,29 +132,6 @@ function Get-RemoteFileSize {
     return -1
 }
 
-# ── 单文件下载函数（由子进程调用） ─────────────────────────
-function Download-SingleFile {
-    param([string]$Url, [string]$DestFile, [int]$Retries)
-    $ErrorActionPreference = "Continue"
-    for ($i = 0; $i -lt $Retries; $i++) {
-        try {
-            if ($UseAria2c) {
-                $p = Start-Process -FilePath "aria2c" -ArgumentList "--continue=true --auto-file-renaming=false --allow-overwrite=true --split=4 --file-allocation=none --console-log-level=error --dir=""$(Split-Path $DestFile -Parent)"" --out=""$(Split-Path $DestFile -Leaf)"" ""$Url""" -NoNewWindow -Wait -PassThru
-                if ($p.ExitCode -eq 0) { return $true }
-            } else {
-                $wc = New-Object System.Net.WebClient
-                $wc.DownloadFile($Url, $DestFile)
-                $wc.Dispose()
-                return $true
-            }
-        } catch {
-            if ($i -ge $Retries - 1) { throw }
-            Start-Sleep -Seconds 3
-        }
-    }
-    return $false
-}
-
 # ── 主流程 ────────────────────────────────────────────────
 Emit "READY"
 Emit "TOTAL" $Models.Count
@@ -169,7 +141,6 @@ New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
 $okCount = 0
 $skipCount = 0
 $failCount = 0
-$pending = New-Object System.Collections.ArrayList
 
 # 构建待下载列表（预先做尺寸比对）
 foreach ($model in $Models) {
@@ -177,7 +148,6 @@ foreach ($model in $Models) {
     $destFile = Join-Path $destDir $model.Filename
     $completeFile = "$destFile.complete"
 
-    # 有 complete 标记 → 跳过
     if ((Test-Path $destFile) -and (Test-Path $completeFile)) {
         $sz = Format-FileSize -Bytes (Get-Item $destFile).Length
         Emit "SKIP" "$($model.Filename):$($model.Subdir):${sz}"
@@ -188,7 +158,6 @@ foreach ($model in $Models) {
 
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
 
-    # 有部分文件 → 远程尺寸比对
     $existingSize = if (Test-Path $destFile) { (Get-Item $destFile).Length } else { 0 }
     if ($existingSize -gt 0) {
         $remoteBytes = Get-RemoteFileSize -Url $model.Url
@@ -207,117 +176,109 @@ foreach ($model in $Models) {
         Emit "RESUME" "$($model.Filename):$($model.Subdir):${localStr}"
         Write-Color "续传 $($model.Subdir)/$($model.Filename) (已有 ${localStr})" Yellow
     }
-    [void]$pending.Add($model)
-}
 
-if ($pending.Count -eq 0) {
-    Emit "COMPLETE" "${okCount}:${skipCount}:${failCount}"
-    Write-Color "全部模型已就绪。" Green
-    if (-not $Electron) { Read-Host "按 Enter 键退出" }
-    exit 0
-}
+    Emit "START" "$($model.Filename):$($model.Subdir):$($model.Size)"
+    Write-Color "⬇ $($model.Subdir)/$($model.Filename) ($($model.Size))" Yellow
 
-# ── 并行下载调度器（不使用 Start-Job，直接用进程并行） ────
-# 使用 Start-Process -PassThru 来并行管理多个进程
-$running = @{}
+    # ── 真正并行：使用 Start-Job 在后台下载 ─────────────────
+    $job = Start-Job -Name "dl_$([System.IO.Path]::GetRandomFileName())" -ScriptBlock {
+        param($M, $MDir, $Retries)
+        $ErrorActionPreference = "Continue"
+        $destDir  = Join-Path $MDir $M.Subdir
+        $destFile = Join-Path $destDir $M.Filename
+        $completeFile = "$destFile.complete"
+        New-Item -ItemType Directory -Force -Path $destDir | Out-Null
 
-while ($pending.Count -gt 0 -or $running.Count -gt 0) {
-    # 清理已完成进程
-    $finished = @()
-    foreach ($pid2 in $running.Keys) {
-        $p = $running[$pid2].Process
-        $modelInfo = $running[$pid2].Model
-        if ($p.HasExited) {
-            $destDir2 = Join-Path $ModelsDir $modelInfo.Subdir
-            $destFile2 = Join-Path $destDir2 $modelInfo.Filename
-            $completeFile2 = "$destFile2.complete"
+        $useAria = $null -ne (Get-Command "aria2c" -ErrorAction SilentlyContinue)
 
-            if ($p.ExitCode -eq 0 -and (Test-Path $destFile2)) {
-                [void](New-Item -ItemType File -Force -Path $completeFile2)
-                $szf = Format-FileSize -Bytes (Get-Item $destFile2).Length
-                Emit "DONE" "$($modelInfo.Filename):$($modelInfo.Subdir):${szf}"
-                Write-Color "  OK 完成 ($szf)" Green
-                $okCount++
-            } else {
-                Emit "ERROR" "$($modelInfo.Filename):$($modelInfo.Subdir):0:下载进程退出码 $($p.ExitCode)"
-                Write-Color "  失败" Red
-                $failCount++
+        for ($i = 0; $i -lt $Retries; $i++) {
+            try {
+                if ($useAria) {
+                    $p = Start-Process -FilePath "aria2c" -ArgumentList "--continue=true --auto-file-renaming=false --allow-overwrite=true --split=4 --file-allocation=none --console-log-level=error --dir=""$destDir"" --out=""$($M.Filename)"" ""$($M.Url)""" -NoNewWindow -Wait -PassThru
+                    if ($p.ExitCode -eq 0) {
+                        [void](New-Item -ItemType File -Force -Path $completeFile)
+                        exit 0
+                    }
+                } else {
+                    $wc = New-Object System.Net.WebClient
+                    $wc.DownloadFile($M.Url, $destFile)
+                    $wc.Dispose()
+                    [void](New-Item -ItemType File -Force -Path $completeFile)
+                    exit 0
+                }
+            } catch {
+                if ($i -ge $Retries - 1) { exit 1 }
+                Start-Sleep -Seconds 3
             }
-            $finished += $pid2
         }
-    }
-    foreach ($pid2 in $finished) { $running.Remove($pid2) }
+        exit 1
+    } -ArgumentList $model, $ModelsDir, $MaxRetries
 
-    # 启动新进程
-    while ($running.Count -lt $Parallel -and $pending.Count -gt 0) {
-        $model = $pending[0]
-        $pending.RemoveAt(0)
+    # 收集作业引用
+    if (-not $global:downloadJobs) { $global:downloadJobs = @() }
+    $global:downloadJobs += @{ Job = $job; Model = $model }
 
-        $destDir3 = Join-Path $ModelsDir $model.Subdir
-        $destFile3 = Join-Path $destDir3 $model.Filename
-
-        Emit "START" "$($model.Filename):$($model.Subdir):$($model.Size)"
-        # 如果已有部分文件，说明是续传，改变提示文字
-        if ((Test-Path $destFile3) -and (Get-Item $destFile3).Length -gt 0) {
-            Write-Color "↻ 续传 $($model.Subdir)/$($model.Filename)" Yellow
-        } else {
-            Write-Color "⬇ $($model.Subdir)/$($model.Filename) ($($model.Size))" Yellow
+    # 控制并发：等待直到活跃作业数小于 $Parallel
+    while ($true) {
+        $active = @($global:downloadJobs | Where-Object { $_.Job.State -eq 'Running' -or $_.Job.State -eq 'NotStarted' })
+        if ($active.Count -lt $Parallel) { break }
+        # 等待任意一个作业完成
+        $finishedJob = Wait-Job -Job ($active.Job) -Any -Timeout 1 2>$null
+        if ($finishedJob) {
+            # 处理已完成的作业
+            foreach ($entry in @($global:downloadJobs)) {
+                if ($entry.Job.State -eq 'Completed') {
+                    $result = Receive-Job $entry.Job -ErrorAction SilentlyContinue
+                    Remove-Job $entry.Job -ErrorAction SilentlyContinue
+                    if ($entry.Job.State -ne 'Failed') {
+                        # 成功
+                        $destF = Join-Path (Join-Path $ModelsDir $entry.Model.Subdir) $entry.Model.Filename
+                        if (Test-Path $destF) {
+                            $sz = Format-FileSize -Bytes (Get-Item $destF).Length
+                            Emit "DONE" "$($entry.Model.Filename):$($entry.Model.Subdir):${sz}"
+                            Write-Color "  OK 完成 ($sz)" Green
+                            $okCount++
+                        }
+                    } else {
+                        Emit "ERROR" "$($entry.Model.Filename):$($entry.Model.Subdir):0:后台作业失败"
+                        Write-Color "  失败" Red
+                        $failCount++
+                    }
+                    $global:downloadJobs = @($global:downloadJobs | Where-Object { $_ -ne $entry })
+                    break
+                } elseif ($entry.Job.State -eq 'Failed' -or $entry.Job.State -eq 'Stopped') {
+                    Receive-Job $entry.Job -ErrorAction SilentlyContinue | Out-Null
+                    Remove-Job $entry.Job -ErrorAction SilentlyContinue
+                    Emit "ERROR" "$($entry.Model.Filename):$($entry.Model.Subdir):0:进程异常退出"
+                    Write-Color "  失败" Red
+                    $failCount++
+                    $global:downloadJobs = @($global:downloadJobs | Where-Object { $_ -ne $entry })
+                    break
+                }
+            }
         }
-
-        # 生成包装脚本路径
-        $execDir2 = Split-Path -Parent $PSCommandPath
-        if (-not $execDir2) { $execDir2 = $PSScriptRoot }
-        if (-not $execDir2) { $execDir2 = "." }
-        $wrapperPath = Join-Path $execDir2 "dl_$([System.IO.Path]::GetRandomFileName()).ps1"
-
-        # 编写包装脚本
-        $wrapperContent = @"
-`$ErrorActionPreference = "Continue"
-`$url = "$($model.Url)"
-`$dest = "$destFile3"
-`$retries = $MaxRetries
-`$useAria = `$$UseAria2c
-for (`$i = 0; `$i -lt `$retries; `$i++) {
-    try {
-        if (`$useAria) {
-            `$p = Start-Process -FilePath "aria2c" -ArgumentList "--continue=true --auto-file-renaming=false --allow-overwrite=true --split=4 --file-allocation=none --console-log-level=error --dir=""`$(Split-Path `$dest -Parent)"" --out=""`$(Split-Path `$dest -Leaf)"" ""`$url""" -NoNewWindow -Wait -PassThru
-            if (`$p.ExitCode -eq 0) { exit 0 }
-        } else {
-            (New-Object System.Net.WebClient).DownloadFile(`$url, `$dest)
-            exit 0
-        }
-    } catch {
-        if (`$i -ge `$retries - 1) { exit 1 }
-        Start-Sleep -Seconds 3
     }
 }
-exit 1
-"@
-        Set-Content -Path $wrapperPath -Value $wrapperContent -Encoding UTF8
 
-        $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$wrapperPath`"" -NoNewWindow -Wait -PassThru
+# 等待所有剩余作业完成
+foreach ($entry in @($global:downloadJobs)) {
+    $null = Wait-Job $entry.Job -Timeout 7200 -ErrorAction SilentlyContinue
+    $result = Receive-Job $entry.Job -ErrorAction SilentlyContinue
+    Remove-Job $entry.Job -ErrorAction SilentlyContinue
 
-        # 清理包装脚本
-        Remove-Item $wrapperPath -Force -ErrorAction SilentlyContinue
-
-        # 检查结果
-        if ($proc.ExitCode -eq 0 -and (Test-Path $destFile3)) {
-            [void](New-Item -ItemType File -Force -Path "$destFile3.complete")
-            $sz2 = Format-FileSize -Bytes (Get-Item $destFile3).Length
-            Emit "DONE" "$($model.Filename):$($model.Subdir):${sz2}"
-            Write-Color "  OK 完成 ($sz2)" Green
-            $okCount++
-        } else {
-            Emit "ERROR" "$($model.Filename):$($model.Subdir):0:下载失败"
-            Write-Color "  失败" Red
-            $failCount++
-        }
-    }
-
-    if ($running.Count -gt 0) {
-        Start-Sleep -Milliseconds 500
+    $destF = Join-Path (Join-Path $ModelsDir $entry.Model.Subdir) $entry.Model.Filename
+    if ((Test-Path $destF) -and (Test-Path "$destF.complete")) {
+        $sz = Format-FileSize -Bytes (Get-Item $destF).Length
+        Emit "DONE" "$($entry.Model.Filename):$($entry.Model.Subdir):${sz}"
+        Write-Color "  OK 完成 ($sz)" Green
+        $okCount++
+    } else {
+        Emit "ERROR" "$($entry.Model.Filename):$($entry.Model.Subdir):0:下载未完成"
+        Write-Color "  失败" Red
+        $failCount++
     }
 }
+$global:downloadJobs = @()
 
 # ── 完成 ──────────────────────────────────────────────────
 Emit "COMPLETE" "${okCount}:${skipCount}:${failCount}"
