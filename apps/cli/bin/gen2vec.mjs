@@ -7,7 +7,7 @@
  * 不管理后端生命周期，假设后端已由桌面端启动或用户自行启动。
  *
  * 用法:
- *   gen2vec-cli <command> [options]
+ *   .\gen2vec_cli.exe <command> [options]
  *
  * 命令:
  *   generate    生成艺术字位图 (txt2img-api)
@@ -28,7 +28,7 @@ import { run as runBatch } from '../src/commands/batch.mjs'
 import { run as runEnv } from '../src/commands/env.mjs'
 
 const VERSION = '1.0.0'
-const CLI_NAME = 'gen2vec-cli'
+const CLI_NAME = process.platform === 'win32' ? '.\\gen2vec_cli.exe' : './gen2vec_cli'
 
 const HELP = `
 ${CLI_NAME} v${VERSION} — 矢量艺术字生成器 · 自动化验收控制台

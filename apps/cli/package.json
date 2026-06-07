@@ -7,12 +7,13 @@
   "bin": {
     "gen2vec-cli": "./bin/gen2vec.mjs"
   },
+  "scripts": {
+    "build": "powershell.exe -ExecutionPolicy Bypass -File ./scripts/build-cli-exe.ps1"
+  },
   "engines": {
     "node": ">=18"
   },
-  "pkg": {
-    "assets": ["src/**/*"],
-    "targets": ["node18-win-x64"],
-    "outputPath": "dist"
+  "devDependencies": {
+    "postject": "^1.0.0-alpha.6"
   }
 }

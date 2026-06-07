@@ -9,7 +9,7 @@ import { healthCheck } from '../api.mjs'
 import { resolveOutputRoot } from '../utils/output.mjs'
 
 const VERSION = '1.0.0'
-const CLI_NAME = 'gen2vec-cli'
+const CLI_NAME = process.platform === 'win32' ? '.\\gen2vec_cli.exe' : './gen2vec_cli'
 
 const TXT2IMG_URL = process.env.TXT2IMG_BACKEND_URL || 'http://127.0.0.1:9001/api/v1/txt2img'
 const VECTORIZER_URL = process.env.VECTORIZER_BACKEND_URL || 'http://127.0.0.1:8000/api/v1/vectorize'
