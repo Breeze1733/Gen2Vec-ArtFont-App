@@ -15,7 +15,7 @@ build/
 **/dist-ssr/
 **/build/
 *.spec
-# *.exe
+*.exe
 *.blockmap
 builder-debug.yml
 builder-effective-config.yaml
@@ -83,6 +83,3 @@ Thumbs.db
 *.bak
 *.tmp
 *.swp
-
-# Legacy/local scratch files
-services/vectorizer-api/app/app.py
