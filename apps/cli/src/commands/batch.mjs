@@ -174,7 +174,7 @@ export async function run(args) {
 
   const startedAt = new Date().toISOString()
   const task = createCliTask({ title: '批量任务', mode: 'batch', startedAt })
-  const batchTaskInfo = await prepareOutputTask({ mode: 'batch-batch', index: 0, seed: baseSeed, startedAt, outputRoot: outputDir })
+  const batchTaskInfo = await prepareOutputTask({ mode: 'batch-batch', index: 0, text: 'batch-run', seed: baseSeed, startedAt, outputRoot: outputDir })
   const batchSummaryDir = batchTaskInfo.taskDir
   const summaryPath = batchTaskInfo.paths.summary
 
@@ -196,9 +196,10 @@ export async function run(args) {
     const itemTaskInfo = await prepareOutputTask({
       mode: 'batch',
       index: i + 1,
+      text,
       seed,
       startedAt,
-      outputRoot: outputDir,
+      outputRoot: batchSummaryDir,
       summaryDir: batchSummaryDir,
     })
 

@@ -755,7 +755,7 @@ const startGeneration = async () => {
             workflowApi: respA.workflow_api || null,
             modelDependencies: respA.model_dependencies || null,
           }
-          const itemTaskInfo = await prepareOutputTask({ mode: 'batch', index: i + 1, text: text || `item-${i + 1}`, seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: true, summaryDir: batchSummaryDir })
+          const itemTaskInfo = await prepareOutputTask({ mode: 'batch', index: i + 1, text: text || `item-${i + 1}`, seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: true, outputRoot: batchSummaryDir, summaryDir: batchSummaryDir })
           const batchEngine = respA.metadata?.engine || ''
           await writeTaskArtifacts({
             outputRoot: itemTaskInfo.outputRoot,
@@ -855,13 +855,20 @@ const startGeneration = async () => {
         }
       }
 
-      // 构建文件列表（汇总所有成功条目的任务目录）
-      const files = []
+      // 构建文件列表：批量根目录、汇总 CSV，以及每条成功/失败的子任务目录。
+      const files = [
+        { key: 'batchRoot', name: batchTaskInfo.taskName, data: batchSummaryDir, isPath: true },
+        { key: 'batchSummary', name: 'batch_summary.csv', data: batchSummaryPath, isPath: true }
+      ]
       const successItems = batchItems.value.filter(b => b.status === 'success')
-      successItems.forEach((b, idx) => {
-        files.push({ key: `task${idx + 1}`, name: b.taskName || `task_${idx + 1}`, data: b.taskDir || '', isPath: true })
+      batchItems.value.forEach((b, idx) => {
+        if (!b.taskDir) return
+        files.push({ key: `task${idx + 1}`, name: b.taskName || `task_${idx + 1}`, data: b.taskDir, isPath: true })
       })
       currentFiles.value = files
+      currentTaskDir.value = batchSummaryDir
+      currentOutputRoot.value = batchTaskInfo.outputRoot
+      currentTaskPaths.value = { ...batchTaskInfo.paths, summary: batchSummaryPath, summaryDir: batchSummaryDir }
 
       // 设置最终任务状态
       if (batchProgress.failed === lines.length) {
@@ -1313,9 +1320,15 @@ const startModelDownload = async () => {
         modelDownloadProgress.current = data.fileIndex || modelDownloadProgress.current
       } else if (data.phase === 'complete') {
         modelDownloadProgress.percent = 100
+        modelDownloadProgress.speed = ''
+        modelDownloadProgress.eta = ''
+        modelDownloadProgress.filePercent = -1
         if (modelDownloadProgress.total > 0) {
           modelDownloadProgress.current = modelDownloadProgress.total
         }
+      } else if (data.phase === 'error') {
+        modelDownloadProgress.speed = ''
+        modelDownloadProgress.eta = ''
       }
     })
 

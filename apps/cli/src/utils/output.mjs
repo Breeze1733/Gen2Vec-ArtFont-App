@@ -59,6 +59,34 @@ export function padTaskIndex(index) {
   return String(Math.trunc(safeIndex)).padStart(3, '0')
 }
 
+function transliterateChinese(text) {
+  const map = {
+    爱: 'ai', 情: 'qing', 海: 'hai', 梨: 'li', 园: 'yuan', 醉: 'zui', 梦: 'meng', 七: 'qi', 里: 'li', 香: 'xiang',
+    红: 'hong', 豆: 'dou', 抹: 'mo', 茶: 'cha', 青: 'qing', 山: 'shan', 集: 'ji', 夏: 'xia', 日: 'ri', 冰: 'bing', 饮: 'yin',
+    花: 'hua', 朝: 'chao', 节: 'jie', 咖: 'ka', 啡: 'fei', 字: 'zi', 艺: 'yi', 术: 'shu', 文: 'wen', 本: 'ben', 图: 'tu'
+  }
+  return Array.from(String(text || '')).map((char) => {
+    if (map[char]) return map[char]
+    return /[\u3400-\u9fff]/u.test(char) ? `u${char.codePointAt(0).toString(16)}` : char
+  }).join('-')
+}
+
+export function safeTaskSlug(text) {
+  const transliterated = transliterateChinese(text || 'art-text')
+  const slug = transliterated
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+  return (slug || 'art-text').slice(0, 48)
+}
+
+export function buildTaskDirectoryName({ startedAt = null, mode = 'single', index = 1, text = 'art-text', seed = 0 } = {}) {
+  const taskId = mode === 'batch' ? `${formatTaskStartedAt(startedAt)}_${padTaskIndex(index)}` : formatTaskStartedAt(startedAt)
+  return `task_${taskId}_${safeTaskSlug(text)}_seed-${seed || 0}`
+}
+
 export function formatTaskStartedAt(startedAt) {
   const date = startedAt ? new Date(startedAt) : new Date()
   const validDate = Number.isNaN(date.getTime()) ? new Date() : date
@@ -80,6 +108,7 @@ export async function prepareOutputTask({
   outputRoot = '',
   mode = 'single',
   index = 1,
+  text = 'art-text',
   seed = 0,
   startedAt = null,
   summaryDir = null,
@@ -87,9 +116,7 @@ export async function prepareOutputTask({
   const root = resolveOutputRoot(outputRoot)
   await mkdir(root, { recursive: true })
 
-  const timestamp = formatTaskStartedAt(startedAt)
-  const indexSuffix = mode === 'batch' ? `_${padTaskIndex(index)}` : ''
-  const baseName = `task_${timestamp}${indexSuffix}`
+  const baseName = buildTaskDirectoryName({ startedAt, mode, index, text, seed })
   let taskName = baseName
   let taskDir = path.join(root, taskName)
   let counter = 2
@@ -105,7 +132,7 @@ export async function prepareOutputTask({
 }
 
 export function buildTaskInfo({ outputRoot, taskDir, taskName, mode, index, seed, summaryDir }) {
-  const summaryRoot = summaryDir || outputRoot
+  const summaryRoot = summaryDir || (mode === 'batch-batch' ? taskDir : outputRoot)
   const paths = {
     original: path.join(taskDir, 'original.png'),
     transparent: path.join(taskDir, 'transparent.png'),

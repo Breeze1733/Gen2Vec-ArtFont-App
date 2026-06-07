@@ -26,7 +26,7 @@ export async function run(args) {
 
   const startedAt = new Date().toISOString()
   const task = createCliTask({ title: text || '艺术字流水线', mode: 'single', startedAt })
-  const taskInfo = await prepareOutputTask({ mode: 'single', index: 1, seed, startedAt, outputRoot: outputDir })
+  const taskInfo = await prepareOutputTask({ mode: 'single', index: 1, text, seed, startedAt, outputRoot: outputDir })
 
   const t1 = Date.now()
   const genResult = await generateArtBitmap({

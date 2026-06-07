@@ -23,7 +23,7 @@ export async function run(args) {
 
   const startedAt = new Date().toISOString()
   const task = createCliTask({ title: path.basename(input), mode: 'vectorize', startedAt })
-  const taskInfo = await prepareOutputTask({ mode: 'vectorize', index: 1, seed: 0, startedAt, outputRoot: outputDir })
+  const taskInfo = await prepareOutputTask({ mode: 'vectorize', index: 1, text: path.basename(input, path.extname(input)) || 'uploaded-image', seed: 0, startedAt, outputRoot: outputDir })
 
   // 读取输入文件
   const imageBase64 = await readFileAsBase64(input)

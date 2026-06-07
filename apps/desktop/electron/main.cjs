@@ -133,19 +133,38 @@ function getComfyUIModelsDir(backendDir) {
   return path.join(getComfyUIPortableDir(backendDir), 'ComfyUI', 'models')
 }
 
-function getModelSentinelFile(backendDir) {
-  // 以 vae/ae.safetensors 作为模型是否下载的哨兵文件
-  return path.join(getComfyUIModelsDir(backendDir), 'vae', 'ae.safetensors')
+const REQUIRED_MODEL_FILES = [
+  ['diffusion_models', 'z_image_turbo_bf16.safetensors'],
+  ['unet', 'flux1-schnell-fp8-e4m3fn.safetensors'],
+  ['text_encoders', 'qwen_2.5_vl_7b_fp8_scaled.safetensors'],
+  ['diffusion_models', 'qwen-image-2512-Q3_K_M.gguf'],
+  ['text_encoders', 'qwen_3_4b.safetensors'],
+  ['clip', 't5xxl_fp8_e4m3fn.safetensors'],
+  ['loras', 'Qwen-Image-Lightning-4steps-V1.0.safetensors'],
+  ['vae', 'ae.safetensors'],
+  ['vae', 'qwen_image_vae.safetensors'],
+  ['clip', 'clip_l.safetensors'],
+]
+
+function getRequiredModelPaths(backendDir) {
+  const modelsDir = getComfyUIModelsDir(backendDir)
+  return REQUIRED_MODEL_FILES.map(([subdir, filename]) => {
+    const filePath = path.join(modelsDir, subdir, filename)
+    return { subdir, filename, filePath, completePath: `${filePath}.complete` }
+  })
 }
 
 async function checkModelsExist(backendDir) {
   if (!backendDir) return true // 开发模式跳过
-  try {
-    await fs.access(getModelSentinelFile(backendDir))
-    return true
-  } catch {
-    return false
+  for (const model of getRequiredModelPaths(backendDir)) {
+    try {
+      await fs.access(model.filePath)
+      await fs.access(model.completePath)
+    } catch {
+      return false
+    }
   }
+  return true
 }
 
 function downloadModels(backendDir, onProgress) {
@@ -187,9 +206,9 @@ function downloadModels(backendDir, onProgress) {
     // 已开始下载的模型文件跟踪（用于轮询子进度）
     let trackedFiles = [] // [{ name, subdir, fullPath, lastSize, lastTime, remoteSize }]
     let startedDownloading = false
+    let stdoutBuffer = ''
 
-    proc.stdout.on('data', (chunk) => {
-      const lines = chunk.toString().split(/\r?\n/).filter(Boolean)
+    const handleDownloadOutputLines = (lines) => {
       for (const line of lines) {
         if (!line.startsWith('MODELDL:')) continue
         const parts = line.substring(8).split('|')
@@ -280,6 +299,11 @@ function downloadModels(backendDir, onProgress) {
                 step: 2, phase: 'complete',
                 message: fail > 0 ? `模型下载完成 (${ok} 成功, ${fail} 失败)` : '模型下载完成',
                 percent: 100,
+                fileIndex: totalFiles || completedFiles,
+                totalFiles: totalFiles || completedFiles,
+                speed: '',
+                eta: '',
+                filePercent: -1,
                 result: finalResult
               })
             }
@@ -293,6 +317,13 @@ function downloadModels(backendDir, onProgress) {
             break
         }
       }
+    }
+
+    proc.stdout.on('data', (chunk) => {
+      stdoutBuffer += chunk.toString()
+      const lines = stdoutBuffer.split(/\r?\n/)
+      stdoutBuffer = lines.pop() || ''
+      handleDownloadOutputLines(lines.filter(Boolean))
     })
 
     // 每 2 秒轮询文件大小，推算速度/ETA/百分比
@@ -385,12 +416,35 @@ function downloadModels(backendDir, onProgress) {
     proc.on('close', (code) => {
       clearInterval(progressInterval)
       if (modelDownloadProc === proc) modelDownloadProc = null
+      if (stdoutBuffer.trim()) {
+        handleDownloadOutputLines([stdoutBuffer.trim()])
+        stdoutBuffer = ''
+      }
       if (code !== 0 && failedFiles === 0) {
         // 脚本自身退出非零但无具体文件错误
         reject(new Error(`模型下载脚本异常退出 (退出码: ${code})`))
         return
       }
-      resolve(finalResult || { ok: completedFiles - failedFiles, skip: 0, fail: failedFiles })
+      const result = finalResult || {
+        ok: code === 0 && failedFiles === 0 && totalFiles > 0 ? totalFiles : completedFiles - failedFiles,
+        skip: 0,
+        fail: failedFiles
+      }
+      if (!finalResult && code === 0 && failedFiles === 0 && onProgress) {
+        onProgress({
+          step: 2,
+          phase: 'complete',
+          message: '模型下载完成',
+          percent: 100,
+          fileIndex: totalFiles || completedFiles,
+          totalFiles: totalFiles || completedFiles,
+          speed: '',
+          eta: '',
+          filePercent: -1,
+          result
+        })
+      }
+      resolve(result)
     })
   })
 }
@@ -783,7 +837,10 @@ function transliterateChinese(text) {
     红: 'hong', 豆: 'dou', 抹: 'mo', 茶: 'cha', 青: 'qing', 山: 'shan', 集: 'ji', 夏: 'xia', 日: 'ri', 冰: 'bing', 饮: 'yin',
     花: 'hua', 朝: 'chao', 节: 'jie', 咖: 'ka', 啡: 'fei', 字: 'zi', 艺: 'yi', 术: 'shu', 文: 'wen', 本: 'ben', 图: 'tu'
   }
-  return Array.from(String(text || '')).map((char) => map[char] || char).join('')
+  return Array.from(String(text || '')).map((char) => {
+    if (map[char]) return map[char]
+    return /[\u3400-\u9fff]/u.test(char) ? `u${char.codePointAt(0).toString(16)}` : char
+  }).join('-')
 }
 
 function safeTaskSlug(text) {
@@ -795,6 +852,11 @@ function safeTaskSlug(text) {
     .replace(/^-+|-+$/g, '')
     .toLowerCase()
   return (slug || 'art-text').slice(0, 48)
+}
+
+function buildTaskDirectoryName({ startedAt = null, mode = 'single', index = 1, text = 'art-text', seed = 0 } = {}) {
+  const taskId = mode === 'batch' ? `${formatTaskStartedAt(startedAt)}_${padTaskIndex(index)}` : formatTaskStartedAt(startedAt)
+  return `task_${taskId}_${safeTaskSlug(text)}_seed-${seed || 0}`
 }
 
 function formatTaskStartedAt(startedAt) {
@@ -818,9 +880,7 @@ async function ensureUniqueTaskDir({ outputRoot, mode = 'single', index = 1, tex
   const root = path.resolve(outputRoot || getOutputRoot())
   await fs.mkdir(root, { recursive: true })
 
-  const timestamp = formatTaskStartedAt(startedAt)
-  const indexSuffix = mode === 'batch' ? `_${padTaskIndex(index)}` : ''
-  const baseName = `task_${timestamp}${indexSuffix}`
+  const baseName = buildTaskDirectoryName({ startedAt, mode, index, text, seed })
   let taskName = baseName
   let taskDir = path.join(root, taskName)
   let counter = 2
@@ -835,7 +895,7 @@ async function ensureUniqueTaskDir({ outputRoot, mode = 'single', index = 1, tex
 }
 
 function buildTaskInfo({ outputRoot, taskDir, taskName, mode, index, seed, summaryDir }) {
-  const summaryRoot = summaryDir || outputRoot
+  const summaryRoot = summaryDir || (mode === 'batch-batch' ? taskDir : outputRoot)
   const paths = {
     original: path.join(taskDir, 'original.png'),
     transparent: path.join(taskDir, 'transparent.png'),

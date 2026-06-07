@@ -41,7 +41,7 @@ export async function run(args) {
     return { pngPath: output, metadata: result.metadata }
   }
 
-  const taskInfo = await prepareOutputTask({ mode: 'generate', index: 1, seed, startedAt, outputRoot: outputDir })
+  const taskInfo = await prepareOutputTask({ mode: 'generate', index: 1, text, seed, startedAt, outputRoot: outputDir })
   const status = resolveStatus(result.metadata)
   const metadata = augmentMetadata(result.metadata, { task, taskInfo, modeName: 'generate', text, prompt, seed, usesTxt2Img: true })
   await writeTaskArtifacts({
