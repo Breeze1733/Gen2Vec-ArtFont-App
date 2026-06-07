@@ -176,6 +176,7 @@ function downloadModels(backendDir, onProgress) {
     let currentFileName = ''
     let currentFileSize = ''
     let currentSubdir = ''
+    let finalResult = null
 
     // 已开始下载的模型文件跟踪（用于轮询子进度）
     let trackedFiles = [] // [{ name, subdir, fullPath, lastSize, lastTime, remoteSize }]
@@ -267,12 +268,13 @@ function downloadModels(backendDir, onProgress) {
             const ok = parseInt(parts[1], 10) || 0
             const skip = parseInt(parts[2], 10) || 0
             const fail = parseInt(parts[3], 10) || 0
+            finalResult = { ok, skip, fail }
             if (onProgress) {
               onProgress({
                 step: 2, phase: 'complete',
                 message: fail > 0 ? `模型下载完成 (${ok} 成功, ${fail} 失败)` : '模型下载完成',
                 percent: 100,
-                result: { ok, skip, fail }
+                result: finalResult
               })
             }
             break
@@ -380,7 +382,7 @@ function downloadModels(backendDir, onProgress) {
         reject(new Error(`模型下载脚本异常退出 (退出码: ${code})`))
         return
       }
-      resolve({ ok: completedFiles - failedFiles, skip: 0, fail: failedFiles })
+      resolve(finalResult || { ok: completedFiles - failedFiles, skip: 0, fail: failedFiles })
     })
   })
 }

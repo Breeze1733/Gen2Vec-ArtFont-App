@@ -42,7 +42,7 @@
           <p>仅限图片矢量化模式</p>
         </div>
         <!-- 模型未下载提示 -->
-        <div v-if="modelsSkipped" class="gpu-warning" style="background: #fffbeb; color: #92400e; border: 1px solid #fcd34d;">
+        <div v-if="modelsSkipped || downloadingModels" class="gpu-warning" style="background: #fffbeb; color: #92400e; border: 1px solid #fcd34d;">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <span>⚠️ AI 模型未下载，文生图使用本地降级引擎</span>
             <button
@@ -51,9 +51,32 @@
               @click="startModelDownload"
               style="padding:4px 12px;border-radius:6px;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;cursor:pointer;font-size:12px;font-weight:600"
             >下载模型</button>
-            <span v-else style="font-size:12px;color:#92400e">
-              下载中... {{ modelDownloadProgress.current }}/{{ modelDownloadProgress.total }}
+            <span v-else style="font-size:12px;color:#92400e;font-weight:600">
+              下载中 {{ modelDownloadProgress.current || 0 }}/{{ modelDownloadProgress.total || '?' }}
             </span>
+          </div>
+          <div v-if="downloadingModels || modelDownloadProgress.message" style="margin-top:10px;display:grid;gap:6px">
+            <div style="height:6px;background:#fde68a;border-radius:999px;overflow:hidden">
+              <div :style="{ width: modelDownloadOverallPercent + '%', height: '100%', background: '#f59e0b', borderRadius: '999px', transition: 'width 0.25s ease' }"></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:#92400e">
+              <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                {{ modelDownloadProgress.fileName || modelDownloadProgress.message || '准备下载模型...' }}
+              </span>
+              <span style="flex:none">{{ modelDownloadOverallPercent }}%</span>
+            </div>
+            <div v-if="modelDownloadProgress.filePercent >= 0" style="display:grid;gap:4px">
+              <div style="height:4px;background:#fed7aa;border-radius:999px;overflow:hidden">
+                <div :style="{ width: modelDownloadFilePercent + '%', height: '100%', background: '#ea580c', borderRadius: '999px', transition: 'width 0.25s ease' }"></div>
+              </div>
+              <div style="font-size:11px;color:#a16207">当前文件 {{ modelDownloadFilePercent }}%</div>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:#a16207">
+              <span v-if="modelDownloadProgress.fileSize">大小 {{ modelDownloadProgress.fileSize }}</span>
+              <span v-if="modelDownloadProgress.speed">速度 {{ modelDownloadProgress.speed }}</span>
+              <span v-if="modelDownloadProgress.eta">剩余 {{ modelDownloadProgress.eta }}</span>
+              <span v-if="modelDownloadProgress.result">{{ modelDownloadResultText }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -118,7 +141,7 @@
 </template>
 
 <script setup>
-import { reactive, ref, onMounted } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
 import GenerationForm from './components/GenerationForm.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
@@ -280,7 +303,20 @@ const error = ref('')
 const modelsSkipped = ref(false)
 const modelsReady = ref(true)
 const downloadingModels = ref(false)
-const modelDownloadProgress = reactive({ current: 0, total: 0, fileName: '', percent: 0 })
+const modelDownloadProgress = reactive({
+  current: 0,
+  total: 0,
+  fileName: '',
+  fileSize: '',
+  subdir: '',
+  percent: 0,
+  filePercent: -1,
+  speed: '',
+  eta: '',
+  message: '',
+  phase: '',
+  result: null
+})
 const payload = reactive({
   text: '',
   prompt: '',
@@ -291,6 +327,47 @@ const payload = reactive({
   seed: 0,
   imageFile: null,
   vector: { ...vectorPresets.balanced }
+})
+
+const clampPercent = (value) => {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0) return -1
+  return Math.min(100, Math.max(0, Math.round(n)))
+}
+
+const resetModelDownloadProgress = () => {
+  modelDownloadProgress.current = 0
+  modelDownloadProgress.total = 0
+  modelDownloadProgress.fileName = ''
+  modelDownloadProgress.fileSize = ''
+  modelDownloadProgress.subdir = ''
+  modelDownloadProgress.percent = 0
+  modelDownloadProgress.filePercent = -1
+  modelDownloadProgress.speed = ''
+  modelDownloadProgress.eta = ''
+  modelDownloadProgress.message = ''
+  modelDownloadProgress.phase = ''
+  modelDownloadProgress.result = null
+}
+
+const modelDownloadOverallPercent = computed(() => {
+  const direct = clampPercent(modelDownloadProgress.percent)
+  if (direct >= 0) return direct
+  if (modelDownloadProgress.total > 0) {
+    return clampPercent((modelDownloadProgress.current / modelDownloadProgress.total) * 100)
+  }
+  return 0
+})
+
+const modelDownloadFilePercent = computed(() => {
+  const direct = clampPercent(modelDownloadProgress.filePercent)
+  return direct >= 0 ? direct : 0
+})
+
+const modelDownloadResultText = computed(() => {
+  const result = modelDownloadProgress.result
+  if (!result) return ''
+  return `${result.ok || 0} 成功，${result.skip || 0} 跳过，${result.fail || 0} 失败`
 })
 
 const applyVectorPreset = (presetName) => {
@@ -1213,29 +1290,47 @@ const startModelDownload = async () => {
   if (downloadingModels.value) return
   downloadingModels.value = true
   error.value = ''
+  resetModelDownloadProgress()
 
   try {
     onSplashProgress((data) => {
+      if (!data || typeof data !== 'object') return
+
+      if (data.phase) modelDownloadProgress.phase = data.phase
+      if (data.message) modelDownloadProgress.message = data.message
+      if (data.fileIndex !== undefined) modelDownloadProgress.current = data.fileIndex || 0
+      if (data.totalFiles !== undefined) modelDownloadProgress.total = data.totalFiles || 0
+      if (data.fileName !== undefined) modelDownloadProgress.fileName = data.fileName || ''
+      if (data.fileSize !== undefined) modelDownloadProgress.fileSize = data.fileSize || ''
+      if (data.subdir !== undefined) modelDownloadProgress.subdir = data.subdir || ''
+      if (data.percent !== undefined) modelDownloadProgress.percent = clampPercent(data.percent)
+      if (data.filePercent !== undefined) modelDownloadProgress.filePercent = clampPercent(data.filePercent)
+      if (data.speed !== undefined) modelDownloadProgress.speed = data.speed || ''
+      if (data.eta !== undefined) modelDownloadProgress.eta = data.eta || ''
+      if (data.result) modelDownloadProgress.result = data.result
+
       if (data.phase === 'downloading') {
-        modelDownloadProgress.current = data.fileIndex || 0
-        modelDownloadProgress.total = data.totalFiles || 0
-        modelDownloadProgress.fileName = data.fileName || ''
-        modelDownloadProgress.percent = data.percent || 0
+        modelDownloadProgress.current = data.fileIndex || modelDownloadProgress.current
+      } else if (data.phase === 'complete') {
+        modelDownloadProgress.percent = 100
+        if (modelDownloadProgress.total > 0) {
+          modelDownloadProgress.current = modelDownloadProgress.total
+        }
       }
     })
 
-    await downloadModels()
-    modelsSkipped.value = false
-    modelsReady.value = true
+    const result = await downloadModels()
+    if (result) modelDownloadProgress.result = result
+    const failed = Number(result?.fail || 0)
+    modelsSkipped.value = failed > 0
+    modelsReady.value = failed === 0
     error.value = ''
   } catch (err) {
+    modelDownloadProgress.phase = 'error'
+    modelDownloadProgress.message = err?.message || '模型下载失败'
     error.value = `模型下载失败: ${err.message}`
   } finally {
     downloadingModels.value = false
-    modelDownloadProgress.current = 0
-    modelDownloadProgress.total = 0
-    modelDownloadProgress.fileName = ''
-    modelDownloadProgress.percent = 0
     removeSplashProgressListener()
   }
 }
