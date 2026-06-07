@@ -1,36 +1,47 @@
 #!/usr/bin/env node
 
 /**
- * Gen2Vec CLI 入口
- * 艺术字矢量化命令行工具
+ * Gen2Vec CLI — 矢量艺术字生成器命令行工具
  *
- * 启动流程：
- *   1. 检查同级 backend/ 目录 → 解压引擎 → 下载模型 → 启动后端
- *   2. 执行用户命令 (generate / vectorize / pipeline / batch / health / shutdown)
- *   3. 退出时清理后端进程
+ * 定位：随桌面端安装包交付的自动化验收控制台。
+ * 不管理后端生命周期，假设后端已由桌面端启动或用户自行启动。
+ *
+ * 用法:
+ *   gen2vec-cli <command> [options]
+ *
+ * 命令:
+ *   generate    生成艺术字位图 (txt2img-api)
+ *   vectorize   将位图矢量化为 SVG (vectorizer-api)
+ *   pipeline    完整流水线：文本 → 位图 → SVG
+ *   batch       批量流水线（支持 TXT/CSV/JSON）
+ *   env         显示当前环境与后端状态
+ *   health      检查后端服务状态
+ *   shutdown    关闭后端服务
  */
 
 import { parseArgs } from 'node:util'
+import { healthCheck, shutdownBackends } from '../src/api.mjs'
 import { run as runGenerate } from '../src/commands/generate.mjs'
 import { run as runVectorize } from '../src/commands/vectorize.mjs'
 import { run as runPipeline } from '../src/commands/pipeline.mjs'
 import { run as runBatch } from '../src/commands/batch.mjs'
-import { healthCheck, shutdownBackends } from '../src/api.mjs'
-import { runStartupSequence, shutdownBackendsProcesses, resolveBackendDir } from '../src/startup.mjs'
+import { run as runEnv } from '../src/commands/env.mjs'
 
-const VERSION = '0.1.0'
+const VERSION = '1.0.0'
+const CLI_NAME = 'gen2vec-cli'
 
 const HELP = `
-Gen2Vec CLI v${VERSION} — 矢量艺术字生成器
+${CLI_NAME} v${VERSION} — 矢量艺术字生成器 · 自动化验收控制台
 
 用法:
-  gen2vec <command> [options]
+  ${CLI_NAME} <command> [options]
 
 命令:
   generate    生成艺术字位图
   vectorize   将位图矢量化为 SVG
   pipeline    完整流水线（文本 → 位图 → SVG）
-  batch       批量生成（文本 → 位图 → SVG，容错执行）
+  batch       批量流水线（文本 → 位图 → SVG，容错执行）
+  env         显示当前环境与后端状态
   health      检查后端服务状态
   shutdown    关闭后端服务
 
@@ -41,7 +52,7 @@ Gen2Vec CLI v${VERSION} — 矢量艺术字生成器
   -n, --negative <text>        负面提示词
   -r, --resolution <res>       分辨率 (默认: 1024 x 1024)
   -s, --seed <n>               随机种子
-  -o, --output <path>          输出文件路径
+  -o, --output <path>          额外输出文件路径
   -i, --input <path>           输入图片路径
       --preset <name>          矢量化预设 (clean|balanced|detailed|ultra)
       --vector-preset <name>   矢量化预设 (pipeline / batch 命令)
@@ -56,26 +67,64 @@ Gen2Vec CLI v${VERSION} — 矢量艺术字生成器
       --length-threshold <n>   长度阈值 1-50
       --layer-difference <n>   图层差异 1-50
       --scale <n>              放大倍数 1-4
-
-示例:
-  gen2vec generate --text "你好" --prompt "霓虹风格"
-  gen2vec vectorize --input artwork.png --preset detailed
-  gen2vec pipeline --text "Hello" --vector-preset ultra
-  gen2vec batch --text "你好|霓虹风格" --vector-preset detailed
-  gen2vec batch --input-file batch.txt --output-dir ./outputs/batch-demo
-  gen2vec batch --input-file testdata/art_text_prompts_150.txt --output-dir ./outputs/cli-batch-150 --seed 20260605 --vector-preset balanced
-  gen2vec health
-  gen2vec shutdown
+      --wait <n>               等待后端就绪的最大秒数（默认: 0，不等待）
 
 环境变量:
-  TXT2IMG_BACKEND_URL     txt2img 服务地址 (默认: http://127.0.0.1:9001)
-  VECTORIZER_BACKEND_URL  矢量化服务地址 (默认: http://127.0.0.1:8000)
-  TXT2IMG_WORKFLOW        ComfyUI 工作流名称 (默认: 空，使用后端降级链)
-  ART_TEXT_OUTPUT_ROOT    默认输出根目录 (默认: ./outputs)
+  TXT2IMG_BACKEND_URL      txt2img 服务地址 (默认: http://127.0.0.1:9001/api/v1/txt2img)
+  VECTORIZER_BACKEND_URL   矢量化服务地址 (默认: http://127.0.0.1:8000/api/v1/vectorize)
+  TXT2IMG_WORKFLOW         ComfyUI 工作流名称
+  ART_TEXT_OUTPUT_ROOT     默认输出根目录 (默认: ./outputs)
+
+场景示例:
+  评审验收 — 单条测试:
+    ${CLI_NAME} pipeline --text "七里香" --prompt "清新国风、墨绿色金边"
+
+  评审验收 — 批量 150 条:
+    ${CLI_NAME} batch --input-file testdata/art_text_prompts_150.txt --output-dir ./outputs/cli-batch-150
+
+  图片矢量化:
+    ${CLI_NAME} vectorize --input artwork.png --preset detailed
+
+  环境检查:
+    ${CLI_NAME} env
 `
 
-// 记录后端是否由我们启动的（退出时需要关闭）
-let startedByUs = false
+/**
+ * 检查后端是否就绪，如不可用则报错退出。
+ * CLI 不启动后端，仅做前置校验。
+ */
+async function ensureBackendReady(waitSeconds = 0) {
+  const deadline = Date.now() + waitSeconds * 1000
+  let lastCheck = null
+
+  while (Date.now() < deadline) {
+    lastCheck = await healthCheck()
+    if (lastCheck.txt2img && lastCheck.vectorizer) return true
+    if (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1000))
+    }
+  }
+
+  // waitSeconds 为 0 时直接到这里（只检查一次）
+  if (!lastCheck) lastCheck = await healthCheck()
+
+  if (!lastCheck.txt2img && !lastCheck.vectorizer) {
+    console.error(`\n错误: 后端服务未运行 (txt2img:9001, vectorizer:8000)`)
+    console.error(`请先启动"矢量艺术字生成器"桌面应用，或手动启动后端服务。`)
+    console.error(`提示: 可通过 Set-TXT2IMG_BACKEND_URL / VECTORIZER_BACKEND_URL 环境变量指定自定义地址。`)
+    console.error(`      或运行 "${CLI_NAME} env" 查看详情。`)
+    return false
+  }
+  if (!lastCheck.txt2img) {
+    console.error(`\n错误: txt2img 服务不可用 (9001)，文生图功能不可用。`)
+    return false
+  }
+  if (!lastCheck.vectorizer) {
+    console.error(`\n错误: 矢量化服务不可用 (8000)，矢量化功能不可用。`)
+    return false
+  }
+  return true
+}
 
 async function main() {
   const { values, positionals } = parseArgs({
@@ -102,6 +151,7 @@ async function main() {
       'length-threshold': { type: 'string' },
       'layer-difference': { type: 'string' },
       scale: { type: 'string' },
+      wait: { type: 'string' },
     },
     allowPositionals: true,
   })
@@ -113,6 +163,41 @@ async function main() {
   }
 
   const command = positionals[0]
+
+  // 不需要后端的命令
+  if (command === 'help') {
+    console.log(HELP)
+    process.exit(0)
+  }
+
+  if (command === 'env') {
+    await runEnv()
+    process.exit(0)
+  }
+
+  if (command === 'shutdown') {
+    console.log('正在关闭后端服务...')
+    await shutdownBackends()
+    console.log('✓ 已发送关闭请求')
+    process.exit(0)
+  }
+
+  // health 也不需要等待
+  if (command === 'health') {
+    const status = await healthCheck()
+    const allOk = status.txt2img && status.vectorizer
+    console.log(`txt2img 服务:    ${status.txt2img ? '✓ 正常' : '✗ 不可用'}`)
+    console.log(`矢量化服务:     ${status.vectorizer ? '✓ 正常' : '✗ 不可用'}`)
+    process.exit(allOk ? 0 : 1)
+  }
+
+  // ── 以下命令需要后端 ──
+  const waitSeconds = values.wait ? Math.max(0, parseInt(values.wait, 10) || 0) : 0
+  const backendReady = await ensureBackendReady(waitSeconds)
+  if (!backendReady) {
+    process.exit(1)
+  }
+
   const parseNumber = (value, name) => {
     if (value === undefined || value === null || value === '') return undefined
     const parsed = Number(value)
@@ -141,31 +226,6 @@ async function main() {
     return vector
   }
 
-  // shutdown 命令不需要启动后端
-  if (command === 'shutdown') {
-    console.log('正在关闭后端服务...\n')
-    await shutdownBackends()
-    await shutdownBackendsProcesses()
-    console.log('✓ 已关闭')
-    process.exit(0)
-  }
-
-  // 其他命令需要后端在线 → 走启动序列
-  const backendDir = resolveBackendDir()
-  if (backendDir) {
-    console.log(`\n  ⏳ 矢量艺术字生成器 v${VERSION}`)
-    const result = await runStartupSequence()
-    if (!result.success) {
-      console.error('\n错误: 后端服务未就绪，无法执行命令')
-      process.exit(1)
-    }
-    startedByUs = true
-  } else {
-    // 没有 backend/ 目录，假设后端已手动启动
-    // 开发模式下用
-  }
-
-  // 执行命令
   try {
     switch (command) {
       case 'generate': {
@@ -240,17 +300,6 @@ async function main() {
         break
       }
 
-      case 'health': {
-        const status = await healthCheck()
-        const allOk = status.txt2img && status.vectorizer
-        console.log(`txt2img 服务:    ${status.txt2img ? '✓ 正常' : '✗ 不可用'}`)
-        console.log(`矢量化服务:     ${status.vectorizer ? '✓ 正常' : '✗ 不可用'}`)
-        if (!allOk) {
-          process.exit(1)
-        }
-        break
-      }
-
       default:
         console.error(`未知命令: ${command}`)
         console.log(HELP)
@@ -261,29 +310,5 @@ async function main() {
     process.exit(1)
   }
 }
-
-// 退出清理
-process.on('exit', () => {
-  if (startedByUs) {
-    shutdownBackendsProcesses().catch(() => {})
-  }
-})
-
-// 响应 Ctrl+C
-process.on('SIGINT', async () => {
-  console.log('\n正在关闭后端...')
-  if (startedByUs) {
-    await shutdownBackends()
-    await shutdownBackendsProcesses()
-  }
-  process.exit(0)
-})
-
-process.on('SIGTERM', async () => {
-  if (startedByUs) {
-    await shutdownBackendsProcesses()
-  }
-  process.exit(0)
-})
 
 main()

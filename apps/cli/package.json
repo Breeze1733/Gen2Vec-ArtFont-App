@@ -1,6 +1,18 @@
 {
-    "main":  "bin/gen2vec.mjs",
-    "private":  true,
-    "name":  "gen2vec-cli",
-    "type":  "module"
+  "name": "gen2vec-cli",
+  "version": "1.0.0",
+  "description": "矢量艺术字生成器 · CLI 自动化验收控制台（随桌面端安装包交付）",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "gen2vec-cli": "./bin/gen2vec.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "pkg": {
+    "assets": ["src/**/*"],
+    "targets": ["node18-win-x64"],
+    "outputPath": "dist"
+  }
 }

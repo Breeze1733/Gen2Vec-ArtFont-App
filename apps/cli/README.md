@@ -1,25 +1,63 @@
-# Gen2Vec CLI
+# Gen2Vec CLI — 矢量艺术字生成器 · 自动化验收控制台
 
-矢量艺术字生成器命令行工具。
+## 定位
+
+`gen2vec-cli` 是 **随桌面端安装包交付的自动化验收控制台**，不独立分发。
+
+- **日常使用** → 启动桌面端 GUI，使用图形界面操作。
+- **评审验收 / 批量测试 / 脚本自动化** → 使用 CLI。
+
+CLI 假设后端（txt2img-api + vectorizer-api）已经由桌面端启动完毕，不参与后端生命周期管理。
+
+---
 
 ## 运行方式
 
-```powershell
-# 安装桌面端后，在安装目录下:
-gen2vec_cli <command> [options]
+### 方式 1：安装包自带（推荐，交付验收用）
 
-# 或者源码直接运行（需要 Node.js 18+）:
-node apps/cli/bin/gen2vec.mjs <command> [options]
+安装桌面端后，在安装目录下直接运行：
+
+```powershell
+cd "C:\Program Files\矢量艺术字生成器"
+.\gen2vec-cli <command> [options]
 ```
 
-## 命令
+**此时桌面端已在后台自动启动后端**，CLI 零等待直接执行。
 
-### generate — 生成艺术字位图
+### 方式 2：源码直接运行（开发调试用）
 
 ```powershell
-gen2vec generate --text "你好" --prompt "霓虹风格" --output hello.png
-gen2vec generate -t "你好" -p "霓虹风格" -o hello.png
-gen2vec generate --text "你好" --prompt "霓虹风格" --output-dir ./outputs
+# 确保后端已启动
+
+node apps/cli/bin/gen2vec.mjs <command> [options]
+
+# 或通过 npm link
+cd apps/cli
+npm link
+gen2vec-cli <command> [options]
+```
+
+---
+
+## 命令参考
+
+### 通用选项
+
+| 选项 | 简写 | 说明 |
+|------|:----:|------|
+| `--help` | `-h` | 显示帮助 |
+| `--wait <秒>` | | 等待后端就绪的最大秒数（默认 0，不等待） |
+
+---
+
+### `pipeline` — 完整流水线（文本 → 位图 → SVG）
+
+最常用的验收命令，一条指令走完全流程。
+
+```powershell
+gen2vec-cli pipeline --text "七里香" --prompt "清新国风、墨绿色金边"
+gen2vec-cli pipeline --text "Hello" --prompt "neon style" --vector-preset ultra
+gen2vec-cli pipeline --text "夏日冰饮 50%" --prompt "清爽蓝白配色" --seed 42
 ```
 
 | 参数 | 简写 | 说明 | 必填 |
@@ -29,29 +67,16 @@ gen2vec generate --text "你好" --prompt "霓虹风格" --output-dir ./outputs
 | `--negative` | `-n` | 负面提示词 | |
 | `--resolution` | `-r` | 分辨率 (默认: 1024 x 1024) | |
 | `--seed` | `-s` | 随机种子 | |
-| `--output` | `-o` | 兼容模式：额外输出单个 PNG 路径 | |
-| `--output-dir` | | desktop-compatible 任务输出根目录 (默认: `./outputs`) | |
+| `--vector-preset` | | 矢量化预设 | |
+| `--output-dir` | | 输出目录 (默认: ./outputs) | |
+| `--output` | `-o` | 额外输出单个 SVG 路径 | |
 
-### vectorize — 位图矢量化
+---
 
-```powershell
-gen2vec vectorize --input artwork.png --preset detailed --preview
-gen2vec vectorize -i artwork.png -o result.svg
-gen2vec vectorize --input artwork.png --preset balanced --output-dir ./outputs
-```
-
-| 参数 | 简写 | 说明 | 必填 |
-|------|:----:|------|:----:|
-| `--input` | `-i` | 输入图片路径 | ✓ |
-| `--output` | `-o` | 兼容模式：额外输出 SVG 路径 | |
-| `--preset` | | 矢量化预设: `clean` / `balanced` / `detailed` / `ultra` | |
-| `--preview` | | 同时保存预览 PNG | |
-| `--output-dir` | | desktop-compatible 任务输出根目录 (默认: `./outputs`) | |
-
-### pipeline — 全流程（文本 → 位图 → SVG）
+### `generate` — 生成艺术字位图
 
 ```powershell
-gen2vec pipeline --text "Hello" --prompt "赛博朋克" --vector-preset ultra --output-dir ./outputs
+gen2vec-cli generate --text "你好" --prompt "霓虹风格"
 ```
 
 | 参数 | 简写 | 说明 | 必填 |
@@ -61,88 +86,120 @@ gen2vec pipeline --text "Hello" --prompt "赛博朋克" --vector-preset ultra --
 | `--negative` | `-n` | 负面提示词 | |
 | `--resolution` | `-r` | 分辨率 | |
 | `--seed` | `-s` | 随机种子 | |
-| `--vector-preset` | | 矢量化预设 | |
-| `--output-dir` | | 输出目录 (默认: `./outputs`) | |
-| `--output` | `-o` | 兼容模式：额外输出 SVG，并在同目录输出同名 PNG | |
+| `--output-dir` | | 输出目录 | |
+| `--output` | `-o` | 额外输出单个 PNG | |
 
-### batch — 批量全流程（文本 → 位图 → SVG）
+---
 
-批量输入支持 TXT / CSV / JSON；TXT 与桌面端输入框一致，每行一条：
+### `vectorize` — 位图矢量化
+
+```powershell
+gen2vec-cli vectorize --input artwork.png --preset detailed
+gen2vec-cli vectorize -i input.png --preset ultra --preview
+```
+
+| 参数 | 简写 | 说明 | 必填 |
+|------|:----:|------|:----:|
+| `--input` | `-i` | 输入图片路径 | ✓ |
+| `--preset` | | 矢量化预设 | |
+| `--preview` | | 同时保存预览 PNG | |
+| `--output-dir` | | 输出目录 | |
+| `--output` | `-o` | 额外输出单个 SVG | |
+
+---
+
+### `batch` — 批量流水线
+
+输入支持 TXT / CSV / JSON。每行一条：
 
 ```text
 文本 | 风格提示词 | 负面提示词 | seed | resolution
 ```
 
-常用命令：
+常用：
 
 ```powershell
-gen2vec batch --input-file batch.txt --output-dir ./outputs/batch-demo --vector-preset balanced
-gen2vec batch --text "你好|霓虹风格`n世界|金属浮雕" --seed 20260605 --seed-step 1
-gen2vec batch --input-file batch.txt --no-vectorize
+gen2vec-cli batch --input-file testdata/art_text_prompts_150.txt --output-dir ./outputs/cli-batch-150
+gen2vec-cli batch --text "七里香|清新国风`n夏日冰饮 50%|清爽蓝白" --seed 20260605 --seed-step 1
+gen2vec-cli batch --input-file batch.csv --no-vectorize
 ```
 
-150 条生成指令样例：
+| 参数 | 说明 | 必填 |
+|------|------|:----:|
+| `--input-file` | 批量输入文件 (TXT/CSV/JSON) | (二选一) |
+| `--text` | 直接传入一行或多行批量输入 | (二选一) |
+| `--negative` | 全局负面提示词 | |
+| `--resolution` | 全局分辨率 | |
+| `--seed` | 全局随机种子 | |
+| `--seed-step` | 每条 seed 递增步长 | |
+| `--vector-preset` | 矢量化预设 | |
+| `--no-vectorize` | 只生成 original.png，不做矢量化 | |
+| `--output-dir` | 输出目录 | |
+
+---
+
+### `env` — 环境信息
+
+显示当前 CLI 版本、后端 URL、health 状态、Node.js 运行时和输出目录配置。
 
 ```powershell
-gen2vec batch `
-  --input-file testdata/art_text_prompts_150.txt `
-  --output-dir ./outputs/cli-batch-150 `
-  --resolution "1024 x 1024" `
-  --seed 20260605 `
-  --vector-preset balanced `
-  --color-precision 4 `
-  --filter-speckle 18 `
-  --corner-threshold 70 `
-  --length-threshold 12 `
-  --layer-difference 20 `
-  --scale 2
+gen2vec-cli env
 ```
 
-| 参数 | 简写 | 说明 | 必填 |
-|------|:----:|------|:----:|
-| `--text` | `-t` | 直接传入一行或多行批量输入；与 `--input-file` 二选一 | |
-| `--input-file` | | 批量输入文件 TXT / CSV / JSON；与 `--text` 二选一 | |
-| `--negative` | `-n` | 全局负面提示词，行内第 3 列可覆盖 | |
-| `--resolution` | `-r` | 全局分辨率，行内第 5 列可覆盖 | |
-| `--seed` | `-s` | 全局随机种子；默认和桌面端一样每条使用同一个 seed | |
-| `--seed-step` | | 每条 seed 递增步长；需要每条不同 seed 时设为 `1` | |
-| `--vector-preset` | | 矢量化预设 | |
-| `--no-vectorize` | | 只生成 `original.png`，不执行矢量化 | |
-| `--output-dir` | | 输出目录 (默认: `./outputs`) | |
+---
 
-## 输出结构
-
-默认输出与桌面端对齐，每个任务目录固定包含：
-
-```text
-task_YYYYMMDD_HHMMSS_mmm[_001]/
-├─ original.png
-├─ transparent.png
-├─ result.svg
-├─ preview.png
-├─ metadata.json
-├─ run.log
-└─ workflows/
-   ├─ workflow_api.json
-   ├─ nodes.md
-   └─ model_dependencies.json
-```
-
-批量模式会额外在汇总目录写入 `batch_summary.csv`，每条成功或失败都会落一行，便于验收和重跑。
-
-### health — 检查后端状态
+### `health` — 后端健康检查
 
 ```powershell
-gen2vec health
+gen2vec-cli health
 # txt2img 服务:    ✓ 正常
 # 矢量化服务:     ✓ 正常
 ```
 
-### shutdown — 关闭后端
+---
+
+### `shutdown` — 关闭后端
 
 ```powershell
-gen2vec shutdown
+gen2vec-cli shutdown
 ```
+
+---
+
+## 输出结构
+
+CLI 与桌面端使用相同的产物目录结构，两者可以共用、互查。
+
+```text
+outputs/
+├── task_YYYYMMDD_HHMMSS_xxx/
+│   ├─ original.png            # 文生图原始位图
+│   ├─ transparent.png         # 透明背景 PNG
+│   ├─ result.svg              # 标准 SVG 矢量图
+│   ├─ preview.png             # SVG 回渲染预览
+│   ├─ metadata.json           # 结构化元数据
+│   ├─ run.log                 # 运行日志
+│   └─ workflows/              # ComfyUI 工作流快照
+│       ├─ workflow_api.json
+│       ├─ nodes.md
+│       └─ model_dependencies.json
+├── task_YYYYMMDD_HHMMSS_xxx/
+│   └── ...
+└── batch_summary.csv          # 批量模式汇总（如有）
+```
+
+---
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `TXT2IMG_BACKEND_URL` | `http://127.0.0.1:9001/api/v1/txt2img` | 文生图服务地址 |
+| `VECTORIZER_BACKEND_URL` | `http://127.0.0.1:8000/api/v1/vectorize` | 矢量化服务地址 |
+| `TXT2IMG_WORKFLOW` | (空，使用后端降级链) | ComfyUI 工作流名称 |
+| `ART_TEXT_OUTPUT_ROOT` | `./outputs` | 产物输出根目录 |
+
+---
 
 ## 矢量化预设
 
@@ -152,12 +209,3 @@ gen2vec shutdown
 | `balanced` | 4 | 18 | 70 | 12 | 20 | 2 |
 | `detailed` | 6 | 2 | 30 | 3 | 4 | 3 |
 | `ultra` | 8 | 1 | 20 | 2 | 2 | 3 |
-
-## 环境变量
-
-| 变量 | 默认值 |
-|------|--------|
-| `TXT2IMG_BACKEND_URL` | `http://127.0.0.1:9001/api/v1/txt2img` |
-| `VECTORIZER_BACKEND_URL` | `http://127.0.0.1:8000/api/v1/vectorize` |
-| `TXT2IMG_WORKFLOW` | 空字符串，使用后端降级链 |
-| `ART_TEXT_OUTPUT_ROOT` | `./outputs` |

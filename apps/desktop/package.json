@@ -26,7 +26,8 @@
       { "from": "../../services/txt2img-api/dist/download-models.ps1", "to": "backend/download-models.ps1" },
       { "from": "../../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
       { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
-      { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" }
+      { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" },
+      { "from": "../../apps/cli/dist/gen2vec_cli.exe", "to": "../gen2vec_cli.exe" }
     ],
     "win": {
       "target": "nsis"
