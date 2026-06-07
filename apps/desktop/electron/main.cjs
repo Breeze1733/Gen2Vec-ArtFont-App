@@ -721,6 +721,12 @@ ipcMain.on('splash:action', (_event, data) => {
   }
 
   if (action) {
+    if (action === 'minimize-window') {
+      const win = BrowserWindow.fromWebContents(_event.sender)
+      if (win && !win.isDestroyed()) win.minimize()
+      return
+    }
+
     // 对所有非 exit-app 动作，广播给 waitForSplashAction（跳过、下载、重试）
     if (action !== 'exit-app') {
       splashActions.emit(SPLASH_ACTION_EVENT, action)

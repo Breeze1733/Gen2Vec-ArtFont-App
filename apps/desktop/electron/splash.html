@@ -29,11 +29,11 @@
       -webkit-app-region: no-drag;
     }
 
-    /* Always-visible close button */
+    /* Always-visible window buttons */
+    .minimize-btn,
     .close-btn {
       position: absolute;
       top: 12px;
-      right: 12px;
       width: 32px;
       height: 32px;
       border-radius: 50%;
@@ -48,6 +48,19 @@
       transition: all 0.2s ease;
       -webkit-app-region: no-drag;
       z-index: 10;
+    }
+
+    .minimize-btn {
+      right: 48px;
+    }
+
+    .close-btn {
+      right: 12px;
+    }
+
+    .minimize-btn:hover {
+      background: #e0f2fe;
+      color: #0284c7;
     }
 
     .close-btn:hover {
@@ -332,6 +345,7 @@
 </head>
 <body>
   <div class="splash-container">
+    <button class="minimize-btn" id="minimizeBtn" title="最小化">&#8722;</button>
     <button class="close-btn" id="closeBtn" title="关闭">✕</button>
     <div class="logo-area">
       <div class="logo-icon">🎨</div>
@@ -392,6 +406,7 @@
       const downloadStats = document.getElementById('downloadStats')
       const fileProgress = document.getElementById('fileProgress')
       const fileProgressFill = document.getElementById('fileProgressFill')
+      const minimizeBtn = document.getElementById('minimizeBtn')
       const closeBtn = document.getElementById('closeBtn')
 
       let currentStep = 0
@@ -458,6 +473,12 @@
       }
 
       // ── Button handlers ──
+      minimizeBtn.addEventListener('click', () => {
+        if (window.artTextApp?.sendSplashAction) {
+          window.artTextApp.sendSplashAction({ action: 'minimize-window' })
+        }
+      })
+
       // Close button — always visible, always kills everything
       closeBtn.addEventListener('click', () => {
         if (window.artTextApp?.sendSplashAction) {
