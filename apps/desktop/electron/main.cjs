@@ -632,10 +632,18 @@ function waitForSplashAction() {
 }
 
 ipcMain.on('splash:action', (_event, data) => {
-  const { action } = data || {}
-  splashActions.emit(SPLASH_ACTION_EVENT, action)
-  if (action === 'exit-app') {
-    app.quit()
+  // data 可能是 { action: 'xxx' } 对象或 'xxx' 字符串（preload 传的是对象）
+  let action
+  if (typeof data === 'string') {
+    action = data
+  } else if (data && typeof data === 'object') {
+    action = data.action
+  }
+  if (action) {
+    splashActions.emit(SPLASH_ACTION_EVENT, action)
+    if (action === 'exit-app') {
+      app.quit()
+    }
   }
 })
 
