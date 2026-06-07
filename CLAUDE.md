@@ -1,94 +1,105 @@
 # CLAUDE.md
 
-本文档为 Claude Code 提供本仓库的指引。
+本文档给 Claude Code / Codex 等代码代理使用，用于快速理解仓库结构、运行方式和修改约束。
 
 ## 沟通约定
 
-- 与用户沟通使用**中文**
-- 文档描述、注释等使用**中文**
-- 代码中的标识符、API 名、专有名词等使用标准**英文**
+- 与用户沟通使用中文。
+- 文档、注释、提交说明优先使用中文。
+- 代码标识符、API 字段、文件名、专有框架名使用英文原名。
+- 修改前先读相关模块，优先沿用现有风格，不做无关重构。
 
-## 项目概览
+## 项目定位
 
-矢量艺术字生成器 — 本地优先的 AI 艺术字工具。根据提示词生成位图艺术字（通过 ComfyUI 或本地降级方案），再使用计算机视觉技术将位图矢量化输出 SVG。
+Gen2Vec ArtFont 是一个本地优先的 AI 艺术字生成与矢量化应用。
 
-支持三种模式：单条提示词、批量提示词、图片矢量化。
+主流程：
+
+```text
+文字 + 风格提示词
+  -> txt2img-api
+  -> ComfyUI 工作流或 Pillow stub
+  -> original.png
+  -> vectorizer-api
+  -> transparent.png + result.svg + preview.png
+```
+
+用户入口有两个：
+
+- `apps/desktop`：Electron + Vue 3 桌面端，适合日常交互。
+- `apps/cli`：Node.js CLI，适合批量验收、脚本自动化和调试。
+
+后端分为两个独立服务：
+
+- `services/txt2img-api`：文本到位图，默认端口 `9001`。
+- `services/vectorizer-api`：位图到 SVG，默认端口 `8000`。
 
 ## 仓库结构
 
-```
-Gen2Vec-ArtFont-App/
-├── apps/
-│   ├── desktop/                        # Electron + Vue 3 桌面端
-│   │   ├── electron/
-│   │   │   ├── main.cjs                # 主进程：IPC 处理、HTTP 代理到后端
-│   │   │   └── preload.cjs             # contextBridge 安全 IPC（window.artTextApp）
-│   │   ├── src/renderer/
-│   │   │   ├── App.vue                 # 根组件：GPU 检测、状态管理、历史记录
-│   │   │   ├── api.js                  # API 层：后端 HTTP 调用
-│   │   │   ├── main.js                 # Vue 入口
-│   │   │   ├── components/
-│   │   │   │   ├── ModeSwitcher.vue    # 模式切换（单条/批量/矢量化）
-│   │   │   │   ├── GenerationForm.vue  # 输入表单
-│   │   │   │   ├── VectorParams.vue    # 矢量化参数面板
-│   │   │   │   ├── ResultPanel.vue     # 结果展示
-│   │   │   │   └── HistoryPanel.vue    # 历史任务
-│   │   │   └── styles/global.css       # 单文件 CSS
-│   │   ├── package.json
-│   │   └── vite.config.js
-│   └── cli/                            # Node.js CLI 工具（无需 Electron）
-│       ├── bin/gen2vec.mjs             # CLI 入口
-│       ├── src/
-│       │   ├── api.mjs                 # 后端 API 调用层
-│       │   ├── commands/
-│       │   │   ├── generate.mjs        # generate 命令
-│       │   │   ├── vectorize.mjs       # vectorize 命令
-│       │   │   └── pipeline.mjs        # pipeline 命令
-│       │   └── utils/file.mjs          # 文件读写工具
-│       └── README.md
-├── services/
-│   ├── vectorizer-api/                 # FastAPI：位图 → SVG 矢量化
-│   │   ├── app/
-│   │   │   ├── main.py                 # 路由：/healthz, POST /api/v1/vectorize
-│   │   │   ├── models.py               # Pydantic 模型（VectorConfig, VectorizeRequest/Response）
-│   │   │   ├── image_processing.py     # 图像预处理：rembg 抠图、去噪、裁剪、量化
-│   │   │   ├── vectorization.py        # 矢量化核心：vtracer 追踪 + 质量评估
-│   │   │   └── app.py                  # 入口
-│   │   ├── models/rembg/               # 离线 rembg ONNX 模型
-│   │   └── requirements.txt
-│   └── txt2img-api/                    # FastAPI：文本 → 位图生成
-│       ├── app/
-│       │   ├── main.py                 # 路由：/healthz, POST /api/v1/txt2img
-│       │   ├── models.py               # Pydantic 模型（GenerationRequest/Response）
-│       │   └── generator.py            # ComfyUI 客户端 + Pillow 本地 stub 降级
-│       ├── scripts/
-│       │   ├── run_comfyui.py          # ComfyUI 启动脚本
-│       │   └── poll_comfy.py           # ComfyUI 状态轮询
-│       ├── tests/
-│       │   ├── test_api.py             # API 测试
-│       │   └── test_generator.py       # 生成器测试
-│       ├── workflows/                  # ComfyUI 工作流 JSON（独立于根目录 workflows）
-│       └── pyproject.toml
-├── workflows/                          # （预留）根目录工作流模板
-├── packages/                           # （预留）共享 SDK/类型/工具
-├── docs/
-│   └── electron-ipc.md                 # Electron IPC API 文档
-├── scripts/                            # （预留）开发/构建/发布脚本
-├── README.md
-└── CLAUDE.md
+```text
+apps/
+├─ desktop/
+│  ├─ electron/main.cjs              # Electron 主进程、后端进程管理、IPC、产物写入
+│  ├─ electron/preload.cjs           # contextBridge，暴露 window.artTextApp
+│  ├─ src/renderer/App.vue           # 主界面、任务编排、历史恢复
+│  ├─ src/renderer/api.js            # 渲染进程 API 封装
+│  ├─ src/renderer/components/       # 表单、参数、结果、历史组件
+│  └─ src/renderer/styles/global.css # 全局样式
+├─ cli/
+│  ├─ bin/gen2vec.mjs                # CLI 入口和参数解析
+│  ├─ src/api.mjs                    # 后端 HTTP 调用
+│  ├─ src/commands/                  # generate/vectorize/pipeline/batch/env
+│  └─ src/utils/output.mjs           # 输出目录、元数据、CSV 汇总
+services/
+├─ txt2img-api/
+│  ├─ app/main.py                    # FastAPI 路由、ComfyUI 启动和关闭
+│  ├─ app/generator.py               # 工作流加载、参数注入、ComfyUI 调用、降级链
+│  ├─ app/models.py                  # Pydantic 请求/响应模型
+│  ├─ workflows/                     # ComfyUI API 格式 JSON
+│  └─ tests/                         # pytest
+└─ vectorizer-api/
+   ├─ app/main.py                    # FastAPI 路由和图片来源解析
+   ├─ app/models.py                  # Pydantic 请求/响应模型
+   ├─ app/image_processing.py        # rembg、降噪、裁剪、颜色量化
+   ├─ app/vectorization.py           # vtracer、SVG 格式化、质量评估
+   └─ models/rembg/                  # isnet-general-use.onnx
 ```
 
-## 关键架构决策
+## 关键架构约定
 
-- **FR3 矢量化引擎**（`vectorizer.py`）：通过 k-means 进行颜色量化，逐层用 vtracer 追踪路径，用 svgwrite 组装分层 SVG，用 cairosvg 渲染 PNG 预览，输出轮廓偏差质量指标。
-- **ComfyUI 集成**：txt2img-api 会自动启动捆绑的 ComfyUI 便携实例（如果存在），ComfyUI 不可达时降级为本地 Pillow stub。
-- **桌面端 ↔ 后端 IPC**：Electron 主进程代理 HTTP 请求到 FastAPI 后端。渲染层仅通过 `window.artTextApp`（contextBridge）通信，生产环境无 CORS 问题。
-- **前端无框架**：仅 global.css，未使用 Tailwind 等 CSS 框架。
-- **独立依赖管理**：每个服务/应用独立管理自己的依赖，无 monorepo workspace 工具。
+- 桌面端开发模式不自动启动后端；打包模式才由 Electron 主进程启动 `resources/backend` 下的 EXE。
+- CLI 不管理后端生命周期，只检查和调用已运行的后端。
+- 文生图请求由 `txt2img-api` 选择工作流；如果请求中 `workflow` 为空，按文本语言走降级链。
+- `WORKFLOW_PATH` 环境变量优先级最高，会覆盖请求中的 `workflow`。
+- 矢量化优先使用本地路径传图，失败时再回退到 base64，减少大图在 IPC/HTTP 中传输。
+- `vectorizer-api` 强制使用本地 rembg 模型，不应在运行时下载模型。
+- 运行产物统一写入任务目录，历史恢复依赖这些固定文件名。
 
-## 启动服务
+## 常用命令
 
-### Vectorizer API（端口 8000）
+### txt2img-api
+
+```powershell
+cd services/txt2img-api
+uv sync
+uv run txt2img-api
+```
+
+关闭 ComfyUI 自动启动：
+
+```powershell
+$env:AUTO_START_COMFYUI = "0"
+uv run txt2img-api
+```
+
+测试：
+
+```powershell
+cd services/txt2img-api
+uv run pytest -v
+```
+
+### vectorizer-api
 
 ```powershell
 cd services/vectorizer-api
@@ -96,83 +107,183 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-依赖：OpenCV, scikit-image, vtracer, cairosvg, svgwrite
+需要保证模型存在：
 
-### txt2img-api（端口 9001）
-
-```powershell
-cd services/txt2img-api
-uv sync
-uv run txt2img-api
-# 或：uv run uvicorn app.main:app --host 0.0.0.0 --port 9001
+```text
+services/vectorizer-api/models/rembg/isnet-general-use.onnx
 ```
 
-设置 `AUTO_START_COMFYUI=0` 可跳过自动启动 ComfyUI。ComfyUI 不可达时自动降级为本地 Pillow stub。
-
-### 桌面端
+### desktop
 
 ```powershell
 cd apps/desktop
 npm install
-npm run electron:dev    # Vite 开发 + Electron
-npm run electron:build  # 生产构建（electron-builder, NSIS 安装包）
+npm run electron:dev
 ```
 
-矢量化地址默认 `http://127.0.0.1:8000/api/v1/vectorize`，可通过 `VECTORIZER_BACKEND_URL` 环境变量覆盖。
-文生图地址默认 `http://127.0.0.1:9001/api/v1/txt2img`，可通过 `TXT2IMG_BACKEND_URL` 环境变量覆盖。
-
-### CLI 工具
+构建渲染层：
 
 ```powershell
-# 直接运行（无需安装）
-node apps/cli/bin/gen2vec.mjs --help
+cd apps/desktop
+npm run build
+```
 
-# 常用命令
-node apps/cli/bin/gen2vec.mjs generate --text "你好" --prompt "霓虹风格"
-node apps/cli/bin/gen2vec.mjs vectorize --input artwork.png --preset detailed
-node apps/cli/bin/gen2vec.mjs pipeline --text "Hello" --vector-preset ultra
+打包安装包：
+
+```powershell
+cd apps/desktop
+npm run electron:build
+```
+
+### CLI
+
+```powershell
 node apps/cli/bin/gen2vec.mjs health
+node apps/cli/bin/gen2vec.mjs pipeline --text "七里香" --prompt "清新国风，墨绿色金边"
+node apps/cli/bin/gen2vec.mjs vectorize --input artwork.png --preset detailed
+node apps/cli/bin/gen2vec.mjs batch --input-file testdata/art_text_prompts_150.txt
 ```
 
-CLI 直接调用后端 HTTP 接口，无需 Electron 环境。详见 [apps/cli/README.md](apps/cli/README.md)。
-
-## 测试
+构建 CLI 单文件 EXE：
 
 ```powershell
-# txt2img-api 测试
-cd services/txt2img-api
-uv run pytest
+cd apps/cli
+npm install
+npm run build
 ```
 
-使用 FastAPI TestClient（见 [tests/test_api.py](services/txt2img-api/tests/test_api.py)）。
-
-vectorizer-api 和 desktop 目前尚无测试。
+注意：CLI EXE 构建使用 Node.js SEA，需要 Node.js 20+。
 
 ## API 端点
 
-| 方法 | 路径 | 服务 | 状态 |
-|--------|------|---------|--------|
-| GET | `/healthz` | vectorizer-api, txt2img-api | ✅ |
-| POST | `/api/v1/vectorize` | vectorizer-api | ✅ 位图→SVG |
-| POST | `/api/v1/txt2img` | txt2img-api | ✅ 文本→位图 |
+| 方法 | 路径 | 服务 | 说明 |
+| --- | --- | --- | --- |
+| `GET` | `/healthz` | 两个后端 | 健康检查 |
+| `POST` | `/shutdown` | 两个后端 | 优雅退出 |
+| `POST` | `/api/v1/txt2img` | `txt2img-api` | 文本生成 PNG |
+| `POST` | `/api/v1/vectorize` | `vectorizer-api` | PNG/JPG 转 SVG |
 
-## 环境变量
+默认 URL：
 
-| 变量 | 服务 | 说明 | 默认值 |
-|------|------|------|--------|
-| `VECTORIZER_BACKEND_URL` | desktop, cli | 矢量化接口完整 URL | `http://127.0.0.1:8000/api/v1/vectorize` |
-| `TXT2IMG_BACKEND_URL` | desktop, cli | 文生图接口完整 URL | `http://127.0.0.1:9001/api/v1/txt2img` |
-| `TXT2IMG_WORKFLOW` | cli | ComfyUI 工作流名称 | `test_z_image_turbo` |
-| `AUTO_START_COMFYUI` | txt2img-api | 是否自动启动 ComfyUI | `1` |
-| `WORKFLOW_PATH` | txt2img-api | 自定义工作流 JSON 路径 | — |
-| `COMFYUI_HOST` | txt2img-api | ComfyUI 地址 | `http://127.0.0.1:8188` |
-| `COMFYUI_POLL_TIMEOUT` | txt2img-api | ComfyUI 轮询超时（秒） | `500` |
+```text
+http://127.0.0.1:9001/api/v1/txt2img
+http://127.0.0.1:8000/api/v1/vectorize
+```
+
+## 工作流与模型
+
+`services/txt2img-api/app/generator.py` 中的降级链：
+
+```python
+_CHINESE_FALLBACK = ["qwen_image_2512_gguf", "test_z_image_turbo"]
+_ENGLISH_FALLBACK = ["flux_schnell", "test_z_image_turbo"]
+```
+
+工作流 JSON 必须是 ComfyUI API 格式，即顶层为节点字典，每个节点包含 `class_type` 和 `inputs`。后端通过 `class_type` 自动注入：
+
+- `CLIPTextEncode` / `CLIPTextEncodeFlux`：正向与负向提示词。
+- `EmptyLatentImage` / `EmptySD3LatentImage`：宽高。
+- `KSampler` / `KSamplerAdvanced`：seed。
+
+Qwen-Image 请求分辨率会映射到官方支持的比例尺寸。
 
 ## 矢量化预设
 
+真实默认值位于 `services/vectorizer-api/app/vectorization.py`，桌面端和 CLI 也应保持一致。
+
 | 预设 | color_precision | filter_speckle | corner_threshold | length_threshold | layer_difference | scale |
-|------|-----------------|----------------|------------------|------------------|------------------|-------|
-| clean | 3 | 15 | 60 | 12 | 20 | 2 |
-| balanced | 5 | 6 | 45 | 5 | 10 | 2 |
-| detailed | 6 | 2 | 30 | 3 | 4 | 3 |
-| ultra | 8 | 1 | 20 | 2 | 2 | 3 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `clean` | 2 | 48 | 120 | 30 | 38 | 2 |
+| `balanced` | 4 | 18 | 70 | 12 | 20 | 2 |
+| `detailed` | 6 | 2 | 30 | 3 | 4 | 3 |
+| `ultra` | 8 | 1 | 20 | 2 | 2 | 3 |
+
+如果调整预设，至少同步检查：
+
+- `services/vectorizer-api/app/vectorization.py`
+- `apps/desktop/src/renderer/App.vue`
+- `apps/cli/src/utils/output.mjs`
+
+## 输出约定
+
+任务目录固定包含：
+
+```text
+original.png
+transparent.png
+result.svg
+preview.png
+metadata.json
+run.log
+```
+
+文生图任务还会包含：
+
+```text
+workflows/workflow_api.json
+workflows/nodes.md
+workflows/model_dependencies.json
+```
+
+不要随意改这些文件名，桌面端历史恢复、CLI 汇总和测试验收都依赖它们。
+
+输出根目录：
+
+- CLI 默认：当前工作目录下的 `outputs/`
+- 桌面端开发模式：仓库根目录 `outputs/`
+- 桌面端打包模式：`Documents/Gen2Vec-ArtFont-App/outputs/`
+- `ART_TEXT_OUTPUT_ROOT` 可覆盖
+
+## 打包注意事项
+
+后端：
+
+```powershell
+cd services/txt2img-api
+.\scripts\build-backend-exe.ps1
+
+cd services/vectorizer-api
+.\scripts\build-backend-exe.ps1
+```
+
+桌面端 `apps/desktop/package.json` 的 `build.extraResources` 当前会复制：
+
+- `txt2img-backend.exe`
+- `download-models.ps1`
+- `README.md`
+- `vectorizer-backend.exe`
+- `models/`
+- `gen2vec_cli.exe`
+
+`electron/main.cjs` 已实现 `ComfyUI-Engine.exe` 检测、解压和模型下载流程；如果需要在安装包中内置 ComfyUI 自解压包，必须确认 `package.json` 的 `extraResources` 包含该文件，否则运行时会走降级/跳过逻辑。
+
+## 修改风险点
+
+- 不要把 ComfyUI 便携包或大模型打进 PyInstaller 单文件 EXE；后端代码设计为在 EXE 同级查找。
+- 不要让 vectorizer-api 在运行时联网下载 rembg 模型；它依赖离线模型和 MD5 校验。
+- 不要把桌面端渲染层直接改成 Node API 访问；当前安全边界是 `contextBridge`。
+- 不要随意改 `/healthz` 返回的 `service` 字段，Electron 会用它判断端口是否可复用。
+- 不要随意改输出目录删除逻辑；`delete-output-dir` 有 outputs 根目录校验。
+- 如果改 API schema，需要同步 `apps/desktop/src/renderer/api.js`、`apps/cli/src/api.mjs` 和 README。
+
+## 推荐验证清单
+
+根据改动范围选择验证：
+
+```powershell
+# Python 语法检查
+python -m compileall services/txt2img-api services/vectorizer-api
+
+# txt2img 自动化测试
+cd services/txt2img-api
+uv run pytest -v
+
+# 桌面端构建
+cd apps/desktop
+npm run build
+
+# CLI 健康检查，需要两个后端已启动
+node apps/cli/bin/gen2vec.mjs health
+```
+
+当前仓库中 `vectorizer-api` 与 `desktop` 没有完整自动化测试；涉及这两块时，最好补充手动验证步骤或小型回归脚本。

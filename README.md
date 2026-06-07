@@ -1,20 +1,25 @@
 <!--
-  项目徽章区域 — 后续接入 CI/CD 后可替换为实际状态
+  项目徽章区域。接入 CI/CD 或 Release 后，可替换为真实链接。
 -->
 <!-- [![Build](https://img.shields.io/github/actions/workflow/status/...)](#) -->
 <!-- [![Version](https://img.shields.io/github/v/release/...)](#) -->
-<!-- [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) -->
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#环境要求)
+[![Desktop](https://img.shields.io/badge/desktop-Electron%20%2B%20Vue-42b883.svg)](#技术栈)
+[![Backend](https://img.shields.io/badge/backend-FastAPI-009688.svg)](#技术栈)
 
 # Gen2Vec ArtFont
 
-> 矢量艺术字生成器 — 本地优先的 AI 艺术字工具。输入文字与风格描述，自动生成位图艺术字并通过计算机视觉技术转换为高质量 SVG 矢量图。
+> 矢量艺术字生成器。本地优先的 AI 艺术字工具：输入文字与风格描述，生成艺术字位图，并通过计算机视觉流水线转换为可编辑、可缩放的 SVG 矢量图。
 
-[特性](#特性) •
-[快速开始](#快速开始) •
-[使用指南](#使用指南) •
-[API 参考](#api-参考) •
-[配置说明](#配置说明) •
-[开发指南](#开发指南) •
+[背景](#背景) |
+[特性](#特性) |
+[架构](#架构) |
+[快速开始](#快速开始) |
+[使用指南](#使用指南) |
+[API 参考](#api-参考) |
+[配置说明](#配置说明) |
+[开发指南](#开发指南) |
 [许可证](#许可证)
 
 ---
@@ -24,16 +29,19 @@
 - [背景](#背景)
 - [特性](#特性)
 - [架构](#架构)
+  - [模块职责](#模块职责)
+  - [数据流](#数据流)
 - [项目结构](#项目结构)
 - [快速开始](#快速开始)
   - [环境要求](#环境要求)
   - [安装与启动](#安装与启动)
+  - [验证安装](#验证安装)
 - [使用指南](#使用指南)
   - [桌面端](#桌面端)
   - [CLI 命令行](#cli-命令行)
 - [API 参考](#api-参考)
   - [端点列表](#端点列表)
-  - [请求/响应示例](#请求响应示例)
+  - [请求与响应示例](#请求与响应示例)
 - [配置说明](#配置说明)
   - [环境变量](#环境变量)
   - [矢量化预设](#矢量化预设)
@@ -50,178 +58,167 @@
 
 ## 背景
 
-在品牌设计、海报制作、UI 素材等场景中，经常需要将文字渲染为特定风格的艺术字，并以矢量格式交付（可无损缩放、便于二次编辑）。传统做法依赖设计师手工绘制，耗时且成本高。
+在品牌设计、海报制作、活动物料、UI 素材等场景中，艺术字通常需要同时满足两个要求：视觉风格明确，以及后续可编辑、可缩放。传统方式依赖设计师手工绘制，效率低，批量产出和自动化验收也比较困难。
 
-Gen2Vec ArtFont 利用开源文生图模型（Flux、Z-Image、Qwen-Image）自动生成艺术字位图，再通过 rembg 背景移除 + vtracer 路径追踪的流水线将其转换为分层 SVG。整个过程在本地完成，无需联网，保护数据隐私。
+Gen2Vec ArtFont 将“文生图生成”和“位图矢量化”拆成两段本地流水线：
 
-### 适用场景
+1. `txt2img-api` 根据文字和风格提示词调用 ComfyUI 工作流生成艺术字位图。
+2. `vectorizer-api` 对位图进行背景移除、降噪、颜色量化和路径追踪，输出 SVG。
+3. 桌面端和 CLI 共享同一套后端能力，既能手动操作，也能批量验收。
 
-- **品牌设计**：快速生成 Logo 风格的艺术字 SVG
-- **海报制作**：批量生成活动标题的艺术字素材
-- **UI 素材**：为应用界面生成风格统一的图标文字
-- **自动化验收**：通过 CLI 批量跑测试集，评估模型效果
-
----
+项目当前面向 Windows 桌面交付，支持本地模型和本地产物保存；ComfyUI 或模型不可用时，文生图链路会降级到 Pillow stub，保证系统仍能返回可诊断结果。
 
 ## 特性
 
-- **🎨 文生图** — 对接 ComfyUI，支持 Flux Schnell、Z-Image Turbo、Qwen-Image 等多模型工作流；自动检测中英文内容并构建最优提示词模板
-- **✂️ 智能矢量化** — rembg 背景移除 → 双边滤波去噪 → k-means 颜色量化 → vtracer 分层路径追踪 → SVG 组装
-- **📊 质量评估** — SVG 回渲染与原始透明图逐像素 RMSE 对比，输出保真度分数
-- **🖥️ 多端覆盖** — Electron + Vue 3 桌面端（GUI）与 Node.js CLI（命令行）共享同一套后端服务
-- **🔒 本地优先** — 所有 AI 推理在本地运行；ComfyUI 不可用时自动降级为 Pillow 本地轻量引擎
-- **📦 批量处理** — 支持 TXT / CSV / JSON 批量输入，逐条容错执行，自动生成汇总 CSV
-- **🔄 弹性降级** — 多模型工作流降级链，单个模型失败自动切换下一个，确保任务不中断
-
----
+- **文生图生成**：对接 ComfyUI，支持 Flux Schnell、Z-Image Turbo、Qwen-Image 等工作流。
+- **智能矢量化**：rembg 离线抠图、OpenCV 边缘保留降噪、颜色量化、vtracer SVG 路径追踪。
+- **工作流降级**：按文本语言自动选择工作流；失败后切换候选工作流，最终兜底到 Pillow stub。
+- **多端覆盖**：Electron + Vue 3 桌面端用于日常操作，Node.js CLI 用于批量任务和自动化验收。
+- **批量处理**：支持 TXT / CSV / JSON 批量输入，逐条容错执行并生成汇总 CSV。
+- **标准产物**：固定输出 `original.png`、`transparent.png`、`result.svg`、`preview.png`、`metadata.json`、`run.log`。
+- **本地优先**：矢量化模型使用本地 ONNX 文件；输出结果默认写入本机 `outputs/` 或用户文档目录。
 
 ## 架构
 
+```text
+┌───────────────────────────────────────────────┐
+│                  Interface Layer              │
+│  ┌──────────────────┐   ┌──────────────────┐  │
+│  │ Electron + Vue 3 │   │ Node.js CLI       │  │
+│  │ desktop GUI      │   │ automation        │  │
+│  └────────┬─────────┘   └────────┬─────────┘  │
+└───────────┼──────────────────────┼────────────┘
+            │ HTTP / IPC           │ HTTP
+            v                      v
+┌───────────────────────────────────────────────┐
+│                   Service Layer               │
+│  ┌──────────────────┐   ┌──────────────────┐  │
+│  │ txt2img-api      │   │ vectorizer-api   │  │
+│  │ :9001            │   │ :8000            │  │
+│  │ text -> bitmap   │   │ bitmap -> SVG    │  │
+│  └────────┬─────────┘   └────────┬─────────┘  │
+└───────────┼──────────────────────┼────────────┘
+            │                      │
+            v                      v
+      ComfyUI :8188          rembg + OpenCV + vtracer
+      Flux / Z-Image
+      / Qwen-Image
 ```
-┌──────────────────────────────────────────────────┐
-│                   界面层 (UI Layer)                │
-│  ┌──────────────────┐  ┌───────────────────────┐ │
-│  │  Electron + Vue 3 │  │  Node.js CLI (.mjs)   │ │
-│  │  (桌面端 GUI)     │  │  (命令行 / 自动化)    │ │
-│  └────────┬─────────┘  └───────────┬───────────┘ │
-│           │        HTTP            │              │
-└───────────┼────────────────────────┼──────────────┘
-            │                        │
-┌───────────┼────────────────────────┼──────────────┐
-│           ▼                        ▼              │
-│                 服务层 (Service Layer)             │
-│  ┌──────────────────┐  ┌───────────────────────┐ │
-│  │  txt2img-api      │  │  vectorizer-api       │ │
-│  │  :9001            │  │  :8000                │ │
-│  │  文本 → 位图      │  │  位图 → SVG           │ │
-│  └────────┬─────────┘  └───────────────────────┘ │
-│           │                                       │
-└───────────┼───────────────────────────────────────┘
-            │
-    ┌───────▼────────┐
-    │    ComfyUI     │  ← 可选组件，自动启动 / 降级
-    │    :8188        │
-    │ Flux / Z-Image │
-    │ / Qwen-Image   │
-    └────────────────┘
-```
+
+### 模块职责
+
+| 模块 | 路径 | 职责 |
+| --- | --- | --- |
+| 桌面端 | `apps/desktop` | UI、任务编排、历史恢复、打包后后端进程管理 |
+| CLI | `apps/cli` | 命令行参数解析、后端调用、批量任务、产物写入 |
+| 文生图服务 | `services/txt2img-api` | ComfyUI 工作流加载、提示词注入、生成图片、降级策略 |
+| 矢量化服务 | `services/vectorizer-api` | 图片来源解析、背景移除、预处理、SVG 生成、质量指标 |
+| 测试数据 | `testdata` | 批量艺术字测试样例 |
+| 文档 | `docs` | 打包方案、硬件环境、需求文档等 |
 
 ### 数据流
 
+```text
+用户输入：文字 + 风格提示词 + 矢量化参数
+  |
+  v
+txt2img-api
+  |-- ComfyUI 工作流成功 -> original.png
+  |-- ComfyUI 不可用 ----> Pillow stub original.png
+  |
+  v
+vectorizer-api
+  |-- rembg 背景移除
+  |-- OpenCV 降噪 / 裁剪 / 抗锯齿保留
+  |-- 颜色量化
+  |-- vtracer 路径追踪
+  |
+  v
+transparent.png + result.svg + preview.png + metadata.json
 ```
-用户输入 (文字 + 提示词)
-    │
-    ▼
-txt2img-api ──→ ComfyUI (或本地 stub)
-    │
-    ▼
-original.png ──→ vectorizer-api
-    │
-    ├── rembg 背景移除
-    ├── 双边滤波去噪
-    ├── k-means 颜色量化
-    ├── vtracer 分层追踪
-    └── SVG 组装 + 质量评估
-    │
-    ▼
-result.svg + preview.png + metadata.json
-```
-
----
 
 ## 项目结构
 
-```
+```text
 Gen2Vec-ArtFont-App/
-│
-├── apps/                             # 客户端应用
-│   ├── desktop/                      # Electron + Vue 3 桌面端
-│   │   ├── electron/
-│   │   │   ├── main.cjs              # 主进程：后端生命周期、IPC 代理、启动画面
-│   │   │   └── preload.cjs           # contextBridge 安全 IPC 桥接
-│   │   └── src/renderer/
-│   │       ├── App.vue               # 根组件：GPU 检测、模式切换、任务编排
-│   │       ├── api.js                # API 层：直连 HTTP + Electron IPC 兜底
-│   │       ├── components/           # UI 组件
-│   │       │   ├── ModeSwitcher.vue  #   模式切换（单条 / 批量 / 矢量化）
-│   │       │   ├── GenerationForm.vue#   输入表单
-│   │       │   ├── VectorParams.vue  #   矢量化参数面板
-│   │       │   ├── ResultPanel.vue   #   结果展示
-│   │       │   └── HistoryPanel.vue  #   历史任务
-│   │       └── styles/global.css     # 全局样式
-│   │
-│   └── cli/                          # Node.js CLI 工具
-│       ├── bin/gen2vec.mjs           # CLI 入口
-│       └── src/
-│           ├── api.mjs               # 后端 HTTP 调用层
-│           ├── commands/             # 命令实现
-│           │   ├── generate.mjs      #   generate — 生成位图
-│           │   ├── vectorize.mjs     #   vectorize — 位图矢量化
-│           │   ├── pipeline.mjs      #   pipeline — 完整流水线
-│           │   ├── batch.mjs         #   batch — 批量流水线
-│           │   └── env.mjs           #   env — 环境信息
-│           └── utils/                # 文件读写、输出目录管理
-│
-├── services/                         # 后端服务
-│   ├── txt2img-api/                  # 文生图服务（Python / FastAPI）
-│   │   ├── app/
-│   │   │   ├── main.py               # 路由 + ComfyUI 生命周期管理
-│   │   │   ├── generator.py          # ComfyUI 客户端 + 提示词模板引擎 + 降级 stub
-│   │   │   └── models.py             # Pydantic 请求 / 响应模型
-│   │   ├── workflows/                # ComfyUI API 格式工作流 JSON
-│   │   │   ├── flux_schnell.json
-│   │   │   ├── test_z_image_turbo.json
-│   │   │   └── qwen_image_2512_gguf.json
-│   │   ├── scripts/                  # ComfyUI 启动 / 轮询辅助脚本
-│   │   └── tests/                    # pytest 测试
-│   │
-│   └── vectorizer-api/               # 矢量化服务（Python / FastAPI）
-│       ├── app/
-│       │   ├── main.py               # 路由 + 图像源解析
-│       │   ├── image_processing.py   # rembg 抠图、去噪、裁剪、颜色量化
-│       │   ├── vectorization.py      # vtracer 追踪 + 质量评估
-│       │   └── models.py             # Pydantic 模型 + 预设参数
-│       └── models/rembg/             # 离线背景移除 ONNX 模型
-│
-├── docs/                             # 项目文档
-│   ├── 基于开源文生图模型的矢量艺术字生成应用.md  # 需求文档
-│   ├── electron-packaging.md                       # 打包说明
-│   └── hardware-environment.md                     # 测试机硬件报告
-│
-├── testdata/                         # 测试数据
-│   └── art_text_prompts_150.txt      # 150 条批量测试样例
-│
-├── workflows/                        # （预留）根目录工作流模板
-├── packages/                         # （预留）共享 SDK / 类型 / 工具
-├── scripts/                          # （预留）开发 / 构建 / 发布脚本
-├── outputs/                          # 运行时产物输出目录（gitignore）
-│
-├── README.md                         # 本文件
-├── CLAUDE.md                         # Claude Code 项目指引
-├── LICENSE                           # MIT 许可证
-└── .gitignore
+├─ apps/
+│  ├─ desktop/                       # Electron + Vue 3 桌面端
+│  │  ├─ electron/
+│  │  │  ├─ main.cjs                 # 主进程：后端生命周期、IPC、文件写入
+│  │  │  ├─ preload.cjs              # contextBridge 安全桥接
+│  │  │  └─ splash.html              # 打包版启动页
+│  │  ├─ src/renderer/
+│  │  │  ├─ App.vue                  # 主界面与任务编排
+│  │  │  ├─ api.js                   # 渲染层 API 封装
+│  │  │  ├─ components/              # 表单、参数、结果、历史组件
+│  │  │  └─ styles/global.css        # 全局样式
+│  │  ├─ package.json                # Electron / Vite / 打包配置
+│  │  └─ vite.config.js
+│  └─ cli/                           # Node.js CLI
+│     ├─ bin/gen2vec.mjs             # CLI 入口
+│     ├─ src/api.mjs                 # 后端 HTTP 调用
+│     ├─ src/commands/               # generate/vectorize/pipeline/batch/env
+│     ├─ src/utils/                  # 文件与输出目录工具
+│     └─ scripts/                    # CLI 单文件 EXE 构建脚本
+├─ services/
+│  ├─ txt2img-api/                   # 文本 -> 位图 FastAPI 服务
+│  │  ├─ app/main.py                 # 路由、关闭接口、ComfyUI 生命周期
+│  │  ├─ app/generator.py            # 工作流加载、参数注入、ComfyUI 调用
+│  │  ├─ app/models.py               # Pydantic 请求/响应模型
+│  │  ├─ workflows/                  # ComfyUI API 格式工作流 JSON
+│  │  ├─ tests/                      # pytest 测试
+│  │  └─ scripts/                    # 后端 EXE 构建与模型下载脚本
+│  └─ vectorizer-api/                # 位图 -> SVG FastAPI 服务
+│     ├─ app/main.py                 # 路由与图片来源解析
+│     ├─ app/image_processing.py     # rembg、降噪、裁剪、颜色量化
+│     ├─ app/vectorization.py        # vtracer、SVG 预览、质量评估
+│     ├─ app/models.py               # Pydantic 模型与参数校验
+│     ├─ models/rembg/               # 离线 rembg ONNX 模型
+│     └─ scripts/                    # 后端 EXE 构建脚本
+├─ docs/                             # 项目文档
+├─ testdata/                         # 批量测试样例
+├─ outputs/                          # 运行产物，已 gitignore
+├─ README.md
+├─ CLAUDE.md
+└─ LICENSE
 ```
-
----
 
 ## 快速开始
 
 ### 环境要求
 
-| 组件 | 最低版本 | 说明 |
-|------|----------|------|
-| Python | ≥ 3.13 | txt2img-api 运行环境 |
-| Node.js | ≥ 18 | desktop / CLI 运行环境 |
-| uv | 最新版 | Python 包管理器（[安装指南](https://docs.astral.sh/uv/)） |
-| npm | ≥ 9 | Node.js 包管理器 |
-| GPU（推荐） | NVIDIA 独显 ≥ 8 GB 显存 | ComfyUI 推理加速；无 GPU 时自动降级 |
-| 操作系统 | Windows 10 / 11 | 当前仅支持 Windows |
+| 组件 | 要求 | 说明 |
+| --- | --- | --- |
+| 操作系统 | Windows 10 / 11 | 当前桌面交付和打包流程按 Windows 设计 |
+| Node.js | 18+ | 桌面端开发与 CLI 运行；构建 CLI EXE 需要 Node.js 20+ |
+| npm | 9+ | Node.js 包管理 |
+| Python | 3.13+ | `txt2img-api` 要求 |
+| uv | 推荐 | `txt2img-api` 的 Python 依赖管理 |
+| GPU | NVIDIA 独显推荐 | ComfyUI 推理推荐独显；无 GPU 时可使用降级能力 |
+
+矢量化服务需要本地 rembg 模型：
+
+```text
+services/vectorizer-api/models/rembg/isnet-general-use.onnx
+```
+
+模型 MD5：
+
+```text
+fc16ebd8b0c10d971d3513d564d01e29
+```
+
+可运行以下脚本下载：
+
+```powershell
+services\vectorizer-api\models\rembg\download-isnet-general-use.bat
+```
 
 ### 安装与启动
 
-所有命令在**项目根目录**下执行。三个组件需分别启动：
+建议使用三个终端分别启动两个后端和桌面端。
 
-#### 第一步：启动矢量化后端（端口 8000）
+#### 1. 启动矢量化后端（端口 8000）
 
 ```powershell
 cd services/vectorizer-api
@@ -229,7 +226,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-#### 第二步：启动文生图后端（端口 9001）
+#### 2. 启动文生图后端（端口 9001）
 
 ```powershell
 cd services/txt2img-api
@@ -237,9 +234,16 @@ uv sync
 uv run txt2img-api
 ```
 
-> 服务启动后会自动检测并启动同目录下的 ComfyUI 便携版。设置 `$env:AUTO_START_COMFYUI="0"` 可跳过自动启动，此时文生图将使用本地 Pillow 降级引擎。
+如果不希望服务启动时自动拉起 ComfyUI：
 
-#### 第三步：启动桌面端
+```powershell
+$env:AUTO_START_COMFYUI = "0"
+uv run txt2img-api
+```
+
+此时 ComfyUI 不可用的请求会降级为 Pillow stub。
+
+#### 3. 启动桌面端
 
 ```powershell
 cd apps/desktop
@@ -247,144 +251,137 @@ npm install
 npm run electron:dev
 ```
 
-> 桌面端默认连接 `http://127.0.0.1:8000`（矢量化）和 `http://127.0.0.1:9001`（文生图），可通过环境变量覆盖。
+开发模式下 Electron 不自动管理后端进程，需要保持两个后端终端运行。
 
-#### 验证安装
+### 验证安装
 
 ```powershell
-# 检查两个后端是否就绪
 node apps/cli/bin/gen2vec.mjs health
+node apps/cli/bin/gen2vec.mjs env
 ```
 
-预期输出：
+预期两个服务均可用：
 
+```text
+txt2img 服务:    正常
+矢量化服务:      正常
 ```
-txt2img 服务:    ✓ 正常
-矢量化服务:     ✓ 正常
-```
-
----
 
 ## 使用指南
 
 ### 桌面端
 
-桌面端提供三种工作模式，通过顶部标签页切换：
+桌面端提供三个主要工作模式：
 
 | 模式 | 操作流程 |
-|------|----------|
-| **单条生成** | 输入文字 + 风格提示词 → 调整矢量化参数 → 点击生成 → 查看 SVG 结果 |
-| **批量生成** | 粘贴批量文本（`文字 \| 提示词` 格式，每行一条）→ 设置参数 → 批量执行 |
-| **图片矢量化** | 选择本地 PNG/JPG 文件 → 调整矢量化参数 → 直接矢量化 |
+| --- | --- |
+| 单条生成 | 输入艺术字文本和风格提示词，调整矢量化参数，生成 PNG + SVG |
+| 批量生成 | 粘贴或导入多条文本，逐条生成并写入批量汇总 CSV |
+| 图片矢量化 | 选择本地 PNG/JPG 图片，跳过文生图，直接输出 SVG |
 
 结果面板支持：
-- 预览 SVG（新标签页打开）
-- 下载单文件（PNG / SVG / JSON）
-- 打开任务输出目录
-- 历史任务恢复（从本地文件重新加载）
+
+- 查看原图、透明图、SVG 回渲染预览图。
+- 打开任务输出目录。
+- 打开 SVG 预览。
+- 从历史任务恢复本地产物。
 
 ### CLI 命令行
 
-CLI 定位为**自动化验收控制台**，随桌面端安装包交付。假设后端已由桌面端启动（或手动启动）。
+CLI 定位为自动化验收和批量处理工具。它只调用后端，不负责启动后端。
 
-#### 基本格式
+基本格式：
 
 ```powershell
 node apps/cli/bin/gen2vec.mjs <command> [options]
 ```
 
-#### 命令列表
+命令列表：
 
 | 命令 | 说明 | 示例 |
-|------|------|------|
-| `pipeline` | 完整流水线：文本 → 位图 → SVG | `pipeline --text "你好" --prompt "霓虹风格"` |
-| `generate` | 仅生成位图 | `generate --text "你好" --prompt "霓虹风格"` |
+| --- | --- | --- |
+| `pipeline` | 完整流水线：文本 -> 位图 -> SVG | `pipeline --text "七里香" --prompt "清新国风"` |
+| `generate` | 仅生成位图 | `generate --text "Hello" --prompt "neon sign"` |
 | `vectorize` | 仅矢量化已有图片 | `vectorize --input artwork.png --preset detailed` |
 | `batch` | 批量流水线 | `batch --input-file testdata/art_text_prompts_150.txt` |
 | `health` | 后端健康检查 | `health` |
 | `env` | 显示环境信息 | `env` |
 | `shutdown` | 关闭后端服务 | `shutdown` |
 
-#### pipeline 参数
+常用示例：
 
-| 参数 | 简写 | 类型 | 默认值 | 说明 |
-|------|:----:|------|--------|------|
-| `--text` | `-t` | string | — | 艺术字文本（**必填**） |
-| `--prompt` | `-p` | string | `""` | 风格提示词 |
-| `--negative` | `-n` | string | `""` | 负面提示词 |
-| `--resolution` | `-r` | string | `1024 x 1024` | 输出分辨率 |
-| `--seed` | `-s` | number | `0` | 随机种子（0 = 随机） |
-| `--vector-preset` | | string | `balanced` | 矢量化预设 |
-| `--output-dir` | | string | `./outputs` | 输出根目录 |
-| `--output` | `-o` | string | — | 额外输出单个 SVG 路径 |
-| `--wait` | | number | `0` | 等待后端就绪的最大秒数 |
+```powershell
+# 完整流水线
+node apps/cli/bin/gen2vec.mjs pipeline --text "七里香" --prompt "清新国风，墨绿色金边" --vector-preset detailed
 
-#### batch 参数
+# 只生成位图
+node apps/cli/bin/gen2vec.mjs generate --text "Hello" --prompt "neon sign, clean solid background"
 
-| 参数 | 说明 |
-|------|------|
-| `--input-file` | 批量输入文件路径（TXT / CSV / JSON） |
-| `--text` | 直接传入批量文本（支持 `\n` 换行） |
-| `--negative` | 全局负面提示词 |
-| `--resolution` | 全局分辨率 |
-| `--seed` | 全局起始种子 |
-| `--seed-step` | 每条 seed 递增步长（默认 0） |
-| `--vector-preset` | 矢量化预设 |
-| `--no-vectorize` | 仅生成 original.png，跳过矢量化 |
-| `--output-dir` | 输出根目录 |
+# 只矢量化已有图片
+node apps/cli/bin/gen2vec.mjs vectorize --input artwork.png --preset ultra --preview
 
-#### 批量输入格式
+# 批量生成
+node apps/cli/bin/gen2vec.mjs batch --input-file testdata/art_text_prompts_150.txt --output-dir outputs/cli-batch
+```
 
-TXT（与桌面端批量输入框一致）：
+批量 TXT 输入格式：
 
 ```text
-文本 | 风格提示词
-七里香 | 清新国风、墨绿色金边
-夏日冰饮 50% | 清爽蓝白配色、冰块纹理
+文本 | 风格提示词 | 负面提示词 | seed | resolution
+七里香 | 清新国风，墨绿色金边 | 模糊，断笔 | 42 | 1024x1024
+夏日冰饮 50% | 清爽蓝白配色，冰块纹理 | | 43 | 1024x1024
 ```
 
-CSV：
+CSV 输入示例：
 
 ```csv
-text,prompt,seed
-七里香,清新国风,42
-Hello,neon style,100
+text,prompt,negative,seed,resolution
+七里香,清新国风，墨绿色金边,模糊，断笔,42,1024x1024
+Hello,neon sign,blur,100,1024x1024
 ```
 
-JSON：
+JSON 输入示例：
 
 ```json
 [
-  { "text": "七里香", "prompt": "清新国风" },
-  { "text": "Hello", "prompt": "neon style" }
+  { "text": "七里香", "prompt": "清新国风，墨绿色金边", "seed": 42 },
+  { "text": "Hello", "prompt": "neon sign", "seed": 100 }
 ]
 ```
-
----
 
 ## API 参考
 
 ### 端点列表
 
 | 方法 | 路径 | 服务 | 说明 |
-|------|------|------|------|
-| `GET` | `/healthz` | txt2img-api, vectorizer-api | 健康检查 |
-| `POST` | `/api/v1/txt2img` | txt2img-api | 文本生成位图 |
-| `POST` | `/api/v1/vectorize` | vectorizer-api | 位图矢量化 |
-| `POST` | `/shutdown` | txt2img-api, vectorizer-api | 优雅关闭服务 |
+| --- | --- | --- | --- |
+| `GET` | `/healthz` | 两个后端 | 健康检查 |
+| `POST` | `/shutdown` | 两个后端 | 优雅关闭服务 |
+| `POST` | `/api/v1/txt2img` | `txt2img-api` | 文本生成位图 |
+| `POST` | `/api/v1/vectorize` | `vectorizer-api` | 位图矢量化 |
 
-### 请求/响应示例
+### 请求与响应示例
 
-#### POST /api/v1/txt2img
+#### `GET /healthz`
 
-**请求：**
+```json
+{ "ok": true, "service": "txt2img-api" }
+```
+
+```json
+{ "ok": true, "service": "vectorizer-api" }
+```
+
+#### `POST /api/v1/txt2img`
+
+请求：
 
 ```json
 {
   "text": "七里香",
-  "prompt": "清新国风、墨绿色金边",
+  "prompt": "清新国风，墨绿色金边",
   "negative_prompt": "",
-  "resolution": "1024 x 1024",
+  "resolution": "1024x1024",
   "seed": 42,
   "style": "default",
   "format": "PNG",
@@ -392,43 +389,35 @@ JSON：
 }
 ```
 
-**响应：**
+响应：
 
 ```json
 {
-  "image_base64": "data:image/png;base64,iVBORw0KGgo...",
-  "image_name": "清新国风-墨绿色金边.png",
+  "image_base64": "data:image/png;base64,...",
+  "image_name": "txt2img-generated.png",
   "metadata": {
     "engine": "comfyui",
-    "prompt": "清新国风、墨绿色金边",
+    "prompt": "清新国风，墨绿色金边",
+    "resolution": "1024x1024",
     "seed": 42,
-    "canvas": { "width": 1024, "height": 1024 },
     "fallback_tier": 0,
-    "workflow_used": "qwen_image_2512_gguf",
-    "generated_at": "2026-06-07T06:30:00Z"
+    "workflow_used": "qwen_image_2512_gguf"
   },
-  "workflow_api": { ... },
-  "model_dependencies": {
-    "checkpoints": [],
-    "unets": ["qwen_image_2512-Q4_K_M.gguf"],
-    "clip": ["qwen_2.5_vl_7b_fp8_scaled.safetensors"],
-    "vae": ["qwen_image_vae.safetensors"],
-    "loras": [],
-    "workflow_name": "qwen_image_2512_gguf"
-  }
+  "workflow_api": {},
+  "model_dependencies": {}
 }
 ```
 
-#### POST /api/v1/vectorize
+#### `POST /api/v1/vectorize`
 
-**请求：**
+请求：
 
 ```json
 {
   "source_type": "generated",
   "text": "七里香",
-  "prompt": "清新国风",
-  "resolution": "1024 x 1024",
+  "prompt": "清新国风，墨绿色金边",
+  "resolution": "1024x1024",
   "seed": 42,
   "vector": {
     "preset": "detailed",
@@ -437,7 +426,9 @@ JSON：
     "corner_threshold": 30,
     "length_threshold": 3,
     "layer_difference": 4,
-    "scale": 3
+    "scale": 3,
+    "evaluate_quality": true,
+    "remove_edge_white_background": true
   },
   "generated_image": {
     "file_path": "outputs/task_xxx/original.png"
@@ -445,14 +436,14 @@ JSON：
 }
 ```
 
-**响应：**
+响应：
 
 ```json
 {
   "transparent_png": "data:image/png;base64,...",
   "preview_png": "data:image/png;base64,...",
   "png": "data:image/png;base64,...",
-  "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" ...>...</svg>",
+  "svg": "<svg ...></svg>",
   "metadata": {
     "engine": "vectorizer-api-split-pipeline",
     "params": {
@@ -464,11 +455,6 @@ JSON：
       "layer_difference": 4,
       "scale": 3
     },
-    "canvas": { "width": 1024, "height": 1024 },
-    "stats": {
-      "elapsed_ms": 2847.32,
-      "svg_size_kb": 156.4
-    },
     "quality": {
       "svg_fidelity": 94.7
     }
@@ -476,93 +462,84 @@ JSON：
 }
 ```
 
----
-
 ## 配置说明
 
 ### 环境变量
 
-#### 客户端变量（desktop / CLI）
+| 变量 | 默认值 | 作用范围 | 说明 |
+| --- | --- | --- | --- |
+| `TXT2IMG_BACKEND_URL` | `http://127.0.0.1:9001/api/v1/txt2img` | desktop / CLI | 文生图接口完整 URL |
+| `VECTORIZER_BACKEND_URL` | `http://127.0.0.1:8000/api/v1/vectorize` | desktop / CLI | 矢量化接口完整 URL |
+| `TXT2IMG_WORKFLOW` | 空 | CLI | 指定 ComfyUI 工作流名；为空时使用后端降级链 |
+| `ART_TEXT_OUTPUT_ROOT` | `outputs` 或用户文档目录 | desktop / CLI | 产物输出根目录 |
+| `AUTO_START_COMFYUI` | `1` | txt2img-api | 是否在启动时自动拉起 ComfyUI |
+| `COMFYUI_HOST` | `http://127.0.0.1:8188` | txt2img-api | ComfyUI API 地址 |
+| `COMFYUI_POLL_TIMEOUT` | `500` | txt2img-api | 轮询 ComfyUI 完成的最大秒数 |
+| `COMFYUI_POLL_INTERVAL` | `1.0` | txt2img-api | 轮询间隔秒数 |
+| `WORKFLOW_PATH` | 空 | txt2img-api | 指定 ComfyUI API 格式 JSON 的绝对路径，会覆盖请求中的 `workflow` |
+| `COMFYUI_LAUNCHER_BAT` | 空 | txt2img-api | 使用自定义 ComfyUI 启动脚本 |
+| `COMFYUI_NETWORK_MODE` | `offline` | txt2img-api | 写入 ComfyUI-Manager 配置，减少启动联网检查 |
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `TXT2IMG_BACKEND_URL` | `http://127.0.0.1:9001/api/v1/txt2img` | 文生图接口完整 URL |
-| `VECTORIZER_BACKEND_URL` | `http://127.0.0.1:8000/api/v1/vectorize` | 矢量化接口完整 URL |
-| `TXT2IMG_WORKFLOW` | `""` | ComfyUI 工作流名称（空 = 使用降级链） |
-| `ART_TEXT_OUTPUT_ROOT` | `./outputs` | 产物输出根目录 |
+输出目录规则：
 
-#### 服务端变量（txt2img-api）
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `AUTO_START_COMFYUI` | `1` | 是否在启动时自动拉起 ComfyUI |
-| `COMFYUI_HOST` | `http://127.0.0.1:8188` | ComfyUI 服务地址 |
-| `COMFYUI_POLL_TIMEOUT` | `500` | ComfyUI 任务轮询超时（秒） |
-| `COMFYUI_POLL_INTERVAL` | `1.0` | ComfyUI 轮询间隔（秒） |
-| `WORKFLOW_PATH` | — | 自定义工作流 JSON 路径（覆盖默认） |
-| `COMFYUI_LAUNCHER_BAT` | — | 自定义 ComfyUI 启动脚本（escape hatch） |
-| `COMFYUI_NETWORK_MODE` | `offline` | ComfyUI-Manager 网络模式 |
+- CLI 默认写入当前工作目录下的 `outputs/`。
+- 桌面端开发模式写入仓库根目录 `outputs/`。
+- 桌面端打包模式写入 `Documents/Gen2Vec-ArtFont-App/outputs/`。
+- 设置 `ART_TEXT_OUTPUT_ROOT` 后使用该目录。
 
 ### 矢量化预设
 
-| 预设 | 颜色精度 | 斑点过滤 | 拐角阈值 | 长度阈值 | 图层差异 | 缩放 | 适用场景 |
-|------|:--------:|:--------:|:--------:|:--------:|:--------:|:----:|----------|
-| `clean` | 2 | 48 | 120 | 30 | 38 | 2× | 简洁 SVG，路径少，文件小 |
-| `balanced` | 4 | 18 | 70 | 12 | 20 | 2× | **默认推荐**，细节与体积均衡 |
-| `detailed` | 6 | 2 | 30 | 3 | 4 | 3× | 高精度，保留更多颜色层次 |
-| `ultra` | 8 | 1 | 20 | 2 | 2 | 3× | 极致细节，适合高质量印刷 |
+| 预设 | color_precision | filter_speckle | corner_threshold | length_threshold | layer_difference | scale | 适用场景 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `clean` | 2 | 48 | 120 | 30 | 38 | 2 | 路径更少，文件更小，适合干净图形 |
+| `balanced` | 4 | 18 | 70 | 12 | 20 | 2 | 默认推荐，平衡细节与体积 |
+| `detailed` | 6 | 2 | 30 | 3 | 4 | 3 | 保留更多颜色层次和边缘细节 |
+| `ultra` | 8 | 1 | 20 | 2 | 2 | 3 | 最大细节，文件体积也最大 |
+
+预设值来自 `services/vectorizer-api/app/vectorization.py`。传入预设后，仍可单独覆盖 6 个底层参数。
 
 ### 工作流降级链
 
-txt2img-api 根据输入文本的语种自动选择最优模型，失败时自动切换：
+`txt2img-api` 会根据文本内容选择候选工作流。显式传入 `workflow` 时只尝试指定工作流；未指定时使用降级链。
 
 | 文本类型 | 优先级 1 | 优先级 2 | 兜底 |
-|----------|----------|----------|------|
-| 中文为主 | Qwen-Image | Z-Image Turbo | Pillow 本地 stub |
-| 英文 / 其他 | Flux Schnell | Z-Image Turbo | Pillow 本地 stub |
+| --- | --- | --- | --- |
+| 中文为主 | `qwen_image_2512_gguf` | `test_z_image_turbo` | Pillow stub |
+| 英文或其他 | `flux_schnell` | `test_z_image_turbo` | Pillow stub |
 
-> 通过请求参数 `workflow` 可显式指定工作流名称，此时跳过降级链，仅尝试指定工作流。
-
----
+`WORKFLOW_PATH` 环境变量优先级最高，会直接指定工作流 JSON 路径。
 
 ## 输出规范
 
-每次生成在 `outputs/` 下创建独立任务目录，命名规则为 `task_{YYYYMMDD_HHMMSS_mmm}`。
-
-### 目录结构
+每次任务会生成独立目录，目录名由运行模式、时间和种子等信息组成。典型结构：
 
 ```text
 outputs/
-├── task_20260607_143052_123/
-│   ├── original.png                # 文生图原始位图
-│   ├── transparent.png             # 去背景透明 PNG
-│   ├── result.svg                  # 最终矢量 SVG（格式化，缩进美化）
-│   ├── preview.png                 # SVG 回渲染预览图（cairosvg）
-│   ├── metadata.json               # 结构化元数据
-│   ├── run.log                     # 运行日志（key=value 格式）
-│   └── workflows/                  # ComfyUI 工作流快照（文生图任务）
-│       ├── workflow_api.json       #   API 格式工作流
-│       ├── nodes.md                #   节点说明
-│       └── model_dependencies.json #   模型依赖清单
-│
-├── task_20260607_143105_456/
-│   └── ...
-│
-└── batch_summary.csv               # 批量模式汇总（如有）
+├─ task_YYYYMMDD_HHMMSS_mmm/
+│  ├─ original.png                  # 文生图原始位图或用户上传原图
+│  ├─ transparent.png               # 透明背景 PNG
+│  ├─ result.svg                    # SVG 矢量图
+│  ├─ preview.png                   # SVG 回渲染 PNG 预览
+│  ├─ metadata.json                 # 参数、耗时、质量指标等元数据
+│  ├─ run.log                       # key=value 运行日志
+│  └─ workflows/                    # 文生图任务的工作流快照
+│     ├─ workflow_api.json
+│     ├─ nodes.md
+│     └─ model_dependencies.json
+└─ batch_summary.csv                # 批量任务汇总，如有
 ```
 
-### metadata.json 结构
+`metadata.json` 主要字段：
 
 ```json
 {
   "schema_version": 1,
-  "task_id": "1717766400000",
-  "task_name": "task_20260607_143052_123",
+  "task_name": "task_YYYYMMDD_HHMMSS_mmm",
   "mode": "single",
   "engine": "vectorizer-api-split-pipeline",
   "generation": {
     "text": "七里香",
-    "prompt": "清新国风、墨绿色金边",
+    "prompt": "清新国风，墨绿色金边",
     "seed": 42,
     "resolution": "1024x1024",
     "duration_ms": 15234
@@ -575,11 +552,6 @@ outputs/
     "length_threshold": 3,
     "layer_difference": 4,
     "scale": 3
-  },
-  "canvas": { "width": 1024, "height": 1024 },
-  "stats": {
-    "elapsed_ms": 2847.32,
-    "svg_size_kb": 156.4
   },
   "quality": {
     "svg_fidelity": 94.7
@@ -595,95 +567,115 @@ outputs/
 }
 ```
 
----
-
 ## 开发指南
 
 ### 本地开发
 
 ```powershell
-# 1. 克隆仓库
-git clone <repo-url>
-cd Gen2Vec-ArtFont-App
-
-# 2. 安装 Python 依赖
-cd services/txt2img-api && uv sync
-cd ../vectorizer-api && pip install -r requirements.txt
-
-# 3. 安装 Node.js 依赖
-cd ../../apps/desktop && npm install
-
-# 4. 启动后端（两个终端）
-# 终端 A：
-cd services/vectorizer-api
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-
-# 终端 B：
+# 1. 安装 txt2img-api 依赖
 cd services/txt2img-api
-uv run txt2img-api
+uv sync
 
-# 5. 启动桌面端开发模式
-cd apps/desktop
+# 2. 安装 vectorizer-api 依赖
+cd ..\vectorizer-api
+pip install -r requirements.txt
+
+# 3. 安装桌面端依赖
+cd ..\..\apps\desktop
+npm install
+
+# 4. 启动两个后端，再启动桌面端
 npm run electron:dev
 ```
 
+推荐后端分别在独立终端中启动，便于查看日志。
+
 ### 测试
 
+当前自动化测试主要覆盖 `txt2img-api`：
+
 ```powershell
-# txt2img-api 单元测试
 cd services/txt2img-api
 uv run pytest -v
-
-# 运行单个测试文件
-uv run pytest tests/test_generator.py -v
 ```
 
-> vectorizer-api 和 desktop 目前尚无自动化测试（计划中）。
+Python 语法检查：
 
-### 构建与打包
+```powershell
+python -m compileall services/txt2img-api services/vectorizer-api
+```
 
-#### 桌面端安装包
+桌面端构建检查：
 
 ```powershell
 cd apps/desktop
+npm run build
+```
+
+`vectorizer-api` 和 `desktop` 目前没有完整自动化测试。涉及这两块改动时，建议补充手动验证记录。
+
+### 构建与打包
+
+#### 构建后端 EXE
+
+```powershell
+cd services/txt2img-api
+.\scripts\build-backend-exe.ps1
+
+cd ..\vectorizer-api
+.\scripts\build-backend-exe.ps1
+```
+
+#### 构建 CLI EXE
+
+```powershell
+cd apps/cli
+npm install
+npm run build
+```
+
+CLI 单文件 EXE 使用 Node.js SEA，构建环境需要 Node.js 20+。
+
+#### 构建 Electron 安装包
+
+```powershell
+cd apps/desktop
+npm install
 npm run electron:build
 ```
 
-使用 electron-builder 打包为 NSIS 安装包（`release/` 目录），自动捆绑：
+`apps/desktop/package.json` 当前打包资源包括：
 
-| 捆绑内容 | 来源 | 打包方式 |
-|----------|------|----------|
-| `txt2img-backend.exe` | `services/txt2img-api/` | PyInstaller |
-| `vectorizer-backend.exe` | `services/vectorizer-api/` | PyInstaller |
-| `gen2vec_cli.exe` | `apps/cli/` | Node.js SEA 单文件 |
-| `models/rembg/` | `services/vectorizer-api/models/` | 直接复制 |
-| `download-models.ps1` | `services/txt2img-api/` | 直接复制 |
+| 内容 | 来源 |
+| --- | --- |
+| `txt2img-backend.exe` | `services/txt2img-api/dist/` |
+| `download-models.ps1` | `services/txt2img-api/dist/` |
+| `README.md` | `services/txt2img-api/dist/` |
+| `vectorizer-backend.exe` | `services/vectorizer-api/dist/` |
+| `models/` | `services/vectorizer-api/dist/models` |
+| `gen2vec_cli.exe` | `apps/cli/dist/` |
+
+注意：`electron/main.cjs` 已包含检测和解压 `ComfyUI-Engine.exe` 的逻辑。如果交付包需要内置 ComfyUI 自解压包，需要确认 `apps/desktop/package.json` 的 `extraResources` 同步包含该文件。
 
 详见 [docs/electron-packaging.md](docs/electron-packaging.md)。
 
----
-
 ## 技术栈
 
-| 层级 | 技术 | 版本 |
-|------|------|------|
-| **桌面端框架** | Electron | 42 |
-| **前端框架** | Vue 3 + Vite | 3.5 / 8 |
-| **CLI 运行时** | Node.js (ES Modules) | ≥ 18 |
-| **后端框架** | FastAPI + Uvicorn | 0.115 |
-| **文生图引擎** | ComfyUI (Flux / Z-Image / Qwen-Image) | — |
-| **图像处理** | OpenCV, scikit-image, Pillow | 4.11 / 0.26 / 11.1 |
-| **矢量化核心** | vtracer | 0.6 |
-| **SVG 处理** | svgwrite, cairosvg | 1.4 / 2.7 |
-| **背景移除** | rembg (ONNX Runtime) | 2.0 |
-| **桌面打包** | electron-builder (NSIS) | 26 |
-| **Python 打包** | PyInstaller | — |
-| **CLI 打包** | Node.js Single Executable Apps | — |
-
----
+| 层级 | 技术 |
+| --- | --- |
+| 桌面端 | Electron 42, Vue 3, Vite 8 |
+| CLI | Node.js ES Modules, Node.js SEA |
+| 后端框架 | FastAPI, Uvicorn, Pydantic |
+| 文生图 | ComfyUI, Flux Schnell, Z-Image Turbo, Qwen-Image |
+| 图像处理 | Pillow, OpenCV, scikit-image |
+| 背景移除 | rembg, ONNX Runtime, `isnet-general-use.onnx` |
+| 矢量化 | vtracer, svgwrite, cairosvg |
+| 打包 | electron-builder, PyInstaller, PowerShell |
 
 ## 许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
+本项目源代码基于 [MIT License](LICENSE) 开源。
 
-Copyright (c) 2026 Breeze
+第三方依赖、ComfyUI 工作流、模型权重和下载脚本所涉及的模型文件可能遵循各自的许可证或使用条款。分发或商用前，请同时核对对应模型和依赖的许可要求。
+
+Copyright (c) 2026 Breeze and Gen2Vec ArtFont contributors.
