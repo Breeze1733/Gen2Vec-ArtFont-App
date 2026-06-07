@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, net, shell, Notification } = requir
 const path = require('path')
 const fs = require('fs/promises')
 const fsSync = require('fs')
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
 const netModule = require('net')
 
 // ── 模块级状态 ──
@@ -10,6 +10,8 @@ let splashWin = null
 let mainWin = null
 let txt2imgProc = null
 let vectorizerProc = null
+let extractProc = null
+let modelDownloadProc = null
 let startupState = { ready: false, modelsReady: false, backendsRunning: false, modelsSkipped: false }
 let startupError = null
 
@@ -99,12 +101,15 @@ function extractComfyUI(backendDir, onProgress) {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })
+    extractProc = proc
 
     proc.on('error', (err) => {
+      if (extractProc === proc) extractProc = null
       reject(new Error(`启动解压程序失败: ${err.message}`))
     })
 
     proc.on('close', (code) => {
+      if (extractProc === proc) extractProc = null
       if (code !== 0) {
         reject(new Error(`推理引擎解压失败 (退出码: ${code})`))
         return
@@ -169,6 +174,7 @@ function downloadModels(backendDir, onProgress) {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })
+    modelDownloadProc = proc
 
     let totalFiles = 0
     let completedFiles = 0
@@ -372,11 +378,13 @@ function downloadModels(backendDir, onProgress) {
 
     proc.on('error', (err) => {
       clearInterval(progressInterval)
+      if (modelDownloadProc === proc) modelDownloadProc = null
       reject(new Error(`启动下载脚本失败: ${err.message}`))
     })
 
     proc.on('close', (code) => {
       clearInterval(progressInterval)
+      if (modelDownloadProc === proc) modelDownloadProc = null
       if (code !== 0 && failedFiles === 0) {
         // 脚本自身退出非零但无具体文件错误
         reject(new Error(`模型下载脚本异常退出 (退出码: ${code})`))
@@ -405,6 +413,22 @@ function spawnBackend(exePath, cwd) {
   })
 
   return proc
+}
+
+function killProcessTree(proc) {
+  if (!proc || proc.killed || !proc.pid) return
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill.exe', ['/PID', String(proc.pid), '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+    } else {
+      proc.kill('SIGTERM')
+    }
+  } catch (_) {
+    try { proc.kill() } catch {}
+  }
 }
 
 async function waitForHealthz(url, timeoutMs = 30000, onProgress) {
@@ -1324,21 +1348,29 @@ function shutdownBackends() {
     }
   }
 
-  // 硬杀直接子进程（兜底）
-  if (txt2imgProc && !txt2imgProc.killed) {
-    try { txt2imgProc.kill() } catch {}
-  }
-  if (vectorizerProc && !vectorizerProc.killed) {
-    try { vectorizerProc.kill() } catch {}
-  }
+  // 硬杀整棵进程树（兜底）：后端可能再 spawn ComfyUI / Python 子进程。
+  killProcessTree(txt2imgProc)
+  killProcessTree(vectorizerProc)
+  txt2imgProc = null
+  vectorizerProc = null
 }
 
 // 全局退出函数 — 杀后端 + 杀所有 PowerShell 子进程 + 退出 app
 function forceQuit() {
   shutdownBackends()
-  // 如果存在模型下载进程，也杀掉
-  try { process.kill() } catch {}
-  app.quit()
+  // 预加载阶段可能还在解压引擎或下载模型，必须杀整棵进程树。
+  killProcessTree(modelDownloadProc)
+  killProcessTree(extractProc)
+  modelDownloadProc = null
+  extractProc = null
+  app.exit(0)
+}
+
+function shutdownPreloadTasks() {
+  killProcessTree(modelDownloadProc)
+  killProcessTree(extractProc)
+  modelDownloadProc = null
+  extractProc = null
 }
 
 app.whenReady().then(async () => {
@@ -1403,6 +1435,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', (event) => {
   event.preventDefault()
   shutdownBackends()
+  shutdownPreloadTasks()
   // 延迟退出，确保 TCP 包被 OS 内核发送
   setTimeout(() => { app.exit(0) }, 300)
 })
@@ -1410,5 +1443,6 @@ app.on('before-quit', (event) => {
 // 捕获所有未预期的错误，确保不留下孤儿进程
 process.on('uncaughtException', () => {
   shutdownBackends()
+  shutdownPreloadTasks()
   app.exit(1)
 })
