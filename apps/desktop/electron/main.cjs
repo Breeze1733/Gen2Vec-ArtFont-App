@@ -175,30 +175,11 @@ function downloadModels(backendDir, onProgress) {
     let failedFiles = 0
     let currentFileName = ''
     let currentFileSize = ''
-    let currentFileSpeed = ''
-    let currentFileEta = ''
-    let currentFilePct = -1
     let currentSubdir = ''
-    let lastProgress = null
 
-    // 辅助：采集实时进度/速度信息到公共状态
-    const captureProgress = () => {
-      return {
-        step: 2, phase: 'downloading',
-        message: currentFilePct >= 0
-          ? `正在下载 (${completedFiles + 1}/${totalFiles || '?'}) ${currentFileName}`
-          : `正在下载模型 (${completedFiles + 1}/${totalFiles || '?'})...`,
-        percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
-        fileIndex: completedFiles + 1,
-        totalFiles,
-        fileName: currentFileName,
-        fileSize: currentFileSize,
-        speed: currentFileSpeed,
-        eta: currentFileEta,
-        filePercent: currentFilePct,
-        subdir: currentSubdir
-      }
-    }
+    // 已开始下载的模型文件跟踪（用于轮询子进度）
+    let trackedFiles = [] // [{ name, subdir, fullPath, lastSize, lastTime, remoteSize }]
+    let startedDownloading = false
 
     proc.stdout.on('data', (chunk) => {
       const lines = chunk.toString().split(/\r?\n/).filter(Boolean)
@@ -215,71 +196,48 @@ function downloadModels(backendDir, onProgress) {
             currentFileName = parts[1] || ''
             currentSubdir = parts[2] || ''
             currentFileSize = parts[3] || ''
-            currentFileSpeed = ''
-            currentFileEta = ''
-            currentFilePct = -1
-            lastProgress = captureProgress()
-            if (onProgress) onProgress(lastProgress)
-            break
-          case 'PROGRESS':
-            currentFileName = parts[1] || currentFileName
-            currentSubdir = parts[2] || currentSubdir
-            currentFilePct = parseInt(parts[3], 10) || 0
-            break
-          case 'SPEED':
-            currentFileName = parts[1] || currentFileName
-            currentSubdir = parts[2] || currentSubdir
-            currentFileSpeed = parts[3] || ''
-            break
-          case 'ETA':
-            currentFileName = parts[1] || currentFileName
-            currentSubdir = parts[2] || currentSubdir
-            const etaSeconds = parseInt(parts[3], 10) || 0
-            if (etaSeconds >= 3600) {
-              currentFileEta = `${Math.floor(etaSeconds / 3600)}h${Math.floor((etaSeconds % 3600) / 60)}m`
-            } else if (etaSeconds >= 60) {
-              currentFileEta = `${Math.floor(etaSeconds / 60)}m${etaSeconds % 60}s`
-            } else {
-              currentFileEta = `${etaSeconds}s`
-            }
-            break
-          case 'CHECK':
-            // 尺寸比对信息：脚本发现本地有部分文件
-            if (onProgress) {
-              onProgress({
-                step: 2, phase: 'checking',
-                message: `比对文件: ${parts[1] || ''}`,
-                percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
-                detail: `本地 ${parts[3] || '?'} / 远程 ${parts[4] || '?'}`
+            startedDownloading = true
+            // 添加到跟踪列表
+            if (currentFileName && currentSubdir) {
+              const modelsDir = getComfyUIModelsDir(backendDir)
+              const fullPath = path.join(modelsDir, currentSubdir, currentFileName)
+              let initialSize = 0
+              try { if (fsSync.existsSync(fullPath)) initialSize = fsSync.statSync(fullPath).size } catch (_) {}
+              trackedFiles.push({
+                name: currentFileName,
+                subdir: currentSubdir,
+                fullPath,
+                lastSize: initialSize,
+                lastTime: Date.now(),
+                remoteSize: 0
               })
             }
-            break
-          case 'RESUME':
-            // 续传信息
             if (onProgress) {
               onProgress({
-                step: 2, phase: 'resuming',
-                message: `续传: ${parts[1] || ''} (${parts[3] || ''})`,
-                percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1
+                step: 2, phase: 'downloading',
+                message: `正在下载 (${completedFiles + 1}/${totalFiles || '?'}) ${currentFileName}`,
+                percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
+                fileIndex: completedFiles + 1,
+                totalFiles,
+                fileName: currentFileName,
+                fileSize: currentFileSize
               })
             }
             break
           case 'DONE':
           case 'SKIP':
             completedFiles++
-            currentFilePct = -1
-            currentFileSpeed = ''
-            currentFileEta = ''
+            // 从跟踪列表中移除
+            const doneName = parts[1] || currentFileName
+            trackedFiles = trackedFiles.filter(f => f.name !== doneName)
             if (onProgress) {
               onProgress({
                 step: 2, phase: 'downloading',
-                message: type === 'SKIP'
-                  ? `跳过: ${parts[1] || currentFileName}`
-                  : `完成: ${parts[1] || currentFileName}`,
+                message: type === 'SKIP' ? `跳过: ${doneName}` : `完成: ${doneName}`,
                 percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
                 fileIndex: completedFiles,
                 totalFiles,
-                fileName: parts[1] || currentFileName,
+                fileName: doneName,
                 speed: '',
                 eta: '',
                 filePercent: -1
@@ -289,23 +247,23 @@ function downloadModels(backendDir, onProgress) {
           case 'ERROR':
             completedFiles++
             failedFiles++
-            currentFilePct = -1
-            currentFileSpeed = ''
-            currentFileEta = ''
+            const errName = parts[1] || currentFileName
+            trackedFiles = trackedFiles.filter(f => f.name !== errName)
             if (onProgress) {
               onProgress({
                 step: 2, phase: 'downloading',
-                message: `下载失败: ${parts[1] || currentFileName}`,
+                message: `下载失败: ${errName}`,
                 detail: parts[4] ? `错误: ${parts.slice(4).join(':')}` : '',
                 percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
                 fileIndex: completedFiles,
                 totalFiles,
-                fileName: parts[1] || currentFileName,
+                fileName: errName,
                 errorCode: parts[3] || '0'
               })
             }
             break
           case 'COMPLETE':
+            trackedFiles = []
             const ok = parseInt(parts[1], 10) || 0
             const skip = parseInt(parts[2], 10) || 0
             const fail = parseInt(parts[3], 10) || 0
@@ -318,6 +276,10 @@ function downloadModels(backendDir, onProgress) {
               })
             }
             break
+          case 'CHECK':
+          case 'RESUME':
+            // 这些只是信息提示，不触发进度推送
+            break
           case 'READY':
           case 'ENGINE_OK':
             break
@@ -325,15 +287,80 @@ function downloadModels(backendDir, onProgress) {
       }
     })
 
-    // 每 2 秒推送一次合并后的实时进度（速度/ETA/文件内百分比）
+    // 每 2 秒轮询文件大小，推算速度/ETA/百分比
     const progressInterval = setInterval(() => {
-      if (currentFilePct >= 0 || currentFileSpeed) {
-        const merged = captureProgress()
-        // 只在有变化时才推送，避免无意义刷新
-        if (JSON.stringify(merged) !== JSON.stringify(lastProgress)) {
-          lastProgress = merged
-          if (onProgress) onProgress(merged)
-        }
+      if (trackedFiles.length === 0) return
+
+      const modelsDir = getComfyUIModelsDir(backendDir)
+      let totalSpeed = ''
+      let totalEta = ''
+      let maxFilePct = -1
+
+      for (const tf of trackedFiles) {
+        try {
+          if (fsSync.existsSync(tf.fullPath)) {
+            const currentSize = fsSync.statSync(tf.fullPath).size
+            const now = Date.now()
+            const elapsedSecs = (now - tf.lastTime) / 1000
+
+            if (elapsedSecs >= 1.5 && currentSize > tf.lastSize) {
+              const bytesPerSec = (currentSize - tf.lastSize) / elapsedSecs
+              // 尝试获取远程总大小
+              if (tf.remoteSize <= 0) {
+                const sizeStr = currentFileSize || ''
+                if (sizeStr.includes('GB')) {
+                  tf.remoteSize = parseFloat(sizeStr) * 1024 * 1024 * 1024
+                } else if (sizeStr.includes('MB')) {
+                  tf.remoteSize = parseFloat(sizeStr) * 1024 * 1024
+                }
+              }
+
+              const speedMBs = bytesPerSec / (1024 * 1024)
+              if (speedMBs >= 0.01) {
+                totalSpeed = `${speedMBs.toFixed(1)} MB/s`
+                // ETA
+                if (tf.remoteSize > 0 && currentSize > 0) {
+                  const remaining = tf.remoteSize - currentSize
+                  if (remaining > 0 && bytesPerSec > 0) {
+                    const etaSec = Math.round(remaining / bytesPerSec)
+                    if (etaSec >= 3600) {
+                      totalEta = `${Math.floor(etaSec / 3600)}h${Math.floor((etaSec % 3600) / 60)}m`
+                    } else if (etaSec >= 60) {
+                      totalEta = `${Math.floor(etaSec / 60)}m${etaSec % 60}s`
+                    } else {
+                      totalEta = `${etaSec}s`
+                    }
+                  }
+                }
+                // 文件内百分比
+                if (tf.remoteSize > 0) {
+                  maxFilePct = Math.min(100, Math.round((currentSize / tf.remoteSize) * 100))
+                }
+              }
+              tf.lastSize = currentSize
+              tf.lastTime = now
+            } else if (tf.lastSize === 0 && currentSize > 0) {
+              tf.lastSize = currentSize
+              tf.lastTime = now
+            }
+          }
+        } catch (_) { /* 文件可能被锁定，跳过 */ }
+      }
+
+      if (startedDownloading && onProgress) {
+        onProgress({
+          step: 2, phase: 'downloading',
+          message: `正在下载 (${completedFiles + 1}/${totalFiles || '?'}) ${currentFileName}`,
+          percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
+          fileIndex: completedFiles + 1,
+          totalFiles,
+          fileName: currentFileName,
+          fileSize: currentFileSize,
+          speed: totalSpeed,
+          eta: totalEta,
+          filePercent: maxFilePct,
+          subdir: currentSubdir
+        })
       }
     }, 2000)
 
@@ -591,29 +618,24 @@ async function runStartupSequence(splashWin) {
 let currentStartupStep = 1
 
 // 等待 splash 窗口中用户的操作
-let splashActionResolve = null
+const EventEmitter = require('events')
+class SplashActionEmitter extends EventEmitter {}
+const splashActions = new SplashActionEmitter()
+const SPLASH_ACTION_EVENT = 'splash-action'
 
 function waitForSplashAction() {
   return new Promise((resolve) => {
-    splashActionResolve = resolve
+    splashActions.once(SPLASH_ACTION_EVENT, (action) => {
+      resolve(action)
+    })
   })
 }
 
 ipcMain.on('splash:action', (_event, data) => {
   const { action } = data || {}
-  if (action === 'skip-models' || action === 'download-models') {
-    if (splashActionResolve) {
-      splashActionResolve(action)
-      splashActionResolve = null
-    }
-  } else if (action === 'exit-app') {
+  splashActions.emit(SPLASH_ACTION_EVENT, action)
+  if (action === 'exit-app') {
     app.quit()
-  } else if (action === 'retry-startup') {
-    // 重试：重新执行启动序列
-    if (splashActionResolve) {
-      splashActionResolve('retry')
-      splashActionResolve = null
-    }
   }
 })
 

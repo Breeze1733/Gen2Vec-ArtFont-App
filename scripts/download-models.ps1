@@ -7,32 +7,11 @@
   用于手动部署和 Electron 自动调用两种场景。
   默认使用 hf-mirror.com 国内镜像。
 
-  手动模式：PowerShell 右键运行，显示人类可读的彩色输出。
-
-  Electron 模式（-Electron）：
-  输出结构化文本行，供 Electron 主进程解析并渲染为启动画面进度条：
-    READY           — 脚本就绪，开始工作
-    ENGINE_OK       — ComfyUI 引擎检测通过
-    TOTAL:10        — 共需下载 N 个文件
-    SKIP:filename:subdir:size        — 文件已存在，跳过
-    START:filename:subdir:size       — 开始下载
-    PROGRESS:filename:subdir:pct     — 当前文件下载百分比 (0-100)
-    SPEED:filename:subdir:rate       — 实时下载速度 (MB/s)
-    ETA:filename:subdir:seconds      — 预计剩余秒数
-    CHECK:filename:subdir:local:remote — 远程尺寸比对，本地已有部分文件
-    RESUME:filename:subdir:size      — 续传已有部分文件
-    DONE:filename:subdir:size        — 下载完成
-    ERROR:filename:subdir:code:msg   — 下载失败（含 HTTP 状态码）
-    COMPLETE:ok:skip:fail            — 全部完成（ok=成功, skip=跳过, fail=失败）
-    ENGINE_MISSING:path              — 引擎目录不存在（退出码 2）
-
-  所有状态行以 "MODELDL:" 为前缀，便于 Electron 过滤。
-
 .PARAMETER DestDir
-  目标目录（默认：脚本所在目录）。Electron 传入 extraResources 的 backend/ 路径。
+  目标目录（默认：脚本所在目录）。
 
 .PARAMETER Electron
-  Electron 集成模式：输出 MODELDL: 结构化行，抑制人类可读输出。
+  Electron 集成模式：输出 MODELDL: 结构化行。
 
 .PARAMETER NoMirror
   直接使用 huggingface.co 而非 hf-mirror.com 镜像。
@@ -42,14 +21,6 @@
 
 .PARAMETER Parallel
   并行下载文件数（默认 3，最大建议不超过 5）。
-
-.EXAMPLE
-  # 手动使用
-  .\download-models.ps1
-
-.EXAMPLE
-  # Electron 调用
-  .\download-models.ps1 -Electron -DestDir "C:\Program Files\Gen2Vec\resources\backend"
 #>
 
 param(
@@ -61,8 +32,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
-# ── 输出前缀（Electron 模式统一前缀）─────────────────────
 $PREFIX = if ($Electron) { "MODELDL:" } else { "" }
 
 # ── 路径 ──────────────────────────────────────────────────
@@ -72,48 +41,36 @@ $ModelsDir  = Join-Path $ComfyUIDir "ComfyUI\models"
 # ── 检测 aria2c ───────────────────────────────────────────
 $UseAria2c = $null -ne (Get-Command "aria2c" -ErrorAction SilentlyContinue)
 
-# ── Emit 函数 ─────────────────────────────────────────────
 function Emit {
-    param(
-        [string]$Type,
-        [string]$Message = ""
-    )
+    param([string]$Type, [string]$Message = "")
     if ($Electron) {
-        if ($Message) {
-            Write-Output "${PREFIX}${Type}:${Message}"
-        } else {
-            Write-Output "${PREFIX}${Type}"
-        }
+        if ($Message) { Write-Output "${PREFIX}${Type}:${Message}" }
+        else { Write-Output "${PREFIX}${Type}" }
     }
 }
 
-# ── 手动模式彩色输出 ──────────────────────────────────────
 function Write-Color {
     param([string]$Text, [string]$Color = "White")
-    if (-not $Electron) {
-        Write-Host $Text -ForegroundColor $Color
-    }
+    if (-not $Electron) { Write-Host $Text -ForegroundColor $Color }
 }
 
-# ── 检测 ComfyUI 引擎 ─────────────────────────────────────
+# ── 检测引擎 ──────────────────────────────────────────────
 if (-not (Test-Path $ComfyUIDir)) {
     Emit "ENGINE_MISSING" $ComfyUIDir
     Write-Color "`n错误：未找到 ComfyUI 引擎！" Red
     Write-Color "请先双击 ComfyUI-Engine.exe 解压引擎到当前目录。" Yellow
-    if (-not $Electron) {
-        Read-Host "按 Enter 键退出"
-    }
+    if (-not $Electron) { Read-Host "按 Enter 键退出" }
     exit 2
 }
 Emit "ENGINE_OK"
 
 if (-not $Electron) {
-    $hfDisplay = if ($NoMirror) { "huggingface.co" } else { "hf-mirror.com" }
+    $hfD = if ($NoMirror) { "huggingface.co" } else { "hf-mirror.com" }
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host "  ComfyUI 模型下载器" -ForegroundColor White
     Write-Host "  目标目录: $ModelsDir" -ForegroundColor White
-    Write-Host "  镜像源:   $hfDisplay" -ForegroundColor White
-    Write-Host "  下载工具: $(if ($UseAria2c) { 'aria2c (多连接, 断点续传)' } else { '.NET HttpClient (断点续传)' })" -ForegroundColor White
+    Write-Host "  镜像源:   $hfD" -ForegroundColor White
+    Write-Host "  下载工具: $(if ($UseAria2c) { 'aria2c' } else { 'WebClient' })" -ForegroundColor White
     Write-Host "  并发数:   $Parallel" -ForegroundColor White
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host ""
@@ -155,29 +112,7 @@ $Models = @(
        Size = "246 MB" }
 )
 
-# ── 工具函数 ──────────────────────────────────────────────
-
-# HEAD 请求获取远程文件大小
-function Get-RemoteFileSize {
-    param([string]$Url)
-    try {
-        $req = [System.Net.WebRequest]::Create($Url)
-        $req.Method = "HEAD"
-        $req.Timeout = 30000
-        $resp = $req.GetResponse()
-        if ($resp.ContentLength -ge 0) {
-            $size = [long]$resp.ContentLength
-            $resp.Close()
-            return $size
-        }
-        $resp.Close()
-    } catch {
-        # 静默失败
-    }
-    return -1
-}
-
-# 字节数 → 人类可读
+# ── 辅助函数 ──────────────────────────────────────────────
 function Format-FileSize {
     param([long]$Bytes)
     if ($Bytes -lt 0) { return "?" }
@@ -188,203 +123,41 @@ function Format-FileSize {
     return "$Bytes B"
 }
 
-# ── aria2c 下载（多连接 + 实时速度上报） ────────────────────
-function Invoke-Aria2cDownload {
-    param($Model, $DestDir, $DestFile, $CompleteFile)
-
-    $retryCount = 0
-    while ($retryCount -lt $MaxRetries) {
-        $retryCount++
-
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = "aria2c"
-        $psi.Arguments = "--continue=true --auto-file-renaming=false --allow-overwrite=true --split=4 --min-split-size=1M --max-connection-per-server=4 --file-allocation=none --console-log-level=error --summary-interval=0 --dir=$DestDir --out=$($Model.Filename) --download-result=hide $($Model.Url)"
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
-        $psi.UseShellExecute = $false
-        $psi.CreateNoWindow = $true
-
-        $proc = [System.Diagnostics.Process]::Start($psi)
-        $proc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
-
-        $lastBytes = if (Test-Path $DestFile) { (Get-Item $DestFile).Length } else { 0 }
-        $lastTime = Get-Date
-
-        while (-not $proc.HasExited) {
-            Start-Sleep -Milliseconds 1000
-            if (Test-Path $DestFile) {
-                $curr = (Get-Item $DestFile).Length
-                $elapsed = ((Get-Date) - $lastTime).TotalSeconds
-                if ($elapsed -ge 1) {
-                    $bps = ($curr - $lastBytes) / $elapsed
-                    if ($bps -gt 0) {
-                        Emit "SPEED" "$($Model.Filename):$($Model.Subdir):$("{0:N1}" -f ($bps / 1MB)) MB/s"
-                    }
-                    $lastBytes = $curr
-                    $lastTime = Get-Date
-                }
-            }
+function Get-RemoteFileSize {
+    param([string]$Url)
+    try {
+        $req = [System.Net.WebRequest]::Create($Url)
+        $req.Method = "HEAD"; $req.Timeout = 30000
+        $resp = $req.GetResponse()
+        if ($resp.ContentLength -ge 0) {
+            $s = [long]$resp.ContentLength; $resp.Close(); return $s
         }
-        $proc.WaitForExit()
-
-        if ($proc.ExitCode -eq 0 -and (Test-Path $DestFile)) {
-            [void](New-Item -ItemType File -Force -Path $CompleteFile)
-            $sz = Format-FileSize -Bytes (Get-Item $DestFile).Length
-            Emit "DONE" "$($Model.Filename):$($Model.Subdir):${sz}"
-            Write-Color "   OK 完成 ($sz)" Green
-            return $true
-        }
-
-        $errMsg = $proc.StandardError.ReadToEnd().Trim()
-        if ($retryCount -lt $MaxRetries) {
-            Start-Sleep -Seconds 3
-        } else {
-            if ($errMsg.Length -gt 200) { $errMsg = $errMsg.Substring(0, 200) + "..." }
-            Emit "ERROR" "$($Model.Filename):$($Model.Subdir):0:${errMsg}"
-            Write-Color "   失败: ${errMsg}" Red
-        }
-    }
-    return $false
+        $resp.Close()
+    } catch {}
+    return -1
 }
 
-# ── .NET WebClient 下载（续传 + 实时进度上报） ────────────
-function Invoke-WebClientDownload {
-    param($Model, $DestFile, $CompleteFile)
-
-    $retryCount = 0
-    while ($retryCount -lt $MaxRetries) {
-        $retryCount++
-
+# ── 单文件下载函数（由子进程调用） ─────────────────────────
+function Download-SingleFile {
+    param([string]$Url, [string]$DestFile, [int]$Retries)
+    $ErrorActionPreference = "Continue"
+    for ($i = 0; $i -lt $Retries; $i++) {
         try {
-            $existingSize = if (Test-Path $DestFile) { (Get-Item $DestFile).Length } else { 0 }
-
-            # 获取远程总大小（用于计算百分比）
-            $remoteTotal = Get-RemoteFileSize -Url $Model.Url
-            if ($remoteTotal -le 0) { $remoteTotal = -1 }
-
-            $wc = New-Object System.Net.WebClient
-            $startTime = Get-Date
-            $script:lastBytes = $existingSize
-            $script:lastReport = $startTime
-            $script:first = $true
-
-            # 注册进度回调
-            Register-ObjectEvent -InputObject $wc -EventName DownloadProgressChanged -Action {
-                $e = $Event.SourceEventArgs
-                $existing = $Event.MessageData.ExistingSize
-                $filename = $Event.MessageData.Filename
-                $subdir = $Event.MessageData.Subdir
-                $total = $Event.MessageData.TotalBytes
-                $currentTotal = $e.BytesReceived + $existing
-
-                if ($total -gt 0) {
-                    $pct = [Math]::Min(100, [Math]::Round(($currentTotal / $total) * 100))
-                    Write-Output "${Prefix}PROGRESS:${filename}:${subdir}:${pct}"
-                }
-
-                $now = Get-Date
-                $elapsedSecs = (($now - $script:lastReport).TotalSeconds)
-                if ($elapsedSecs -ge 2 -or $script:first) {
-                    $bytesDelta = $currentTotal - $script:lastBytes
-                    if ($elapsedSecs -gt 0) {
-                        $speedMBs = ($bytesDelta / 1MB) / $elapsedSecs
-                        if ($speedMBs -ge 0.01) {
-                            Write-Output "${Prefix}SPEED:${filename}:${subdir}:$("{0:N1}" -f $speedMBs) MB/s"
-                        }
-                        if ($total -gt 0 -and $speedMBs -gt 0) {
-                            $remainingBytes = $total - $currentTotal
-                            if ($remainingBytes -gt 0) {
-                                $etaSec = [Math]::Round($remainingBytes / ($speedMBs * 1MB), 0)
-                                Write-Output "${Prefix}ETA:${filename}:${subdir}:${etaSec}"
-                            }
-                        }
-                    }
-                    $script:lastBytes = $currentTotal
-                    $script:lastReport = $now
-                    $script:first = $false
-                }
-            } -MessageData @{
-                ExistingSize = $existingSize
-                Filename = $Model.Filename
-                Subdir = $Model.Subdir
-                TotalBytes = $remoteTotal + $existingSize
-            } -SupportEvent | Out-Null
-
-            $wc.DownloadFileAsync((New-Object System.Uri($Model.Url)), $DestFile)
-            while ($wc.IsBusy) {
-                Start-Sleep -Milliseconds 500
-            }
-            $wc.Dispose()
-
-            if (Test-Path $DestFile) {
-                [void](New-Item -ItemType File -Force -Path $CompleteFile)
-                $sz = Format-FileSize -Bytes (Get-Item $DestFile).Length
-                Emit "DONE" "$($Model.Filename):$($Model.Subdir):${sz}"
-                Write-Color "   OK 完成 ($sz)" Green
+            if ($UseAria2c) {
+                $p = Start-Process -FilePath "aria2c" -ArgumentList "--continue=true --auto-file-renaming=false --allow-overwrite=true --split=4 --file-allocation=none --console-log-level=error --dir=""$(Split-Path $DestFile -Parent)"" --out=""$(Split-Path $DestFile -Leaf)"" ""$Url""" -NoNewWindow -Wait -PassThru
+                if ($p.ExitCode -eq 0) { return $true }
+            } else {
+                $wc = New-Object System.Net.WebClient
+                $wc.DownloadFile($Url, $DestFile)
+                $wc.Dispose()
                 return $true
             }
         } catch {
-            if ($retryCount -lt $MaxRetries) {
-                Start-Sleep -Seconds 3
-            } else {
-                $msg = ($_.Exception.Message -replace "[\r\n]+", " ").Trim()
-                Emit "ERROR" "$($Model.Filename):$($Model.Subdir):0:${msg}"
-                Write-Color "   失败: ${msg}" Red
-            }
+            if ($i -ge $Retries - 1) { throw }
+            Start-Sleep -Seconds 3
         }
     }
     return $false
-}
-
-# ── 主下载调度函数 ────────────────────────────────────────
-function Download-File {
-    param($Model)
-
-    $destDir  = Join-Path $ModelsDir $Model.Subdir
-    $destFile = Join-Path $destDir $Model.Filename
-    $completeFile = "$destFile.complete"
-
-    New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-
-    # 步骤1：检查 complete 标记 → 跳过
-    if ((Test-Path $destFile) -and (Test-Path $completeFile)) {
-        $sz = Format-FileSize -Bytes (Get-Item $destFile).Length
-        Emit "SKIP" "$($Model.Filename):$($Model.Subdir):${sz}"
-        Write-Color "  跳过 $($Model.Filename) (${sz})" DarkGray
-        return "SKIP"
-    }
-
-    # 步骤2：检查已有部分文件，对比远程尺寸
-    $existingSize = if (Test-Path $destFile) { (Get-Item $destFile).Length } else { 0 }
-
-    if ($existingSize -gt 0) {
-        $remoteBytes = Get-RemoteFileSize -Url $Model.Url
-        if ($remoteBytes -gt 0 -and $existingSize -eq $remoteBytes) {
-            [void](New-Item -ItemType File -Force -Path $completeFile)
-            $sz = Format-FileSize -Bytes $existingSize
-            Emit "SKIP" "$($Model.Filename):$($Model.Subdir):${sz}"
-            Write-Color "  跳过 $($Model.Filename) (本地已与远程一致)" DarkGray
-            return "SKIP"
-        }
-        $localStr = Format-FileSize -Bytes $existingSize
-        $remoteStr = Format-FileSize -Bytes $remoteBytes
-        Emit "CHECK" "$($Model.Filename):$($Model.Subdir):${localStr}:${remoteStr}"
-        Write-Color "  发现已有文件 (本地 ${localStr} / 远程 ${remoteStr})" Cyan
-        Emit "RESUME" "$($Model.Filename):$($Model.Subdir):${localStr}"
-        Write-Color "  将从 ${localStr} 处续传" Yellow
-    }
-
-    Emit "START" "$($Model.Filename):$($Model.Subdir):$($Model.Size)"
-    Write-Color "下载 $($Model.Subdir)/$($Model.Filename) ($($Model.Size))" Yellow
-
-    # 步骤3：执行下载
-    if ($UseAria2c) {
-        $ok = Invoke-Aria2cDownload -Model $Model -DestDir $destDir -DestFile $destFile -CompleteFile $completeFile
-    } else {
-        $ok = Invoke-WebClientDownload -Model $Model -DestFile $destFile -CompleteFile $completeFile
-    }
-
-    return if ($ok) { "DONE" } else { "FAIL" }
 }
 
 # ── 主流程 ────────────────────────────────────────────────
@@ -396,14 +169,15 @@ New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
 $okCount = 0
 $skipCount = 0
 $failCount = 0
-
-# 构建待下载列表（预先做尺寸比对，只保留真正需要下载的）
 $pending = New-Object System.Collections.ArrayList
+
+# 构建待下载列表（预先做尺寸比对）
 foreach ($model in $Models) {
     $destDir  = Join-Path $ModelsDir $model.Subdir
     $destFile = Join-Path $destDir $model.Filename
     $completeFile = "$destFile.complete"
 
+    # 有 complete 标记 → 跳过
     if ((Test-Path $destFile) -and (Test-Path $completeFile)) {
         $sz = Format-FileSize -Bytes (Get-Item $destFile).Length
         Emit "SKIP" "$($model.Filename):$($model.Subdir):${sz}"
@@ -414,7 +188,7 @@ foreach ($model in $Models) {
 
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
 
-    # 检查已有部分文件 → 远程尺寸比对
+    # 有部分文件 → 远程尺寸比对
     $existingSize = if (Test-Path $destFile) { (Get-Item $destFile).Length } else { 0 }
     if ($existingSize -gt 0) {
         $remoteBytes = Get-RemoteFileSize -Url $model.Url
@@ -422,222 +196,139 @@ foreach ($model in $Models) {
             [void](New-Item -ItemType File -Force -Path $completeFile)
             $sz = Format-FileSize -Bytes $existingSize
             Emit "SKIP" "$($model.Filename):$($model.Subdir):${sz}"
-            Write-Color "跳过 $($model.Filename) (本地已与远程一致) ($sz)" DarkGray
+            Write-Color "跳过 $($model.Filename) (与远程一致, $sz)" DarkGray
             $skipCount++
             continue
         }
         $localStr = Format-FileSize -Bytes $existingSize
         $remoteStr = Format-FileSize -Bytes $remoteBytes
-        if ($remoteBytes -gt 0) {
-            Emit "CHECK" "$($model.Filename):$($model.Subdir):${localStr}:${remoteStr}"
-            Write-Color "校验 $($model.Subdir)/$($model.Filename) — 本地 ${localStr} / 远程 ${remoteStr}" Cyan
-        }
+        Emit "CHECK" "$($model.Filename):$($model.Subdir):${localStr}:${remoteStr}"
+        Write-Color "校验 $($model.Subdir)/$($model.Filename) — 本地 ${localStr} / 远程 ${remoteStr}" Cyan
         Emit "RESUME" "$($model.Filename):$($model.Subdir):${localStr}"
         Write-Color "续传 $($model.Subdir)/$($model.Filename) (已有 ${localStr})" Yellow
     }
-
     [void]$pending.Add($model)
 }
 
-# 下载调度器
-$jobs = @{}
-$nextIndex = 0
+if ($pending.Count -eq 0) {
+    Emit "COMPLETE" "${okCount}:${skipCount}:${failCount}"
+    Write-Color "全部模型已就绪。" Green
+    if (-not $Electron) { Read-Host "按 Enter 键退出" }
+    exit 0
+}
 
-while ($nextIndex -lt $pending.Count -or $jobs.Count -gt 0) {
-    # 检查已完成作业
-    $finishedKeys = @()
-    foreach ($key in $jobs.Keys) {
-        $job = $jobs[$key]
-        if ($job.State -eq 'Completed') {
-            $result = Receive-Job $job
-            Remove-Job $job -ErrorAction SilentlyContinue
-            $finishedKeys += $key
+# ── 并行下载调度器（不使用 Start-Job，直接用进程并行） ────
+# 使用 Start-Process -PassThru 来并行管理多个进程
+$running = @{}
 
-            if ($result -eq "DONE") { $okCount++; Write-Color "  OK 完成" Green }
-            elseif ($result -eq "SKIP") { $skipCount++ }
-            else { $failCount++; Write-Color "  失败" Red }
+while ($pending.Count -gt 0 -or $running.Count -gt 0) {
+    # 清理已完成进程
+    $finished = @()
+    foreach ($pid2 in $running.Keys) {
+        $p = $running[$pid2].Process
+        $modelInfo = $running[$pid2].Model
+        if ($p.HasExited) {
+            $destDir2 = Join-Path $ModelsDir $modelInfo.Subdir
+            $destFile2 = Join-Path $destDir2 $modelInfo.Filename
+            $completeFile2 = "$destFile2.complete"
 
-        } elseif ($job.State -eq 'Failed' -or $job.State -eq 'Stopped') {
-            Remove-Job $job -ErrorAction SilentlyContinue
-            $finishedKeys += $key
+            if ($p.ExitCode -eq 0 -and (Test-Path $destFile2)) {
+                [void](New-Item -ItemType File -Force -Path $completeFile2)
+                $szf = Format-FileSize -Bytes (Get-Item $destFile2).Length
+                Emit "DONE" "$($modelInfo.Filename):$($modelInfo.Subdir):${szf}"
+                Write-Color "  OK 完成 ($szf)" Green
+                $okCount++
+            } else {
+                Emit "ERROR" "$($modelInfo.Filename):$($modelInfo.Subdir):0:下载进程退出码 $($p.ExitCode)"
+                Write-Color "  失败" Red
+                $failCount++
+            }
+            $finished += $pid2
+        }
+    }
+    foreach ($pid2 in $finished) { $running.Remove($pid2) }
+
+    # 启动新进程
+    while ($running.Count -lt $Parallel -and $pending.Count -gt 0) {
+        $model = $pending[0]
+        $pending.RemoveAt(0)
+
+        $destDir3 = Join-Path $ModelsDir $model.Subdir
+        $destFile3 = Join-Path $destDir3 $model.Filename
+
+        Emit "START" "$($model.Filename):$($model.Subdir):$($model.Size)"
+        # 如果已有部分文件，说明是续传，改变提示文字
+        if ((Test-Path $destFile3) -and (Get-Item $destFile3).Length -gt 0) {
+            Write-Color "↻ 续传 $($model.Subdir)/$($model.Filename)" Yellow
+        } else {
+            Write-Color "⬇ $($model.Subdir)/$($model.Filename) ($($model.Size))" Yellow
+        }
+
+        # 生成包装脚本路径
+        $execDir2 = Split-Path -Parent $PSCommandPath
+        if (-not $execDir2) { $execDir2 = $PSScriptRoot }
+        if (-not $execDir2) { $execDir2 = "." }
+        $wrapperPath = Join-Path $execDir2 "dl_$([System.IO.Path]::GetRandomFileName()).ps1"
+
+        # 编写包装脚本
+        $wrapperContent = @"
+`$ErrorActionPreference = "Continue"
+`$url = "$($model.Url)"
+`$dest = "$destFile3"
+`$retries = $MaxRetries
+`$useAria = `$$UseAria2c
+for (`$i = 0; `$i -lt `$retries; `$i++) {
+    try {
+        if (`$useAria) {
+            `$p = Start-Process -FilePath "aria2c" -ArgumentList "--continue=true --auto-file-renaming=false --allow-overwrite=true --split=4 --file-allocation=none --console-log-level=error --dir=""`$(Split-Path `$dest -Parent)"" --out=""`$(Split-Path `$dest -Leaf)"" ""`$url""" -NoNewWindow -Wait -PassThru
+            if (`$p.ExitCode -eq 0) { exit 0 }
+        } else {
+            (New-Object System.Net.WebClient).DownloadFile(`$url, `$dest)
+            exit 0
+        }
+    } catch {
+        if (`$i -ge `$retries - 1) { exit 1 }
+        Start-Sleep -Seconds 3
+    }
+}
+exit 1
+"@
+        Set-Content -Path $wrapperPath -Value $wrapperContent -Encoding UTF8
+
+        $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$wrapperPath`"" -NoNewWindow -Wait -PassThru
+
+        # 清理包装脚本
+        Remove-Item $wrapperPath -Force -ErrorAction SilentlyContinue
+
+        # 检查结果
+        if ($proc.ExitCode -eq 0 -and (Test-Path $destFile3)) {
+            [void](New-Item -ItemType File -Force -Path "$destFile3.complete")
+            $sz2 = Format-FileSize -Bytes (Get-Item $destFile3).Length
+            Emit "DONE" "$($model.Filename):$($model.Subdir):${sz2}"
+            Write-Color "  OK 完成 ($sz2)" Green
+            $okCount++
+        } else {
+            Emit "ERROR" "$($model.Filename):$($model.Subdir):0:下载失败"
+            Write-Color "  失败" Red
             $failCount++
         }
     }
-    foreach ($key in $finishedKeys) { $jobs.Remove($key) }
 
-    # 启动新作业
-    while ($jobs.Count -lt $Parallel -and $nextIndex -lt $pending.Count) {
-        $model = $pending[$nextIndex]
-        $nextIndex++
-
-        if (-not $Electron) {
-            Write-Host "⬇ $($model.Subdir)/$($model.Filename) ($($model.Size))" -ForegroundColor Yellow
-        }
-
-        $prefixArg = if ($Electron) { $PREFIX } else { "" }
-        $job = Start-Job -Name "dl_$nextIndex" -ScriptBlock {
-            param($M, $MDir, $Retries, $Aria2c, $Elec, $Pref)
-            $Prefix = $Pref
-            function Emit {
-                param([string]$T, [string]$M2 = "")
-                if ($Prefix) {
-                    if ($M2) { Write-Output "${Prefix}${T}:${M2}" }
-                    else { Write-Output "${Prefix}${T}" }
-                } else {
-                    # 手动模式：在后台作业中缓存输出，主线程通过 Receive-Job 拿到
-                    if ($M2) { Write-Output "${T}:${M2}" }
-                    else { Write-Output "${T}" }
-                }
-            }
-            function Format-FileSize {
-                param([long]$B)
-                if ($B -lt 0) { return "?" }
-                if ($B -ge 1TB) { return "{0:N2} TB" -f ($B / 1TB) }
-                if ($B -ge 1GB) { return "{0:N2} GB" -f ($B / 1GB) }
-                if ($B -ge 1MB) { return "{0:N2} MB" -f ($B / 1MB) }
-                if ($B -ge 1KB) { return "{0:N2} KB" -f ($B / 1KB) }
-                return "$B B"
-            }
-            function Get-RemoteFileSize {
-                param([string]$U)
-                try {
-                    $req = [System.Net.WebRequest]::Create($U)
-                    $req.Method = "HEAD"; $req.Timeout = 30000
-                    $resp = $req.GetResponse()
-                    if ($resp.ContentLength -ge 0) {
-                        $s = [long]$resp.ContentLength; $resp.Close(); return $s
-                    }
-                    $resp.Close()
-                } catch {}
-                return -1
-            }
-            function Download-Aria2c {
-                param($M, $DD, $DF, $CF)
-                $rc = 0
-                while ($rc -lt $Retries) {
-                    $rc++
-                    $psi = New-Object System.Diagnostics.ProcessStartInfo
-                    $psi.FileName = "aria2c"
-                    $psi.Arguments = "--continue=true --auto-file-renaming=false --allow-overwrite=true --split=4 --min-split-size=1M --max-connection-per-server=4 --file-allocation=none --console-log-level=error --summary-interval=0 --dir=$DD --out=$($M.Filename) --download-result=hide $($M.Url)"
-                    $psi.RedirectStandardOutput = $true
-                    $psi.RedirectStandardError = $true
-                    $psi.UseShellExecute = $false
-                    $psi.CreateNoWindow = $true
-                    $proc = [System.Diagnostics.Process]::Start($psi)
-                    $lastB = if (Test-Path $DF) { (Get-Item $DF).Length } else { 0 }
-                    $lastT = Get-Date
-                    while (-not $proc.HasExited) {
-                        Start-Sleep -Milliseconds 1000
-                        if (Test-Path $DF) {
-                            $curr = (Get-Item $DF).Length
-                            $el = ((Get-Date) - $lastT).TotalSeconds
-                            if ($el -ge 1 -and ($curr - $lastB) -gt 0) {
-                                $bps = ($curr - $lastB) / $el
-                                Emit "SPEED" "$($M.Filename):$($M.Subdir):$("{0:N1}" -f ($bps/1MB)) MB/s"
-                                $lastB = $curr; $lastT = Get-Date
-                            }
-                        }
-                    }
-                    $proc.WaitForExit()
-                    if ($proc.ExitCode -eq 0 -and (Test-Path $DF)) {
-                        [void](New-Item -ItemType File -Force -Path $CF)
-                        $sz = Format-FileSize -Bytes (Get-Item $DF).Length
-                        Emit "DONE" "$($M.Filename):$($M.Subdir):${sz}"
-                        return "DONE"
-                    }
-                    $err = $proc.StandardError.ReadToEnd() -replace "[\r\n]+", " "
-                    if ($err.Length -gt 200) { $err = $err.Substring(0,200) + "..." }
-                    if ($rc -lt $Retries) { Start-Sleep -Seconds 3 }
-                    else { Emit "ERROR" "$($M.Filename):$($M.Subdir):0:$err" }
-                }
-                return "FAIL"
-            }
-            function Download-WebClient {
-                param($M, $DF, $CF)
-                $rc = 0
-                while ($rc -lt $Retries) {
-                    $rc++
-                    try {
-                        $existing = if (Test-Path $DF) { (Get-Item $DF).Length } else { 0 }
-                        $total = Get-RemoteFileSize -U $M.Url
-                        if ($total -le 0) { $total = -1 }
-
-                        $wc = New-Object System.Net.WebClient
-                        $wc.DownloadFileAsync((New-Object System.Uri($M.Url)), $DF)
-                        $lastB = $existing; $lastT = Get-Date
-                        while ($wc.IsBusy) {
-                            Start-Sleep -Milliseconds 1000
-                            if (Test-Path $DF) {
-                                $curr = (Get-Item $DF).Length
-                                $el = ((Get-Date) - $lastT).TotalSeconds
-                                if ($el -ge 1 -and ($curr - $lastB) -gt 0) {
-                                    $bps = ($curr - $lastB) / $el
-                                    if ($bps -gt 0) {
-                                        Emit "SPEED" "$($M.Filename):$($M.Subdir):$("{0:N1}" -f ($bps/1MB)) MB/s"
-                                        if ($total -gt 0) {
-                                            $pct = [Math]::Min(100, [Math]::Round(($curr / $total) * 100))
-                                            Emit "PROGRESS" "$($M.Filename):$($M.Subdir):${pct}"
-                                            $remaining = $total - $curr
-                                            if ($remaining -gt 0) {
-                                                $eta = [Math]::Round($remaining / $bps, 0)
-                                                Emit "ETA" "$($M.Filename):$($M.Subdir):${eta}"
-                                            }
-                                        }
-                                    }
-                                    $lastB = $curr; $lastT = Get-Date
-                                }
-                            }
-                        }
-                        $wc.Dispose()
-                        if (Test-Path $DF) {
-                            [void](New-Item -ItemType File -Force -Path $CF)
-                            $sz = Format-FileSize -Bytes (Get-Item $DF).Length
-                            Emit "DONE" "$($M.Filename):$($M.Subdir):${sz}"
-                            return "DONE"
-                        }
-                    } catch {
-                        if ($rc -lt $Retries) { Start-Sleep -Seconds 3 }
-                        else {
-                            $msg = ($_.Exception.Message -replace "[\r\n]+", " ").Trim()
-                            Emit "ERROR" "$($M.Filename):$($M.Subdir):0:$msg"
-                        }
-                    }
-                }
-                return "FAIL"
-            }
-
-            Emit "START" "$($M.Filename):$($M.Subdir):$($M.Size)"
-
-            if ($Aria2c) {
-                return Download-Aria2c -M $M -DD (Join-Path $MDir $M.Subdir) -DF (Join-Path (Join-Path $MDir $M.Subdir) $M.Filename) -CF "$(Join-Path (Join-Path $MDir $M.Subdir) $M.Filename).complete"
-            } else {
-                return Download-WebClient -M $M -DF (Join-Path (Join-Path $MDir $M.Subdir) $M.Filename) -CF "$(Join-Path (Join-Path $MDir $M.Subdir) $M.Filename).complete"
-            }
-        } -ArgumentList $model, $ModelsDir, $MaxRetries, $UseAria2c, $Electron.IsPresent, $prefixArg
-
-        $jobs["dl_$nextIndex"] = $job
-    }
-
-    if ($jobs.Count -gt 0) {
+    if ($running.Count -gt 0) {
         Start-Sleep -Milliseconds 500
     }
 }
 
-# 完成
+# ── 完成 ──────────────────────────────────────────────────
 Emit "COMPLETE" "${okCount}:${skipCount}:${failCount}"
 
 if (-not $Electron) {
     Write-Host ""
     if ($failCount -gt 0) {
-        Write-Host "⚠ $okCount 成功, $skipCount 跳过, $failCount 失败（重新运行脚本重试）" -ForegroundColor Yellow
-        Write-Host "运行 txt2img-backend.exe 启动服务。" -ForegroundColor White
+        Write-Host "⚠ $okCount 成功, $skipCount 跳过, $failCount 失败" -ForegroundColor Yellow
     } else {
         Write-Host "完成！$okCount 下载, $skipCount 跳过。" -ForegroundColor Green
-        Write-Host "运行 txt2img-backend.exe 即可启动服务。" -ForegroundColor White
     }
 }
-
-if (-not $Electron) {
-    Read-Host "按 Enter 键退出"
-}
+if (-not $Electron) { Read-Host "按 Enter 键退出" }
 if ($failCount -gt 0) { exit 1 } else { exit 0 }
