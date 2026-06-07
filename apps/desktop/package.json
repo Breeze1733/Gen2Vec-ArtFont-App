@@ -23,7 +23,7 @@
     ],
     "extraResources": [
       { "from": "../../services/txt2img-api/dist/txt2img-backend.exe", "to": "backend/txt2img-backend.exe" },
-      { "from": "../../services/txt2img-api/dist/download-models.ps1", "to": "backend/download-models.ps1" },
+      { "from": "../../scripts/download-models.ps1", "to": "backend/download-models.ps1" },
       { "from": "../../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
       { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
       { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" },

@@ -174,6 +174,31 @@ function downloadModels(backendDir, onProgress) {
     let completedFiles = 0
     let failedFiles = 0
     let currentFileName = ''
+    let currentFileSize = ''
+    let currentFileSpeed = ''
+    let currentFileEta = ''
+    let currentFilePct = -1
+    let currentSubdir = ''
+    let lastProgress = null
+
+    // 辅助：采集实时进度/速度信息到公共状态
+    const captureProgress = () => {
+      return {
+        step: 2, phase: 'downloading',
+        message: currentFilePct >= 0
+          ? `正在下载 (${completedFiles + 1}/${totalFiles || '?'}) ${currentFileName}`
+          : `正在下载模型 (${completedFiles + 1}/${totalFiles || '?'})...`,
+        percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
+        fileIndex: completedFiles + 1,
+        totalFiles,
+        fileName: currentFileName,
+        fileSize: currentFileSize,
+        speed: currentFileSpeed,
+        eta: currentFileEta,
+        filePercent: currentFilePct,
+        subdir: currentSubdir
+      }
+    }
 
     proc.stdout.on('data', (chunk) => {
       const lines = chunk.toString().split(/\r?\n/).filter(Boolean)
@@ -188,44 +213,95 @@ function downloadModels(backendDir, onProgress) {
             break
           case 'START':
             currentFileName = parts[1] || ''
-            completedFiles = parseInt(parts[2]?.split('/')[0], 10) || completedFiles
+            currentSubdir = parts[2] || ''
+            currentFileSize = parts[3] || ''
+            currentFileSpeed = ''
+            currentFileEta = ''
+            currentFilePct = -1
+            lastProgress = captureProgress()
+            if (onProgress) onProgress(lastProgress)
+            break
+          case 'PROGRESS':
+            currentFileName = parts[1] || currentFileName
+            currentSubdir = parts[2] || currentSubdir
+            currentFilePct = parseInt(parts[3], 10) || 0
+            break
+          case 'SPEED':
+            currentFileName = parts[1] || currentFileName
+            currentSubdir = parts[2] || currentSubdir
+            currentFileSpeed = parts[3] || ''
+            break
+          case 'ETA':
+            currentFileName = parts[1] || currentFileName
+            currentSubdir = parts[2] || currentSubdir
+            const etaSeconds = parseInt(parts[3], 10) || 0
+            if (etaSeconds >= 3600) {
+              currentFileEta = `${Math.floor(etaSeconds / 3600)}h${Math.floor((etaSeconds % 3600) / 60)}m`
+            } else if (etaSeconds >= 60) {
+              currentFileEta = `${Math.floor(etaSeconds / 60)}m${etaSeconds % 60}s`
+            } else {
+              currentFileEta = `${etaSeconds}s`
+            }
+            break
+          case 'CHECK':
+            // 尺寸比对信息：脚本发现本地有部分文件
             if (onProgress) {
               onProgress({
-                step: 2, phase: 'downloading',
-                message: `正在下载模型 (${completedFiles + 1}/${totalFiles || '?'})...`,
+                step: 2, phase: 'checking',
+                message: `比对文件: ${parts[1] || ''}`,
                 percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
-                fileIndex: completedFiles + 1,
-                totalFiles,
-                fileName: currentFileName,
-                fileSize: parts[3] || ''
+                detail: `本地 ${parts[3] || '?'} / 远程 ${parts[4] || '?'}`
+              })
+            }
+            break
+          case 'RESUME':
+            // 续传信息
+            if (onProgress) {
+              onProgress({
+                step: 2, phase: 'resuming',
+                message: `续传: ${parts[1] || ''} (${parts[3] || ''})`,
+                percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1
               })
             }
             break
           case 'DONE':
           case 'SKIP':
             completedFiles++
+            currentFilePct = -1
+            currentFileSpeed = ''
+            currentFileEta = ''
             if (onProgress) {
               onProgress({
                 step: 2, phase: 'downloading',
-                message: type === 'SKIP' ? `跳过: ${parts[1]}` : `完成: ${parts[1]}`,
+                message: type === 'SKIP'
+                  ? `跳过: ${parts[1] || currentFileName}`
+                  : `完成: ${parts[1] || currentFileName}`,
                 percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
                 fileIndex: completedFiles,
                 totalFiles,
-                fileName: parts[1] || currentFileName
+                fileName: parts[1] || currentFileName,
+                speed: '',
+                eta: '',
+                filePercent: -1
               })
             }
             break
           case 'ERROR':
             completedFiles++
             failedFiles++
+            currentFilePct = -1
+            currentFileSpeed = ''
+            currentFileEta = ''
             if (onProgress) {
               onProgress({
                 step: 2, phase: 'downloading',
                 message: `下载失败: ${parts[1] || currentFileName}`,
+                detail: parts[4] ? `错误: ${parts.slice(4).join(':')}` : '',
                 percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
                 fileIndex: completedFiles,
                 totalFiles,
-                fileName: parts[1] || currentFileName
+                fileName: parts[1] || currentFileName,
+                errorCode: parts[3] || '0'
               })
             }
             break
@@ -249,15 +325,29 @@ function downloadModels(backendDir, onProgress) {
       }
     })
 
+    // 每 2 秒推送一次合并后的实时进度（速度/ETA/文件内百分比）
+    const progressInterval = setInterval(() => {
+      if (currentFilePct >= 0 || currentFileSpeed) {
+        const merged = captureProgress()
+        // 只在有变化时才推送，避免无意义刷新
+        if (JSON.stringify(merged) !== JSON.stringify(lastProgress)) {
+          lastProgress = merged
+          if (onProgress) onProgress(merged)
+        }
+      }
+    }, 2000)
+
     proc.stderr.on('data', (chunk) => {
       console.warn('[download-models stderr]', chunk.toString())
     })
 
     proc.on('error', (err) => {
+      clearInterval(progressInterval)
       reject(new Error(`启动下载脚本失败: ${err.message}`))
     })
 
     proc.on('close', (code) => {
+      clearInterval(progressInterval)
       if (code !== 0 && failedFiles === 0) {
         // 脚本自身退出非零但无具体文件错误
         reject(new Error(`模型下载脚本异常退出 (退出码: ${code})`))
