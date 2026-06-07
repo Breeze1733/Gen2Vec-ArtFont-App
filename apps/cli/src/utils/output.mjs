@@ -192,6 +192,29 @@ function csvEscape(value) {
   return text
 }
 
+function extractQualityMetrics(metadata = {}) {
+  const pngTransparency = metadata?.preprocess?.png_transparency
+  const svgFidelity = metadata?.quality?.svg_fidelity
+  return {
+    png_transparency: pngTransparency === undefined || pngTransparency === null ? '' : pngTransparency,
+    svg_fidelity: svgFidelity === undefined || svgFidelity === null ? '' : svgFidelity,
+  }
+}
+
+function appendQualityMetricsToRunLog(runLog = '', metadata = {}) {
+  if (!runLog) return runLog
+  const metrics = extractQualityMetrics(metadata)
+  const upsertMetric = (text, key, value) => {
+    const line = `${key}=${value}`
+    const pattern = new RegExp(`(^|\\n)${key}=.*(?=\\n|$)`)
+    if (pattern.test(text)) {
+      return text.replace(pattern, (match, prefix) => `${prefix}${line}`)
+    }
+    return `${text}\n${line}`
+  }
+  return upsertMetric(upsertMetric(runLog, 'png_transparency', metrics.png_transparency), 'svg_fidelity', metrics.svg_fidelity)
+}
+
 export async function appendBatchSummaryCsv(summaryPath, row = {}) {
   const columns = [
     'task_id',
@@ -209,6 +232,8 @@ export async function appendBatchSummaryCsv(summaryPath, row = {}) {
     'preview_path',
     'metadata_path',
     'run_log_path',
+    'png_transparency',
+    'svg_fidelity',
     'error',
   ]
   await mkdir(path.dirname(summaryPath), { recursive: true })
@@ -339,7 +364,7 @@ export async function writeTaskArtifacts({
   }
 
   if (runLog) {
-    const saved = await writeArtifactFile(targetPaths.log, runLog, 'log', true)
+    const saved = await writeArtifactFile(targetPaths.log, appendQualityMetricsToRunLog(runLog, metadataPayload || {}), 'log', true)
     if (saved) savedFiles.push(saved)
   }
 
@@ -369,6 +394,7 @@ export async function writeTaskArtifacts({
     if (summaryTarget) {
       await appendBatchSummaryCsv(summaryTarget, {
         ...summaryRow,
+        ...extractQualityMetrics(metadataPayload || {}),
         task_name: summaryRow.task_name || taskName || path.basename(resolvedTaskDir),
         task_dir: summaryRow.task_dir || resolvedTaskDir,
         original_path: summaryRow.original_path || targetPaths.original,
@@ -415,8 +441,10 @@ export function buildRunLog({
   error = '',
   usesTxt2Img = false,
   engine = '',
+  metadata = {},
 } = {}) {
   const paths = taskInfo?.paths || {}
+  const metrics = extractQualityMetrics(metadata)
   return [
     `task_id=${task?.id || ''}`,
     `task_name=${taskInfo?.taskName || ''}`,
@@ -428,6 +456,8 @@ export function buildRunLog({
     `stage2_ms=${stage2Duration}`,
     `uses_txt2img=${usesTxt2Img}`,
     `engine=${engine}`,
+    `png_transparency=${metrics.png_transparency}`,
+    `svg_fidelity=${metrics.svg_fidelity}`,
     `task_dir=${taskInfo?.taskDir || ''}`,
     `original_path=${paths.original || ''}`,
     `transparent_path=${paths.transparent || ''}`,
@@ -491,7 +521,9 @@ export function buildSummaryRow({
   seed = 0,
   resolution = '',
   error = '',
+  metadata = {},
 } = {}) {
+  const metrics = extractQualityMetrics(metadata)
   return {
     task_id: String(task?.id || ''),
     task_name: taskInfo?.taskName || '',
@@ -508,6 +540,8 @@ export function buildSummaryRow({
     preview_path: taskInfo?.paths?.preview || '',
     metadata_path: taskInfo?.paths?.metadata || '',
     run_log_path: taskInfo?.paths?.log || '',
+    png_transparency: metrics.png_transparency,
+    svg_fidelity: metrics.svg_fidelity,
     error,
   }
 }

@@ -942,10 +942,34 @@ function csvEscape(value) {
   return text
 }
 
+function extractQualityMetrics(metadata = {}) {
+  const pngTransparency = metadata?.preprocess?.png_transparency
+  const svgFidelity = metadata?.quality?.svg_fidelity
+  return {
+    png_transparency: pngTransparency === undefined || pngTransparency === null ? '' : pngTransparency,
+    svg_fidelity: svgFidelity === undefined || svgFidelity === null ? '' : svgFidelity
+  }
+}
+
+function appendQualityMetricsToRunLog(runLog = '', metadata = {}) {
+  if (!runLog) return runLog
+  const metrics = extractQualityMetrics(metadata)
+  const upsertMetric = (text, key, value) => {
+    const line = `${key}=${value}`
+    const pattern = new RegExp(`(^|\\n)${key}=.*(?=\\n|$)`)
+    if (pattern.test(text)) {
+      return text.replace(pattern, (match, prefix) => `${prefix}${line}`)
+    }
+    return `${text}\n${line}`
+  }
+  return upsertMetric(upsertMetric(runLog, 'png_transparency', metrics.png_transparency), 'svg_fidelity', metrics.svg_fidelity)
+}
+
 async function appendBatchSummaryCsv(summaryPath, row = {}) {
   const columns = [
     'task_id', 'task_name', 'mode', 'status', 'text', 'prompt', 'seed', 'resolution', 'task_dir',
-    'original_path', 'transparent_path', 'result_svg_path', 'preview_path', 'metadata_path', 'run_log_path', 'error'
+    'original_path', 'transparent_path', 'result_svg_path', 'preview_path', 'metadata_path', 'run_log_path',
+    'png_transparency', 'svg_fidelity', 'error'
   ]
   await fs.mkdir(path.dirname(summaryPath), { recursive: true })
   const exists = fsSync.existsSync(summaryPath)
@@ -1195,7 +1219,7 @@ ipcMain.handle('art-text/write-task-artifacts', async (event, options) => {
   }
 
   if (runLog !== undefined && runLog !== null && runLog !== '') {
-    const logSaved = await writeArtifactFile(targetPaths.log, runLog, true)
+    const logSaved = await writeArtifactFile(targetPaths.log, appendQualityMetricsToRunLog(runLog, metadataPayload || {}), true)
     if (logSaved) savedFiles.push(logSaved)
   }
 
@@ -1217,6 +1241,7 @@ ipcMain.handle('art-text/write-task-artifacts', async (event, options) => {
     if (summaryTarget) {
       await appendBatchSummaryCsv(summaryTarget, {
         ...summaryRow,
+        ...extractQualityMetrics(metadataPayload || {}),
         task_name: summaryRow.task_name || taskName || path.basename(resolvedTaskDir),
         task_dir: summaryRow.task_dir || resolvedTaskDir,
         original_path: summaryRow.original_path || targetPaths.original,
