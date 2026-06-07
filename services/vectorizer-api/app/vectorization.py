@@ -135,17 +135,18 @@ def _calculate_svg_fidelity(source_img: Image.Image, preview_png_bytes: bytes) -
     try:
         from io import BytesIO
 
+        from skimage.metrics import structural_similarity as ssim
+
         source = source_img.convert("RGBA")
         preview = Image.open(BytesIO(preview_png_bytes)).convert("RGBA")
         if preview.size != source.size:
-            preview = preview.resize(source.size, Image.Resampling.LANCZOS)
+            preview = preview.resize(source.size)
 
-        src = np.array(source, dtype=np.float32)
-        out = np.array(preview, dtype=np.float32)
+        original_np = np.array(source)
+        vector_np = np.array(preview)
 
-        diff = src - out
-        rgba_rmse = float(np.sqrt(np.mean(np.square(diff))))
-        return round(max(0.0, 1.0 - (rgba_rmse / 255.0)) * 100.0, 1)
+        fidelity = float(ssim(original_np, vector_np, multichannel=True, channel_axis=2, data_range=255))
+        return round(max(0.0, min(100.0, fidelity * 100.0)), 1)
     except Exception:
         return None
 

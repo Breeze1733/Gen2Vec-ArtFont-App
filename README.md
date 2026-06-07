@@ -226,6 +226,8 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+- [vectorizer API 说明文档](services/vectorizer-api/README.md)
+
 #### 2. 启动文生图后端（端口 9001）
 
 ```powershell
@@ -242,6 +244,8 @@ uv run txt2img-api
 ```
 
 此时 ComfyUI 不可用的请求会降级为 Pillow stub。
+
+- [txt2img API说明](services\txt2img-api\README.md)
 
 #### 3. 启动桌面端
 
@@ -611,8 +615,6 @@ python -m compileall services/txt2img-api services/vectorizer-api
 cd apps/desktop
 npm run build
 ```
-
-`vectorizer-api` 和 `desktop` 目前没有完整自动化测试。涉及这两块改动时，建议补充手动验证记录。
 
 ### 构建与打包
 

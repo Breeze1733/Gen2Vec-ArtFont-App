@@ -1,86 +1,145 @@
 # Vectorizer API
 
-该服务仅负责“位图 -> SVG 矢量图”转换。
+`vectorizer-api` 是 Gen2Vec ArtFont 的位图矢量化后端，负责把用户上传或文生图生成的 PNG/JPG 艺术字图像处理为透明 PNG、SVG 矢量图和 SVG 回渲染预览图。
+
+服务采用 FastAPI，对外提供本地 HTTP 接口；核心流程为：
+
+```text
+输入 PNG/JPG
+  -> 透明背景处理 / alpha 通道保留
+  -> OpenCV 预处理
+  -> vtracer 路径追踪
+  -> SVG 回渲染 PNG
+  -> 元数据与质量指标
+```
+
+## 功能范围
+
+- 对无 alpha 通道的图片，可使用本地 rembg 模型进行背景移除。
+- 对已有 alpha 通道的图片，直接保留原 alpha，不重复做透明化。
+- 输出透明 PNG、SVG 文本、SVG 回渲染 PNG 预览和结构化 metadata。
+- 记录 `PNG 透明度` 与 `SVG 还原度` 两个质量指标。
+
+## 质量指标
+
+### PNG 透明度
+
+`PNG 透明度` 用于描述输出透明 PNG 的整体透明程度。它不是抠图质量分，而是基于 alpha 通道的画布级统计值。
+
+计算位置：
+
+```text
+services/vectorizer-api/app/image_processing.py
+calculate_png_transparency()
+```
+
+计算公式：
+
+```text
+png_transparency = (1 - mean(alpha) / 255) * 100
+```
+
+其中：
+
+- `alpha` 是 RGBA 图像的 alpha 通道矩阵，取值范围为 `0..255`。
+- `alpha = 0` 表示完全透明。
+- `alpha = 255` 表示完全不透明。
+- 输出单位为百分数，保留 1 位小数。
+
+示例：
+
+| 图像状态 | 结果 |
+| --- | ---: |
+| 全透明 | `100.0%` |
+| 全不透明 | `0.0%` |
+| 大量透明背景 + 少量主体 | 较高 |
+| 主体占满画布 | 较低 |
+
+注意：该指标会受到画布尺寸和裁剪策略影响。小主体放在大透明画布中会得到更高透明度，但这不等同于更高抠图质量。
+
+### SVG 还原度
+
+`SVG 还原度` 用于描述 SVG 回渲染 PNG 与透明 PNG 输入之间的结构相似程度。当前实现使用 SSIM（Structural Similarity，结构相似度）计算，并以百分数输出。
+
+计算位置：
+
+```text
+services/vectorizer-api/app/vectorization.py
+_calculate_svg_fidelity()
+```
+
+计算流程：
+
+1. 将透明 PNG 和 SVG 回渲染 PNG 都转换为 `RGBA`。
+2. 如果两张图尺寸不一致，将 SVG 回渲染图 resize 到原图尺寸。
+3. 使用 `skimage.metrics.structural_similarity` 对 RGBA 四通道图像计算 SSIM。
+4. 将 `0..1` 的 SSIM 值转换为 `0..100` 的百分数。
+
+计算公式：
+
+```text
+svg_fidelity = SSIM(original_rgba, rendered_svg_rgba) * 100
+```
+
+其中：
+
+- `original_rgba` 是透明 PNG 的 RGBA 像素矩阵。
+- `rendered_svg_rgba` 是 SVG 回渲染 PNG 的 RGBA 像素矩阵。
+- `data_range = 255`。
+- 输出单位为百分数，保留 1 位小数。
+
+保留 RGBA 的原因：
+
+- 透明底艺术字的边缘抗锯齿、镂空区域和半透明阴影都存储在 alpha 通道中。
+- 只比较 RGB 会忽略透明区域差异，可能高估 SVG 的真实还原效果。
+- RGBA SSIM 更适合本项目的透明 PNG -> SVG 回渲染闭环核验。
 
 ## 接口
 
-- `GET /healthz`
-- `POST /api/v1/vectorize`（已实现）
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/healthz` | 健康检查 |
+| `POST` | `/shutdown` | 关闭后端进程 |
+| `POST` | `/api/v1/vectorize` | 位图转透明 PNG + SVG |
 
-## 矢量化参数约定（6参数 + 4预设）
+桌面端和 CLI 默认调用：
 
-预设：
+```text
+http://127.0.0.1:8000/api/v1/vectorize
+```
 
-- `clean`
-- `balanced`
-- `detailed`
-- `ultra`
+## 请求示例
 
-6个底层参数：
-
-- `color_precision`
-- `filter_speckle`
-- `corner_threshold`
-- `length_threshold`
-- `layer_difference`
-- `scale`：输入图上采样倍率
-
-说明：当传入 `preset` 时，默认采用预设参数；前端若同时传上这 6 参数，则按传入值覆盖对应预设项。
-
-背景透明处理参数（默认开启）：
-
-- `remove_edge_white_background`：是否使用本地 `rembg` 模型移除背景（默认 `true`）
-- `white_value_threshold`：前端兼容保留字段，当前不参与 `rembg` 背景移除
-- `white_saturation_threshold`：前端兼容保留字段，当前不参与 `rembg` 背景移除
-
-## rembg 离线模型
-
-后端强制使用 `isnet-general-use` 模型，并只从本地加载，不会在运行时下载模型。
-
-开发运行时请放置：
-
-- `services/vectorizer-api/models/rembg/isnet-general-use.onnx`
-
-打包运行时请放置：
-
-- `dist/models/rembg/isnet-general-use.onnx`
-
-模型 MD5 必须是：
-
-- `fc16ebd8b0c10d971d3513d564d01e29`
-
-CPU/GPU 由 `onnxruntime` provider 自动选择：安装 `rembg[cpu]` 时使用 CPU，安装 `rembg[gpu]` 且环境可用时优先 GPU 并回退 CPU。
-
-## `POST /api/v1/vectorize` 示例
-
-用户上传位图：
+### 用户上传图片
 
 ```json
 {
   "source_type": "upload",
+  "image_base64": "data:image/png;base64,...",
+  "image_name": "input.png",
   "vector": {
     "preset": "balanced",
-    "color_precision": 5,
-    "filter_speckle": 6,
-    "corner_threshold": 45,
-    "length_threshold": 5,
-    "layer_difference": 10,
+    "color_precision": 4,
+    "filter_speckle": 18,
+    "corner_threshold": 70,
+    "length_threshold": 12,
+    "layer_difference": 20,
     "scale": 2,
     "evaluate_quality": true,
-    "remove_edge_white_background": true,
-    "white_value_threshold": 245,
-    "white_saturation_threshold": 20
-  },
-  "image_base64": "data:image/png;base64,....",
-  "image_name": "input.png"
+    "remove_edge_white_background": true
+  }
 }
 ```
 
-系统生成位图：
+### 文生图流水线图片
 
 ```json
 {
   "source_type": "generated",
+  "text": "七里香",
+  "prompt": "清新国风，墨绿色金边，植物叶片装饰",
+  "resolution": "1024x1024",
+  "seed": 42,
   "vector": {
     "preset": "detailed",
     "color_precision": 6,
@@ -90,35 +149,126 @@ CPU/GPU 由 `onnxruntime` provider 自动选择：安装 `rembg[cpu]` 时使用 
     "layer_difference": 4,
     "scale": 3,
     "evaluate_quality": true,
-    "remove_edge_white_background": true,
-    "white_value_threshold": 245,
-    "white_saturation_threshold": 20
+    "remove_edge_white_background": true
   },
   "generated_image": {
-    "image_base64": "data:image/png;base64,...."
+    "file_path": "outputs/task_xxx/original.png"
   }
 }
 ```
 
-## 响应
+## 响应字段
 
-- `png`：SVG 回渲染 PNG 预览（data URL）
-- `svg`：标准 SVG 文本
-- `metadata`：参数、耗时、文件大小等运行信息
+```json
+{
+  "transparent_png": "data:image/png;base64,...",
+  "preview_png": "data:image/png;base64,...",
+  "png": "data:image/png;base64,...",
+  "svg": "<svg ...></svg>",
+  "metadata": {
+    "engine": "vectorizer-api-split-pipeline",
+    "preprocess": {
+      "transparent_size": {
+        "width": 1024,
+        "height": 1024
+      },
+      "png_transparency": 72.4
+    },
+    "quality": {
+      "svg_fidelity": 94.7
+    }
+  }
+}
+```
 
-说明：`evaluate_quality` 字段当前仅保留前端兼容，不参与后端评分计算。
+字段说明：
+
+- `transparent_png`：透明背景 PNG，data URL 格式。
+- `preview_png` / `png`：SVG 回渲染后的 PNG 预览，data URL 格式。
+- `svg`：格式化后的 SVG 文本。
+- `metadata.preprocess.png_transparency`：PNG 透明度，百分数。
+- `metadata.quality.svg_fidelity`：SVG 还原度，百分数。
+
+## 透明背景处理逻辑
+
+入口函数为 `preprocess_image()`，位于 `app/image_processing.py`。
+
+处理规则：
+
+1. 如果输入图片已有 alpha 通道，直接转换为 `RGBA` 并保留原图透明信息。
+2. 如果输入图片没有 alpha 通道，并且 `remove_edge_white_background=true`，使用本地 rembg 模型移除背景。
+3. 对 rembg 输出进行边缘保留降噪、抗锯齿保留、主体裁剪和颜色量化。
+4. 无论是否执行背景移除，最终都会计算 `PNG 透明度`。
+
+已有 alpha 通道的判定：
+
+```python
+has_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
+```
+
+因此，透明 PNG 输入不会被重复抠图，但仍会参与透明度统计。
+
+## 矢量化参数
+
+服务支持 4 个预设和 6 个底层参数。传入 `preset` 后会加载对应默认值；如果请求中同时传入底层参数，则以请求值覆盖预设值。
+
+| 预设 | color_precision | filter_speckle | corner_threshold | length_threshold | layer_difference | scale | 适用场景 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `clean` | 2 | 48 | 120 | 30 | 38 | 2 | 路径更少，文件更小，适合干净图形 |
+| `balanced` | 4 | 18 | 70 | 12 | 20 | 2 | 默认推荐，平衡细节和体积 |
+| `detailed` | 6 | 2 | 30 | 3 | 4 | 3 | 保留更多颜色层次和边缘细节 |
+| `ultra` | 8 | 1 | 20 | 2 | 2 | 3 | 最大细节，文件体积也最大 |
+
+参数含义：
+
+- `color_precision`：颜色精度，值越高颜色分层越细。
+- `filter_speckle`：小噪点过滤阈值，值越高越倾向删除小区域。
+- `corner_threshold`：角点阈值，影响路径转角保留。
+- `length_threshold`：路径片段长度阈值。
+- `layer_difference`：颜色层之间的差异阈值。
+- `scale`：矢量化前的上采样倍率。
+
+## rembg 离线模型
+
+后端固定使用 `isnet-general-use` 模型，并只从本地加载，不会在运行时下载模型。
+
+开发运行时放置路径：
+
+```text
+services/vectorizer-api/models/rembg/isnet-general-use.onnx
+```
+
+打包运行时放置路径：
+
+```text
+dist/models/rembg/isnet-general-use.onnx
+```
+
+模型 MD5：
+
+```text
+fc16ebd8b0c10d971d3513d564d01e29
+```
+
+如果模型不存在或校验失败，背景移除会返回明确错误。
 
 ## 本地运行
 
-```bash
+```powershell
 cd services/vectorizer-api
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-## 打包为 EXE（Windows）
+健康检查：
+
+```powershell
+curl http://127.0.0.1:8000/healthz
+```
+
+## 打包为 EXE
 
 在 `services/vectorizer-api` 目录执行：
 
@@ -126,26 +276,30 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 powershell -ExecutionPolicy Bypass -File .\scripts\build-backend-exe.ps1
 ```
 
-打包成功后产物在：
+打包产物：
 
-- `services/vectorizer-api/dist/vectorizer-backend.exe`
+```text
+services/vectorizer-api/dist/vectorizer-backend.exe
+```
 
-## 别人怎么用打包好的后端
-
-### 方式 1：命令行启动（推荐）
+启动打包后的后端：
 
 ```powershell
 .\vectorizer-backend.exe --host 127.0.0.1 --port 8000
 ```
 
-### 方式 2：双击脚本启动
+也可以双击：
 
-双击：
+```text
+services/vectorizer-api/scripts/start-backend.bat
+```
 
-- `services/vectorizer-api/scripts/start-backend.bat`
+## 相关源码
 
-它会自动启动后端监听 `127.0.0.1:8000`。
-
-### 联调说明
-
-桌面端默认请求 `http://127.0.0.1:8000/api/v1`，因此只要 exe 运行中，前端矢量化功能即可直接调用。
+| 文件 | 说明 |
+| --- | --- |
+| `app/main.py` | FastAPI 路由、请求来源解析、响应组装 |
+| `app/models.py` | Pydantic 请求/响应模型 |
+| `app/image_processing.py` | 图片解码、透明背景处理、PNG 透明度计算 |
+| `app/vectorization.py` | vtracer 转 SVG、SVG 回渲染、SVG 还原度计算 |
+| `scripts/build-backend-exe.ps1` | PyInstaller 打包脚本 |
