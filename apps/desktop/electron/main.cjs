@@ -632,16 +632,21 @@ function waitForSplashAction() {
 }
 
 ipcMain.on('splash:action', (_event, data) => {
-  // data 可能是 { action: 'xxx' } 对象或 'xxx' 字符串（preload 传的是对象）
+  // data 可以是 { action: 'xxx' } 对象或 'xxx' 字符串（preload 传的是对象）
   let action
   if (typeof data === 'string') {
     action = data
   } else if (data && typeof data === 'object') {
     action = data.action
   }
+
   if (action) {
-    splashActions.emit(SPLASH_ACTION_EVENT, action)
-    if (action === 'exit-app') {
+    // 对所有非 exit-app 动作，广播给 waitForSplashAction（跳过、下载、重试）
+    if (action !== 'exit-app') {
+      splashActions.emit(SPLASH_ACTION_EVENT, action)
+    } else {
+      // 退出：先杀后端，再退出
+      shutdownBackends()
       app.quit()
     }
   }

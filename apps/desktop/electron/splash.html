@@ -516,6 +516,15 @@
         // Handle error
         if (phase === 'error') {
           showButtons(true)
+          // 用 cloneNode 彻底清除所有旧监听
+          const newSkip = btnSkip.cloneNode(true)
+          const newDownload = btnDownload.cloneNode(true)
+          btnSkip.replaceWith(newSkip)
+          btnDownload.replaceWith(newDownload)
+          // 重新获取 DOM 引用
+          btnSkip = document.getElementById('btnSkip')
+          btnDownload = document.getElementById('btnDownload')
+
           btnSkip.textContent = '退出'
           btnSkip.className = 'btn btn-danger'
           btnDownload.textContent = '重试'
@@ -525,20 +534,6 @@
           userActionResolved = false
           setDownloadDetail('')
 
-          // 替换按钮监听：移除所有旧监听，只留下所需的
-          // 用 replaceWith + clone 清掉所有旧监听
-          const newBtnSkip = btnSkip.cloneNode(true)
-          const newBtnDownload = btnDownload.cloneNode(true)
-          btnSkip.replaceWith(newBtnSkip)
-          btnDownload.replaceWith(newBtnDownload)
-          // 重新获取 DOM 引用
-          // 好，我们用更轻量的方式——直接替换 onclick
-          btnSkip.onclick = null
-          btnDownload.onclick = null
-          // 重新绑定
-          const skipParent = btnSkip.parentNode
-          const dlParent = btnDownload.parentNode
-          // 用最简单的方式：覆盖 onclick
           btnSkip.onclick = function exitHandler() {
             if (userActionResolved) return
             userActionResolved = true
