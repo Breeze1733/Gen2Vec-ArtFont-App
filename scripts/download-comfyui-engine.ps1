@@ -311,11 +311,21 @@ function Install-ComfyUIGGUF {
     $urls = ($MirrorSources | ForEach-Object { Get-GGUFSDownloadUrl -Mirror $_ } | Select-Object -Unique)
 
     $zipPath = Join-Path $DestDir "ComfyUI-GGUF.zip"
-    $dl = Try-DownloadWithFallback -Component "ComfyUI-GGUF" -FallbackUrls $urls -OutputPath $zipPath -MinBytes 1024
+    $dl = Try-DownloadWithFallback -Component "ComfyUI-GGUF" -FallbackUrls $urls -OutputPath $zipPath -MinBytes 10240
 
     if (-not $dl.Success) {
         Emit "ERROR" "ComfyUI-GGUF|download|all sources failed"
         Write-Color "  all download sources failed." Red
+        return $false
+    }
+
+    # Validate zip header (PK\x03\x04 or PK\x05\x06)
+    $header = [System.IO.File]::ReadAllBytes($zipPath)[0..1]
+    if ($header[0] -ne 0x50 -or $header[1] -ne 0x4B) {
+        Write-Color ("  file is not a valid zip (bad header), retrying with next source...") Yellow
+        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        Emit "ERROR" "ComfyUI-GGUF|download|not a valid zip file"
+        Write-Color "  all download sources returned invalid files." Red
         return $false
     }
 
