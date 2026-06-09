@@ -557,20 +557,15 @@
         // Handle download progress (step 1 = engine, step 2 = models)
         if (phase === 'downloading' && fileIndex !== undefined && totalFiles) {
           showButtons(false)
+          // 主进度条始终显示基于文件计数的整体进度
           const pct = totalFiles > 0 ? Math.round((fileIndex / totalFiles) * 100) : -1
-          // 引擎下载无 speed/eta 时保持自由动画
-          const hasSpeedInfo = speed || eta
-          setProgress(hasSpeedInfo || totalFiles === 0 ? -1 : pct)
+          setProgress(pct)
           const label = step === 1 ? '引擎' : '模型'
           setDownloadDetail(fileName
             ? `${label}: ${fileName} ${fileSize ? `(${fileSize})` : ''} (${fileIndex}/${totalFiles})`
             : `${fileIndex}/${totalFiles}`
           )
-          if (hasSpeedInfo) {
-            setDownloadStats(speed || '', eta || '')
-          } else {
-            setDownloadStats('', '')
-          }
+          setDownloadStats(speed || '', eta || '')
           setFileProgress(filePercent !== undefined ? filePercent : -1)
         }
 
