@@ -39,7 +39,7 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
 
 | 进程 | 管理者 | 职责 |
 |------|--------|------|
-| **Electron** | 用户 | 文件准备（解压引擎、下载模型）、spawn 两个 FastAPI 后端、轮询 healthz、退出时调 /shutdown |
+| **Electron** | 用户 | 文件准备（下载引擎、下载模型）、spawn 两个 FastAPI 后端、轮询 healthz、退出时调 /shutdown |
 | **txt2img-backend.exe** | **Electron** | 管理 ComfyUI 进程的完整生命周期（spawn、端口轮询、config 写入、退出时清理） |
 | **ComfyUI** | **txt2img-backend.exe** | GPU 推理 |
 
@@ -70,7 +70,7 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
     │       ├── models/                  (矢量化模型)
     │       │   └── rembg/
     │       │       └── isnet-general-use.onnx
-    │       ├── ComfyUI-Engine.exe    (ComfyUI 自解压包, ~2 GB)
+    │       ├── download-comfyui-engine.ps1 (ComfyUI 引擎 + GGUF 下载脚本)
     │       ├── download-models.ps1   (模型下载脚本)
     │       └── README.md
     └── ... (Electron 运行时文件)
@@ -89,9 +89,9 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
 │       ├── models/                                 ← 矢量化模型 (与 EXE 同级)
 │       │   └── rembg/
 │       │       └── isnet-general-use.onnx
-│       ├── ComfyUI-Engine.exe
+│       ├── download-comfyui-engine.ps1              ← 引擎下载脚本
 │       ├── download-models.ps1
-│       ├── ComfyUI_windows_portable_nvidia/    ← Engine.exe 解压产物
+│       ├── ComfyUI_windows_portable_nvidia/    ← 下载解压产物
 │       │   └── ComfyUI_windows_portable/
 │       │       ├── python_embeded/
 │       │       ├── ComfyUI/
@@ -114,18 +114,17 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
 
 ## 3. 启动流程
 
-每次启动都遵循同一个流程，其中"解压引擎"和"下载模型"两步通过检测文件是否存在自动跳过，大部分用户只在首次遇到。
+每次启动都遵循同一个流程，其中"下载引擎"和"下载模型"两步通过检测文件是否存在自动跳过，大部分用户只在首次遇到。
 
 ```
 应用启动 (每次都会走)
   │
   ├─ 1. 显示启动画面 (splash window)，展示当前操作和进度
   │
-  ├─ 2. 检查并解压 ComfyUI  ← 仅首次
-  │     if ComfyUI_windows_portable_nvidia/ 不存在:
-  │       spawn ComfyUI-Engine.exe (7z 自解压, 静默)
-  │       等待解压完成 (检查标志文件或进程退出)
-  │     进度: "正在解压推理引擎..."
+  ├─ 2. 检查并下载 ComfyUI  ← 仅首次
+  │     if ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable/ComfyUI/main.py 不存在:
+  │       spawn powershell -File download-comfyui-engine.ps1 -Electron -DestDir backend/
+  │       等待下载 + 解压完成（输出 ENGINEDL: 行，检查 sentinel 文件）
   │     else → 跳过此步，直接进入 3
   │
   ├─ 3. 检查并下载模型  ← 仅首次（或模型不完整时）
@@ -300,11 +299,12 @@ async function isPortInUse(port) {
     "files": ["dist/**/*", "electron/**/*"],
     "extraResources": [
       { "from": "../../services/txt2img-api/dist/txt2img-backend.exe", "to": "backend/txt2img-backend.exe" },
-      { "from": "../../services/txt2img-api/dist/ComfyUI-Engine.exe", "to": "backend/ComfyUI-Engine.exe" },
-      { "from": "../../services/txt2img-api/dist/download-models.ps1", "to": "backend/download-models.ps1" },
+      { "from": "../../scripts/download-comfyui-engine.ps1", "to": "backend/download-comfyui-engine.ps1" },
+      { "from": "../../scripts/download-models.ps1", "to": "backend/download-models.ps1" },
       { "from": "../../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
       { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
-      { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" }
+      { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" },
+      { "from": "../../apps/cli/dist/gen2vec_cli.exe", "to": "../gen2vec_cli.exe" }
     ],
     "win": { "target": "nsis" },
     "nsis": {
@@ -339,7 +339,7 @@ function getBackendDir() {
 ```
 resources/backend/
 ├── txt2img-backend.exe          ← sys.executable
-├── ComfyUI-Engine.exe
+├── 
 └── ComfyUI_windows_portable_nvidia/
     └── ComfyUI_windows_portable/
         └── python_embeded/python.exe
@@ -418,8 +418,8 @@ MODELDL:READY
 
 | 阶段 | 操作 | 预计耗时 |
 |------|------|----------|
-| 解压 ComfyUI | `ComfyUI-Engine.exe` 自解压 2GB | ~30s（仅首次） |
-| 下载模型 | 10 个文件, ~58GB | 30min-2h（仅首次，取决于网速） |
+| 解压 ComfyUI | `` 自解压 2GB | ~30s（仅首次） |
+| 下载 ComfyUI 引擎 | download-comfyui-engine.ps1 下载并解压 ~2 GB | ~5-15min（仅首次，取决于网速） |
 | 启动 txt2img-backend | PyInstaller 解压 + Python 初始化 | ~3s |
 | 启动 vectorizer-backend | PyInstaller 解压 + Python 初始化 | ~2s |
 | ComfyUI 冷启动 | python_embeded + custom nodes 加载 | ~20-30s (network_mode=offline) |
@@ -445,25 +445,31 @@ MODELDL:READY
 ## 10. 打包命令
 
 ```powershell
-# 1. 构建后端 EXE
-cd services/txt2img-api
-.\scripts\build-backend-exe.ps1
+# 1. 构建后端 EXE（使用 PyInstaller，具体命令见各服务目录脚本）
+#    - services/txt2img-api/ → dist/txt2img-backend.exe
+#    - services/vectorizer-api/ → dist/vectorizer-backend.exe + dist/models/
 
-cd services/vectorizer-api
-.\scripts\build-backend-exe.ps1
+# 2. 构建 CLI EXE
+cd apps/cli
+npm install
+npm run build
+# 产物: apps/cli/dist/gen2vec_cli.exe
 
-# 2. 确认 dist 目录内容
-#    txt2img-api/dist/ 应包含:
-#      - txt2img-backend.exe
-#      - ComfyUI-Engine.exe
-#      - download-models.ps1
-#      - README.md
-#    vectorizer-api/dist/ 应包含:
-#      - vectorizer-backend.exe
-#      - models/rembg/isnet-general-use.onnx
+# 3. 确认打包前置文件清单
+#    必须存在:
+#      services/txt2img-api/dist/txt2img-backend.exe
+#      services/txt2img-api/dist/README.md
+#      services/vectorizer-api/dist/vectorizer-backend.exe
+#      services/vectorizer-api/dist/models/rembg/isnet-general-use.onnx
+#      apps/cli/dist/gen2vec_cli.exe
+#      scripts/download-comfyui-engine.ps1
+#      scripts/download-models.ps1
+#    不应存在（已废弃）:
+#      services/txt2img-api/dist/ComfyUI-Engine.exe
 
-# 3. 构建 Electron 安装包
+# 4. 构建 Electron 安装包
 cd apps/desktop
+npm install
 npm run electron:build
 # 产物: apps/desktop/release/矢量艺术字生成器 Setup x.x.x.exe
 
@@ -471,5 +477,9 @@ npm run electron:build
 
 以下均为可选增强项，核心打包流程已全部实现：
 
+- [x] ComfyUI 引擎在线下载（`download-comfyui-engine.ps1` — 首次运行时自动拉取官方 portable + GGUF）
+- [x] AI 模型在线下载（`download-models.ps1` — 首次运行时从 HuggingFace 镜像拉取）
+- [x] 启动画面进度展示（splash window 实时显示下载/解压/启动进度）
+- [x] ComfyUI-Manager 离线模式（启动前自动写入 `network_mode = offline`）
 - [ ] "稍后下载模型"菜单入口（IPC 接口 `art-text/download-models` 已就绪，缺 UI 菜单项）
 - [ ] 主窗口内嵌模型下载进度组件（配合菜单入口使用）

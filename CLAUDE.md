@@ -249,13 +249,14 @@ cd services/vectorizer-api
 桌面端 `apps/desktop/package.json` 的 `build.extraResources` 当前会复制：
 
 - `txt2img-backend.exe`
+- `download-comfyui-engine.ps1`
 - `download-models.ps1`
 - `README.md`
 - `vectorizer-backend.exe`
 - `models/`
 - `gen2vec_cli.exe`
 
-`electron/main.cjs` 已实现 `ComfyUI-Engine.exe` 检测、解压和模型下载流程；如果需要在安装包中内置 ComfyUI 自解压包，必须确认 `package.json` 的 `extraResources` 包含该文件，否则运行时会走降级/跳过逻辑。
+`electron/main.cjs` 已实现 ComfyUI 引擎下载（`download-comfyui-engine.ps1`）和模型下载（`download-models.ps1`）流程。打包时不再需要包含 ComfyUI-Engine.exe（7z SFX），引擎从 GitHub Releases 自动下载。
 
 ## 修改风险点
 

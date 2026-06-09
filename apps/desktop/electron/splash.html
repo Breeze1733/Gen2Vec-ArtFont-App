@@ -486,13 +486,15 @@
         }
       })
 
+      let currentPromptStep = 0
+
       btnSkip.addEventListener('click', () => {
         if (userActionResolved) return
         userActionResolved = true
         btnSkip.disabled = true
         btnDownload.disabled = true
         if (window.artTextApp?.sendSplashAction) {
-          window.artTextApp.sendSplashAction({ action: 'skip-models' })
+          window.artTextApp.sendSplashAction({ action: 'skip' })
         }
       })
 
@@ -504,7 +506,7 @@
         setStatus('正在准备下载...')
         setProgress(-1)
         if (window.artTextApp?.sendSplashAction) {
-          window.artTextApp.sendSplashAction({ action: 'download-models' })
+          window.artTextApp.sendSplashAction({ action: 'download' })
         }
       })
 
@@ -516,19 +518,24 @@
       function handleProgress(data) {
         if (!data || typeof data !== 'object') return
 
-        const { step, phase, message, percent, fileIndex, totalFiles, fileName, fileSize, speed, eta, filePercent, detail } = data
+        const { step, phase, message, percent, fileIndex, totalFiles, fileName, fileSize, speed, eta, filePercent, detail, promptLabel, promptConfirm, promptDetail } = data
 
         if (step) updateSteps(step, phase)
         if (message) setStatus(message, phase === 'error' ? 'error' : phase === 'done' || phase === 'complete' ? 'success' : '')
         if (percent !== undefined) setProgress(percent)
 
-        // Handle model download prompt
+        // Handle download prompt (step 1 = engine, step 2 = models)
         if (phase === 'prompt') {
+          currentPromptStep = step
           showButtons(true)
           btnSkip.disabled = false
           btnDownload.disabled = false
           userActionResolved = false
-          setDownloadDetail(totalFiles ? `需要下载 ${totalFiles} 个模型文件 (约 58 GB)` : '')
+          btnSkip.textContent = promptLabel || '跳过'
+          btnSkip.className = 'btn btn-secondary'
+          btnDownload.textContent = promptConfirm || '开始下载'
+          btnDownload.className = 'btn btn-primary'
+          setDownloadDetail(promptDetail || '')
           setProgress(0)
           setDownloadStats('', '')
           setFileProgress(-1)
@@ -547,16 +554,23 @@
           setFileProgress(-1)
         }
 
-        // Handle download progress
+        // Handle download progress (step 1 = engine, step 2 = models)
         if (phase === 'downloading' && fileIndex !== undefined && totalFiles) {
           showButtons(false)
           const pct = totalFiles > 0 ? Math.round((fileIndex / totalFiles) * 100) : -1
-          setProgress(pct)
+          // 引擎下载无 speed/eta 时保持自由动画
+          const hasSpeedInfo = speed || eta
+          setProgress(hasSpeedInfo || totalFiles === 0 ? -1 : pct)
+          const label = step === 1 ? '引擎' : '模型'
           setDownloadDetail(fileName
-            ? `当前: ${fileName} ${fileSize ? `(${fileSize})` : ''} (${fileIndex}/${totalFiles})`
+            ? `${label}: ${fileName} ${fileSize ? `(${fileSize})` : ''} (${fileIndex}/${totalFiles})`
             : `${fileIndex}/${totalFiles}`
           )
-          setDownloadStats(speed || '', eta || '')
+          if (hasSpeedInfo) {
+            setDownloadStats(speed || '', eta || '')
+          } else {
+            setDownloadStats('', '')
+          }
           setFileProgress(filePercent !== undefined ? filePercent : -1)
         }
 

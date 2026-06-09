@@ -10,9 +10,9 @@ let splashWin = null
 let mainWin = null
 let txt2imgProc = null
 let vectorizerProc = null
-let extractProc = null
+let engineDownloadProc = null
 let modelDownloadProc = null
-let startupState = { ready: false, modelsReady: false, backendsRunning: false, modelsSkipped: false }
+let startupState = { ready: false, modelsReady: false, backendsRunning: false, modelsSkipped: false, engineSkipped: false }
 let startupError = null
 
 // 强制 Windows 使用高性能独立显卡（NVIDIA/AMD），避免默认分配集显导致 WebGL 检测不到独显
@@ -70,59 +70,198 @@ function isPortInUse(port) {
 
 // ── ComfyUI 引擎管理 ──
 
-function getComfyUIExtractDir(backendDir) {
-  return path.join(backendDir, 'ComfyUI_windows_portable_nvidia')
-}
-
 function getComfyUIPortableDir(backendDir) {
-  return path.join(getComfyUIExtractDir(backendDir), 'ComfyUI_windows_portable')
+  return path.join(backendDir, 'ComfyUI_windows_portable_nvidia', 'ComfyUI_windows_portable')
 }
 
-function isComfyUIExtracted(backendDir) {
+function isComfyUIReady(backendDir) {
   if (!backendDir) return true // 开发模式跳过
   const sentinel = path.join(getComfyUIPortableDir(backendDir), 'ComfyUI', 'main.py')
   return fsSync.existsSync(sentinel)
 }
 
-function extractComfyUI(backendDir, onProgress) {
+function downloadComfyUIEngine(backendDir, onProgress) {
   return new Promise((resolve, reject) => {
-    const engineExe = path.join(backendDir, 'ComfyUI-Engine.exe')
-    if (!fsSync.existsSync(engineExe)) {
-      reject(new Error(`未找到推理引擎文件: ${engineExe}`))
+    const ps1Path = path.join(backendDir, 'download-comfyui-engine.ps1')
+    if (!fsSync.existsSync(ps1Path)) {
+      reject(new Error(`未找到引擎下载脚本: ${ps1Path}`))
       return
     }
 
     if (onProgress) {
-      onProgress({ step: 1, phase: 'extracting', message: '正在解压推理引擎 (ComfyUI-Engine.exe)...', percent: -1 })
+      onProgress({ step: 1, phase: 'downloading', message: '正在准备下载推理引擎...', percent: -1, fileIndex: 0, totalFiles: 0 })
     }
 
-    const proc = spawn(engineExe, [], {
+    const proc = spawn('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', ps1Path,
+      '-Electron',
+      '-DestDir', backendDir
+    ], {
       cwd: backendDir,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })
-    extractProc = proc
+    engineDownloadProc = proc
+
+    let totalFiles = 0
+    let completedFiles = 0
+    let failedFiles = 0
+    let currentFileName = ''
+    let currentFileSize = ''
+    let finalResult = null
+    let stdoutBuffer = ''
+
+    const handleEngineOutputLines = (lines) => {
+      for (const line of lines) {
+        if (!line.startsWith('ENGINEDL:')) continue
+        const parts = line.substring(9).split('|')
+        const type = parts[0]
+
+        switch (type) {
+          case 'TOTAL':
+            totalFiles = parseInt(parts[1], 10) || 0
+            break
+          case 'START':
+            currentFileName = parts[1] || ''
+            currentFileSize = parts[2] || ''
+            if (onProgress) {
+              onProgress({
+                step: 1, phase: 'downloading',
+                message: `正在下载 (${completedFiles + 1}/${totalFiles || '?'}) ${currentFileName}`,
+                percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
+                fileIndex: completedFiles + 1,
+                totalFiles,
+                fileName: currentFileName,
+                fileSize: currentFileSize
+              })
+            }
+            break
+          case 'DONE':
+          case 'SKIP':
+            completedFiles++
+            const doneName = parts[1] || currentFileName
+            if (onProgress) {
+              onProgress({
+                step: 1, phase: 'downloading',
+                message: type === 'SKIP' ? `跳过: ${doneName}` : `完成: ${doneName}`,
+                percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
+                fileIndex: completedFiles,
+                totalFiles,
+                fileName: doneName
+              })
+            }
+            break
+          case 'ERROR':
+            completedFiles++
+            failedFiles++
+            const errName = parts[1] || currentFileName
+            if (onProgress) {
+              onProgress({
+                step: 1, phase: 'downloading',
+                message: `下载失败: ${errName}`,
+                detail: parts[2] ? `错误: ${parts.slice(2).join(':')}` : '',
+                percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
+                fileIndex: completedFiles,
+                totalFiles,
+                fileName: errName
+              })
+            }
+            break
+          case 'COMPLETE':
+            const ok = parseInt(parts[1], 10) || 0
+            const skip = parseInt(parts[2], 10) || 0
+            const fail = parseInt(parts[3], 10) || 0
+            finalResult = { ok, skip, fail }
+            if (onProgress) {
+              onProgress({
+                step: 1,
+                phase: fail > 0 ? 'error' : 'complete',
+                message: fail > 0 ? `引擎下载失败 (${fail} 个组件失败)` : '推理引擎就绪',
+                percent: fail > 0 ? 0 : 100,
+                fileIndex: totalFiles || completedFiles,
+                totalFiles: totalFiles || completedFiles,
+                result: finalResult
+              })
+            }
+            break
+          case 'READY':
+            break
+        }
+      }
+    }
+
+    proc.stdout.on('data', (chunk) => {
+      stdoutBuffer += chunk.toString()
+      const lines = stdoutBuffer.split(/\r?\n/)
+      stdoutBuffer = lines.pop() || ''
+      handleEngineOutputLines(lines.filter(Boolean))
+    })
+
+    proc.stderr.on('data', (chunk) => {
+      console.warn('[download-comfyui-engine stderr]', chunk.toString())
+    })
 
     proc.on('error', (err) => {
-      if (extractProc === proc) extractProc = null
-      reject(new Error(`启动解压程序失败: ${err.message}`))
+      if (engineDownloadProc === proc) engineDownloadProc = null
+      reject(new Error(`启动引擎下载脚本失败: ${err.message}`))
     })
 
     proc.on('close', (code) => {
-      if (extractProc === proc) extractProc = null
-      if (code !== 0) {
-        reject(new Error(`推理引擎解压失败 (退出码: ${code})`))
+      if (engineDownloadProc === proc) engineDownloadProc = null
+      if (stdoutBuffer.trim()) {
+        handleEngineOutputLines([stdoutBuffer.trim()])
+        stdoutBuffer = ''
+      }
+      if (code !== 0 && failedFiles === 0) {
+        reject(new Error(`引擎下载脚本异常退出 (退出码: ${code})`))
         return
       }
-      // 验证解压产物
-      if (!isComfyUIExtracted(backendDir)) {
-        reject(new Error('推理引擎解压后未找到 ComfyUI/main.py，可能解压不完整'))
+      const result = finalResult || {
+        ok: code === 0 && failedFiles === 0 && totalFiles > 0 ? totalFiles : completedFiles - failedFiles,
+        skip: 0,
+        fail: failedFiles
+      }
+      if (!finalResult && code === 0 && failedFiles === 0 && onProgress) {
+        onProgress({
+          step: 1,
+          phase: 'complete',
+          message: '推理引擎就绪',
+          percent: 100,
+          fileIndex: totalFiles || completedFiles,
+          totalFiles: totalFiles || completedFiles,
+          result
+        })
+      }
+      if (failedFiles > 0 && onProgress && !finalResult) {
+        onProgress({
+          step: 1,
+          phase: 'error',
+          message: `引擎下载失败 (${failedFiles} 个组件失败)`,
+          percent: 0,
+          fileIndex: completedFiles,
+          totalFiles: totalFiles || completedFiles
+        })
+      }
+      // 验证 sentinel（COMPLETE 已处理错误的情况会被 prior-reject 跳过）
+      if (failedFiles > 0) {
+        // COMPLETE 已显示错误，静默结束（不额外弹窗）
+        resolve(result)
         return
       }
-      if (onProgress) {
-        onProgress({ step: 1, phase: 'done', message: '推理引擎就绪', percent: 100 })
+      if (!isComfyUIReady(backendDir)) {
+        reject(new Error('引擎下载后未找到 ComfyUI/main.py'))
+        return
       }
-      resolve()
+      // 验证 GGUF 也存在
+      const ggufSentinel = path.join(getComfyUIPortableDir(backendDir), 'ComfyUI', 'custom_nodes', 'ComfyUI-GGUF', 'nodes.py')
+      if (!fsSync.existsSync(ggufSentinel)) {
+        reject(new Error('引擎下载后未找到 ComfyUI-GGUF custom node'))
+        return
+      }
+      resolve(result)
     })
   })
 }
@@ -179,7 +318,7 @@ function downloadModels(backendDir, onProgress) {
     }
 
     if (onProgress) {
-      onProgress({ step: 2, phase: 'downloading', message: '正在准备下载...', percent: 0, fileIndex: 0, totalFiles: 0 })
+      onProgress({ step: 2, phase: 'downloading', message: '正在准备下载...', percent: -1, fileIndex: 0, totalFiles: 0 })
     }
 
     const proc = spawn('powershell.exe', [
@@ -622,16 +761,33 @@ async function runStartupSequence(splashWin) {
   }
 
   try {
-    // ── 步骤 1: 检查 / 解压 ComfyUI 引擎 ──
+    // ── 步骤 1: 检查 / 下载 ComfyUI 引擎 ──
     currentStartupStep = 1
     sendProgress({ step: 1, phase: 'checking', message: '正在检查推理引擎...', percent: -1 })
 
     if (backendDir) {
-      const comfyuiExe = path.join(backendDir, 'ComfyUI-Engine.exe')
-      if (!fsSync.existsSync(comfyuiExe)) {
-        sendProgress({ step: 1, phase: 'done', message: '未包含推理引擎包，使用本地降级引擎', percent: 100 })
-      } else if (!isComfyUIExtracted(backendDir)) {
-        await extractComfyUI(backendDir, sendProgress)
+      const enginePs1 = path.join(backendDir, 'download-comfyui-engine.ps1')
+      if (!fsSync.existsSync(enginePs1)) {
+        sendProgress({ step: 1, phase: 'done', message: '未包含引擎下载脚本，使用本地降级引擎', percent: 100 })
+        startupState.engineSkipped = true
+      } else if (!isComfyUIReady(backendDir)) {
+        sendProgress({
+          step: 1, phase: 'prompt',
+          message: '需要下载推理引擎 (ComfyUI + GGUF，约 2 GB)',
+          percent: 0,
+          promptLabel: '跳过',
+          promptConfirm: '开始下载',
+          promptDetail: '下载后即可使用 GPU 推理生成艺术字'
+        })
+
+        const action = await waitForSplashAction()
+        if (action === 'download') {
+          await downloadComfyUIEngine(backendDir, sendProgress)
+          startupState.engineSkipped = false
+        } else {
+          sendProgress({ step: 1, phase: 'done', message: '已跳过引擎下载，文生图使用本地降级引擎', percent: 100 })
+          startupState.engineSkipped = true
+        }
       } else {
         sendProgress({ step: 1, phase: 'done', message: '推理引擎就绪', percent: 100 })
       }
@@ -643,31 +799,41 @@ async function runStartupSequence(splashWin) {
     currentStartupStep = 2
     sendProgress({ step: 2, phase: 'checking', message: '正在检查 AI 模型...', percent: -1 })
 
-    const modelsExist = await checkModelsExist(backendDir)
-    if (!modelsExist && backendDir) {
-      const ps1Path = path.join(backendDir, 'download-models.ps1')
-      if (!fsSync.existsSync(ps1Path)) {
-        sendProgress({ step: 2, phase: 'done', message: '未包含模型下载脚本，使用本地降级引擎', percent: 100 })
-        startupState.modelsSkipped = true
-      } else {
-        // 等待用户在 splash 中的选择
-        sendProgress({ step: 2, phase: 'prompt', message: '首次运行需要下载 AI 模型 (约 58 GB)', percent: 0 })
-
-        const action = await waitForSplashAction()
-        if (action === 'download-models') {
-          const result = await downloadModels(backendDir, sendProgress)
-          startupState.modelsReady = result.fail === 0
-          startupState.modelsSkipped = false
-        } else {
-          // 用户选择跳过
-          sendProgress({ step: 2, phase: 'skipped', message: '已跳过模型下载，文生图使用本地降级引擎', percent: 100 })
-          startupState.modelsSkipped = true
-          startupState.modelsReady = false
-        }
-      }
+    if (startupState.engineSkipped) {
+      sendProgress({ step: 2, phase: 'done', message: '引擎未安装，跳过模型检查', percent: 100 })
+      startupState.modelsSkipped = true
     } else {
-      sendProgress({ step: 2, phase: 'done', message: 'AI 模型就绪', percent: 100 })
-      startupState.modelsReady = true
+      const modelsExist = await checkModelsExist(backendDir)
+      if (!modelsExist && backendDir) {
+        const ps1Path = path.join(backendDir, 'download-models.ps1')
+        if (!fsSync.existsSync(ps1Path)) {
+          sendProgress({ step: 2, phase: 'done', message: '未包含模型下载脚本，使用本地降级引擎', percent: 100 })
+          startupState.modelsSkipped = true
+        } else {
+          sendProgress({
+            step: 2, phase: 'prompt',
+            message: '首次运行需要下载 AI 模型 (约 58 GB)',
+            percent: 0,
+            promptLabel: '跳过',
+            promptConfirm: '开始下载',
+            promptDetail: '需要下载 10 个模型文件 (约 58 GB)'
+          })
+
+          const action = await waitForSplashAction()
+          if (action === 'download') {
+            const result = await downloadModels(backendDir, sendProgress)
+            startupState.modelsReady = result.fail === 0
+            startupState.modelsSkipped = false
+          } else {
+            sendProgress({ step: 2, phase: 'done', message: '已跳过模型下载，文生图使用本地降级引擎', percent: 100 })
+            startupState.modelsSkipped = true
+            startupState.modelsReady = false
+          }
+        }
+      } else {
+        sendProgress({ step: 2, phase: 'done', message: 'AI 模型就绪', percent: 100 })
+        startupState.modelsReady = true
+      }
     }
 
     // ── 步骤 3: 启动后端服务 ──
@@ -727,12 +893,11 @@ ipcMain.on('splash:action', (_event, data) => {
       return
     }
 
-    // 对所有非 exit-app 动作，广播给 waitForSplashAction（跳过、下载、重试）
-    if (action !== 'exit-app') {
-      splashActions.emit(SPLASH_ACTION_EVENT, action)
-    } else {
-      // 退出：杀后端 → 杀 PowerShell → 退出
+    // Generic download/skip/retry actions go to waitForSplashAction
+    if (action === 'exit-app') {
       forceQuit()
+    } else {
+      splashActions.emit(SPLASH_ACTION_EVENT, action)
     }
   }
 })
@@ -1451,17 +1616,17 @@ function forceQuit() {
   shutdownBackends()
   // 预加载阶段可能还在解压引擎或下载模型，必须杀整棵进程树。
   killProcessTree(modelDownloadProc)
-  killProcessTree(extractProc)
+  killProcessTree(engineDownloadProc)
   modelDownloadProc = null
-  extractProc = null
+  engineDownloadProc = null
   app.exit(0)
 }
 
 function shutdownPreloadTasks() {
   killProcessTree(modelDownloadProc)
-  killProcessTree(extractProc)
+  killProcessTree(engineDownloadProc)
   modelDownloadProc = null
-  extractProc = null
+  engineDownloadProc = null
 }
 
 app.whenReady().then(async () => {
