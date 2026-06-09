@@ -113,6 +113,9 @@ function downloadComfyUIEngine(backendDir, onProgress) {
     let currentFileSize = ''
     let finalResult = null
     let stdoutBuffer = ''
+    // 文件大小轮询跟踪（与模型下载一致）
+    let trackedFiles = []
+    let startedDownloading = false
 
     const handleEngineOutputLines = (lines) => {
       for (const line of lines) {
@@ -127,6 +130,20 @@ function downloadComfyUIEngine(backendDir, onProgress) {
           case 'START':
             currentFileName = parts[1] || ''
             currentFileSize = parts[2] || ''
+            startedDownloading = true
+            // 添加到文件大小跟踪列表
+            const engineFilePath = path.join(backendDir, currentFileName === 'ComfyUI_portable'
+              ? 'ComfyUI_windows_portable_nvidia.7z'
+              : 'ComfyUI-GGUF.zip')
+            let initialSize = 0
+            try { if (fsSync.existsSync(engineFilePath)) initialSize = fsSync.statSync(engineFilePath).size } catch (_) {}
+            trackedFiles.push({
+              name: currentFileName,
+              fullPath: engineFilePath,
+              lastSize: initialSize,
+              lastTime: Date.now(),
+              remoteSize: 0
+            })
             if (onProgress) {
               onProgress({
                 step: 1, phase: 'downloading',
@@ -143,6 +160,7 @@ function downloadComfyUIEngine(backendDir, onProgress) {
           case 'SKIP':
             completedFiles++
             const doneName = parts[1] || currentFileName
+            trackedFiles = trackedFiles.filter(f => f.name !== doneName)
             if (onProgress) {
               onProgress({
                 step: 1, phase: 'downloading',
@@ -150,7 +168,10 @@ function downloadComfyUIEngine(backendDir, onProgress) {
                 percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
                 fileIndex: completedFiles,
                 totalFiles,
-                fileName: doneName
+                fileName: doneName,
+                speed: '',
+                eta: '',
+                filePercent: -1
               })
             }
             break
@@ -200,16 +221,92 @@ function downloadComfyUIEngine(backendDir, onProgress) {
       handleEngineOutputLines(lines.filter(Boolean))
     })
 
+    // 每 2 秒轮询文件大小，推算速度/ETA/百分比
+    const progressInterval = setInterval(() => {
+      if (trackedFiles.length === 0) return
+
+      let totalSpeed = ''
+      let totalEta = ''
+      let maxFilePct = -1
+
+      for (const tf of trackedFiles) {
+        try {
+          if (fsSync.existsSync(tf.fullPath)) {
+            const currentSize = fsSync.statSync(tf.fullPath).size
+            const now = Date.now()
+            const elapsedSecs = (now - tf.lastTime) / 1000
+
+            if (elapsedSecs >= 1.5 && currentSize > tf.lastSize) {
+              const bytesPerSec = (currentSize - tf.lastSize) / elapsedSecs
+              if (tf.remoteSize <= 0) {
+                const sizeStr = currentFileSize || ''
+                if (sizeStr.includes('GB')) {
+                  tf.remoteSize = parseFloat(sizeStr) * 1024 * 1024 * 1024
+                } else if (sizeStr.includes('MB')) {
+                  tf.remoteSize = parseFloat(sizeStr) * 1024 * 1024
+                } else if (sizeStr.includes('KB')) {
+                  tf.remoteSize = parseFloat(sizeStr) * 1024
+                }
+              }
+
+              const speedMBs = bytesPerSec / (1024 * 1024)
+              if (speedMBs >= 0.01) {
+                totalSpeed = `${speedMBs.toFixed(1)} MB/s`
+                if (tf.remoteSize > 0 && currentSize > 0) {
+                  const remaining = tf.remoteSize - currentSize
+                  if (remaining > 0 && bytesPerSec > 0) {
+                    const etaSec = Math.round(remaining / bytesPerSec)
+                    if (etaSec >= 3600) {
+                      totalEta = `${Math.floor(etaSec / 3600)}h${Math.floor((etaSec % 3600) / 60)}m`
+                    } else if (etaSec >= 60) {
+                      totalEta = `${Math.floor(etaSec / 60)}m${etaSec % 60}s`
+                    } else {
+                      totalEta = `${etaSec}s`
+                    }
+                  }
+                }
+                if (tf.remoteSize > 0) {
+                  maxFilePct = Math.min(100, Math.round((currentSize / tf.remoteSize) * 100))
+                }
+              }
+              tf.lastSize = currentSize
+              tf.lastTime = now
+            } else if (tf.lastSize === 0 && currentSize > 0) {
+              tf.lastSize = currentSize
+              tf.lastTime = now
+            }
+          }
+        } catch (_) { /* 文件可能被锁定，跳过 */ }
+      }
+
+      if (startedDownloading && onProgress) {
+        onProgress({
+          step: 1, phase: 'downloading',
+          message: `正在下载 (${completedFiles + 1}/${totalFiles || '?'}) ${currentFileName}`,
+          percent: totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : -1,
+          fileIndex: completedFiles + 1,
+          totalFiles,
+          fileName: currentFileName,
+          fileSize: currentFileSize,
+          speed: totalSpeed,
+          eta: totalEta,
+          filePercent: maxFilePct
+        })
+      }
+    }, 2000)
+
     proc.stderr.on('data', (chunk) => {
       console.warn('[download-comfyui-engine stderr]', chunk.toString())
     })
 
     proc.on('error', (err) => {
+      clearInterval(progressInterval)
       if (engineDownloadProc === proc) engineDownloadProc = null
       reject(new Error(`启动引擎下载脚本失败: ${err.message}`))
     })
 
     proc.on('close', (code) => {
+      clearInterval(progressInterval)
       if (engineDownloadProc === proc) engineDownloadProc = null
       if (stdoutBuffer.trim()) {
         handleEngineOutputLines([stdoutBuffer.trim()])
