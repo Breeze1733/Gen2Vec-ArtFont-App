@@ -342,12 +342,7 @@ function downloadComfyUIEngine(backendDir, onProgress) {
           totalFiles: totalFiles || completedFiles
         })
       }
-      // 验证 sentinel（COMPLETE 已处理错误的情况会被 prior-reject 跳过）
-      if (failedFiles > 0) {
-        // COMPLETE 已显示错误，静默结束（不额外弹窗）
-        resolve(result)
-        return
-      }
+      // 验证 sentinel + GGUF
       if (!isComfyUIReady(backendDir)) {
         reject(new Error('引擎下载后未找到 ComfyUI/main.py'))
         return

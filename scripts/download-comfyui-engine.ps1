@@ -80,6 +80,10 @@ function Format-FileSize {
 }
 
 function Find-7zExe {
+    # 1. Bundled with installer (alongside this script)
+    $bundled7z = Join-Path $PSScriptRoot "7za.exe"
+    if (Test-Path $bundled7z) { return $bundled7z }
+    # 2. System PATH
     $candidates = @(
         (Get-Command "7z.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
         (Get-Command "7z" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
@@ -89,41 +93,11 @@ function Find-7zExe {
     foreach ($c in $candidates) {
         if ($c -and (Test-Path $c)) { return $c }
     }
-    $local7z = Join-Path $DestDir "_7za.exe"
-    if (Test-Path $local7z) { return $local7z }
     return $null
 }
 
 function Ensure-7zExe {
-    $existing = Find-7zExe
-    if ($existing) { return $existing }
-
-    Write-Color "  downloading portable 7za.exe (~600 KB)..." DarkGray
-    $local7z = Join-Path $DestDir "_7za.exe"
-    $urls = @(
-        "https://www.7-zip.org/a/7za920.zip",
-        "https://github.com/ip7z/7zip/releases/download/24.09/7za.exe"
-    )
-    foreach ($u in $urls) {
-        try {
-            Write-Color ("  trying: " + $u) DarkGray
-            if ($u.EndsWith(".zip")) {
-                $zipPath = Join-Path $DestDir "_7za_temp.zip"
-                $dlResult = Invoke-FileDownload -Url $u -OutputPath $zipPath
-                if ($dlResult.Success) {
-                    Expand-Archive -Path $zipPath -DestinationPath $DestDir -Force
-                    Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-                    if (Test-Path $local7z) { return $local7z }
-                }
-            } else {
-                $dlResult = Invoke-FileDownload -Url $u -OutputPath $local7z
-                if ($dlResult.Success -and (Test-Path $local7z)) { return $local7z }
-            }
-        } catch {
-            continue
-        }
-    }
-    return $null
+    return Find-7zExe
 }
 
 function Invoke-FileDownload {
@@ -213,10 +187,6 @@ function Get-ComfyUIDownloadUrl {
     return ($Mirror + "/Comfy-Org/ComfyUI/releases/download/v" + $Version + "/ComfyUI_windows_portable_nvidia.7z")
 }
 
-function Get-GGUFSDownloadUrl {
-    param([string]$Mirror)
-    return ($Mirror + "/city96/ComfyUI-GGUF/archive/refs/heads/main.zip")
-}
 
 # -- Try a download mirror; on failure, try fallbacks --
 function Try-DownloadWithFallback {
@@ -304,33 +274,34 @@ function Install-ComfyUIEngine {
     return $true
 }
 
-# -- Download and install ComfyUI-GGUF --
+# -- Install ComfyUI-GGUF (local zip first, network fallback) --
 function Install-ComfyUIGGUF {
     Emit "START" "ComfyUI-GGUF|~50 KB"
 
-    $urls = ($MirrorSources | ForEach-Object { Get-GGUFSDownloadUrl -Mirror $_ } | Select-Object -Unique)
+    $zipPath = $null
+    $isLocalZip = $false
 
-    $zipPath = Join-Path $DestDir "ComfyUI-GGUF.zip"
-    $dl = Try-DownloadWithFallback -Component "ComfyUI-GGUF" -FallbackUrls $urls -OutputPath $zipPath -MinBytes 10240
+    # 1. Check bundled zip alongside this script
+    $localZip = Join-Path $PSScriptRoot "ComfyUI-GGUF.zip"
+    if (Test-Path $localZip) {
+        $header = [System.IO.File]::ReadAllBytes($localZip)[0..1]
+        if ($header[0] -eq 0x50 -and $header[1] -eq 0x4B) {
+            Write-Color "  using bundled ComfyUI-GGUF.zip" DarkGray
+            $zipPath = $localZip
+            $isLocalZip = $true
+        }
+    }
 
-    if (-not $dl.Success) {
-        Emit "ERROR" "ComfyUI-GGUF|download|all sources failed"
-        Write-Color "  all download sources failed." Red
+    # 2. Bundled zip not found — hard fail (no network fallback)
+    if (-not $zipPath) {
+        Write-Color "  ComfyUI-GGUF.zip not found alongside script." Red
+        Write-Color "  This file is bundled with the installer. Please reinstall the application." Red
+        Emit "ERROR" "ComfyUI-GGUF|missing|bundled zip not found"
         return $false
     }
 
-    # Validate zip header (PK\x03\x04 or PK\x05\x06)
-    $header = [System.IO.File]::ReadAllBytes($zipPath)[0..1]
-    if ($header[0] -ne 0x50 -or $header[1] -ne 0x4B) {
-        Write-Color ("  file is not a valid zip (bad header), retrying with next source...") Yellow
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-        Emit "ERROR" "ComfyUI-GGUF|download|not a valid zip file"
-        Write-Color "  all download sources returned invalid files." Red
-        return $false
-    }
-
-    $sz = Format-FileSize -Bytes $dl.Size
-    Write-Color ("  download complete (" + $sz + "), installing to custom_nodes...") Green
+    $sz = Format-FileSize -Bytes (Get-Item $zipPath).Length
+    Write-Color ("  installing to custom_nodes... (" + $sz + ")") Green
 
     New-Item -ItemType Directory -Force -Path $CustomNodesDir | Out-Null
 
@@ -353,11 +324,15 @@ function Install-ComfyUIGGUF {
         Move-Item -Path $extractedDir.FullName -Destination $GGUFDir -Force
 
         Remove-Item -Recurse -Force $tempExtract -ErrorAction SilentlyContinue
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        if (-not $isLocalZip) {
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        }
     } catch {
         $errMsg = $_.Exception.Message
         Remove-Item -Recurse -Force $tempExtract -ErrorAction SilentlyContinue
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        if (-not $isLocalZip) {
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        }
         Emit "ERROR" ("ComfyUI-GGUF|extract|" + $errMsg)
         Write-Color ("  GGUF install failed: " + $errMsg) Red
         return $false

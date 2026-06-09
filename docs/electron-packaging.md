@@ -70,7 +70,9 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
     │       ├── models/                  (矢量化模型)
     │       │   └── rembg/
     │       │       └── isnet-general-use.onnx
-    │       ├── download-comfyui-engine.ps1 (ComfyUI 引擎 + GGUF 下载脚本)
+    │       ├── 7za.exe                         (7-Zip 解压工具, ~574 KB)
+│       ├── ComfyUI-GGUF.zip               (GGUF 自定义节点, ~40 KB)
+│       ├── download-comfyui-engine.ps1 (ComfyUI 引擎 + GGUF 下载脚本)
     │       ├── download-models.ps1   (模型下载脚本)
     │       └── README.md
     └── ... (Electron 运行时文件)
@@ -89,6 +91,8 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
 │       ├── models/                                 ← 矢量化模型 (与 EXE 同级)
 │       │   └── rembg/
 │       │       └── isnet-general-use.onnx
+│       ├── 7za.exe                                    ← 解压工具
+│       ├── ComfyUI-GGUF.zip                          ← GGUF 节点
 │       ├── download-comfyui-engine.ps1              ← 引擎下载脚本
 │       ├── download-models.ps1
 │       ├── ComfyUI_windows_portable_nvidia/    ← 下载解压产物
@@ -299,7 +303,9 @@ async function isPortInUse(port) {
     "files": ["dist/**/*", "electron/**/*"],
     "extraResources": [
       { "from": "../../services/txt2img-api/dist/txt2img-backend.exe", "to": "backend/txt2img-backend.exe" },
-      { "from": "../../scripts/download-comfyui-engine.ps1", "to": "backend/download-comfyui-engine.ps1" },
+      { "from": "../../services/txt2img-api/dist/7za.exe",              "to": "backend/7za.exe" },
+      { "from": "../../services/txt2img-api/dist/ComfyUI-GGUF.zip",     "to": "backend/ComfyUI-GGUF.zip" },
+      { "from": "../../scripts/download-comfyui-engine.ps1",            "to": "backend/download-comfyui-engine.ps1" },
       { "from": "../../scripts/download-models.ps1", "to": "backend/download-models.ps1" },
       { "from": "../../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
       { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
@@ -458,6 +464,8 @@ npm run build
 # 3. 确认打包前置文件清单
 #    必须存在:
 #      services/txt2img-api/dist/txt2img-backend.exe
+#      services/txt2img-api/dist/7za.exe
+#      services/txt2img-api/dist/ComfyUI-GGUF.zip
 #      services/txt2img-api/dist/README.md
 #      services/vectorizer-api/dist/vectorizer-backend.exe
 #      services/vectorizer-api/dist/models/rembg/isnet-general-use.onnx
