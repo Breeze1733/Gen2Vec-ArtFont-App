@@ -148,11 +148,10 @@ function Invoke-SevenZipWithHeartbeat {
         Write-Host ("`r  {0} finished ({1})        " -f $Label, $elapsedText) -ForegroundColor DarkGray
     }
 
-    # 7za exit code 0 = success, 1 = warning (non-fatal), 2+ = fatal
-    if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 1) {
-        return $p.ExitCode
-    }
-    return 0
+    try { $p.Refresh() } catch {}
+    $ec = if ($null -ne $p.ExitCode) { $p.ExitCode } else { 0 }
+    # 7za: 0 = success, 1 = non-fatal warning, 2+ = fatal
+    return $ec
 }
 
 function Test-NonEmptyFile {
@@ -580,7 +579,8 @@ try {
                 '-o.',
                 (Split-Path $ComfyArchive -Leaf)
             ) -Label "archive extraction"
-            if ($exitCode -ne 0) { throw "7za extract failed with exit code $exitCode" }
+            if ($exitCode -eq 2) { throw "7za extract failed: corrupt archive or disk full" }
+            if ($exitCode -gt 2) { throw "7za extract failed with exit code $exitCode" }
         }
         Write-Step "move extracted folder to $ComfyPortable"
         Normalize-ComfyUIExtraction
