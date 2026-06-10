@@ -24,13 +24,24 @@
 #>
 param(
   [ValidateSet("uv", "python")]
-  [string]$Toolchain = "uv"
+  [string]$Toolchain = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+
+# 自动检测：uv 优先，找不到则回退 python
+if (-not $Toolchain) {
+  if (Get-Command uv -ErrorAction SilentlyContinue) {
+    $Toolchain = "uv"
+    Write-Host "auto-detect: uv found, using uv"
+  } else {
+    $Toolchain = "python"
+    Write-Host "auto-detect: uv not found, falling back to python"
+  }
+}
 
 if ($Toolchain -eq "uv") {
   if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -39,9 +50,8 @@ if ($Toolchain -eq "uv") {
   $pipArgs = @("pip", "install", "--upgrade", "pyinstaller")
   $pyRunArgs = @("run", "python", "-m", "PyInstaller")
 } else {
-  $PythonExe = (Get-Command python).Source
-  $pipArgs = @("-m", "pip", "install", "--upgrade", "pyinstaller")
-  $pyRunArgs = @($PythonExe, "-m", "PyInstaller")
+  $pipArgs = @("-m", "pip", "install", "--upgrade", "pip", "pyinstaller")
+  $pyRunArgs = @("-m", "PyInstaller")
 }
 
 Write-Host "[1/5] Installing build dependencies via $Toolchain..."
