@@ -16,13 +16,14 @@
   Delete "$INSTDIR\resources\backend\_gguf_extract_temp"
 !macroend
 
-; Restore ComfyUI engine and models after an update completes
+; Restore ComfyUI engine and models after an update completes.
+; NOTE: Do NOT guard with ${isUpdated} — the installer itself does NOT receive
+; --updated on its command line (only the OLD uninstaller does). Instead, simply
+; check if the backup directory exists and restore it if so.
 !macro customInstall
-  ${if} ${isUpdated}
-    IfFileExists "$INSTDIR\..\Gen2Vec_ComfyUI_Backup\ComfyUI_windows_portable_nvidia" 0 +4
-      CreateDirectory "$INSTDIR\resources\backend"
-      Rename "$INSTDIR\..\Gen2Vec_ComfyUI_Backup\ComfyUI_windows_portable_nvidia" "$INSTDIR\resources\backend\ComfyUI_windows_portable_nvidia"
-      ; Clean up the (now empty) backup directory
-      RMDir "$INSTDIR\..\Gen2Vec_ComfyUI_Backup"
-  ${endif}
+  IfFileExists "$INSTDIR\..\Gen2Vec_ComfyUI_Backup\ComfyUI_windows_portable_nvidia" 0 +3
+    CreateDirectory "$INSTDIR\resources\backend"
+    Rename "$INSTDIR\..\Gen2Vec_ComfyUI_Backup\ComfyUI_windows_portable_nvidia" "$INSTDIR\resources\backend\ComfyUI_windows_portable_nvidia"
+    ; Clean up the (now empty) backup directory
+    RMDir "$INSTDIR\..\Gen2Vec_ComfyUI_Backup"
 !macroend
