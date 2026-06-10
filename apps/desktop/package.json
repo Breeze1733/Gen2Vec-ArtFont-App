@@ -26,6 +26,7 @@
       { "from": "../../services/txt2img-api/dist/ComfyUI-GGUF.zip", "to": "backend/ComfyUI-GGUF.zip" },
       { "from": "../../scripts/download-comfyui-engine.ps1", "to": "backend/download-comfyui-engine.ps1" },
       { "from": "../../scripts/download-models.ps1", "to": "backend/download-models.ps1" },
+      { "from": "../../scripts/configure-comfyui.ps1", "to": "backend/configure-comfyui.ps1" },
       { "from": "../../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
       { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
       { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" },

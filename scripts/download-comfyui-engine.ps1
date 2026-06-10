@@ -85,6 +85,9 @@ $InspyMirrorUrls = @(
 $InspyUrls = if ($NoMirror) { @($InspyGithubUrl) } else { @($InspyMirrorUrls + $InspyGithubUrl) }
 $InspyNodeDir = Join-Path $CustomNodesDir "ComfyUI-Inspyrenet-Rembg"
 
+$ComfyConfigScript = Join-Path $DestDir "configure-comfyui.ps1"
+$ComfyConfigSentinel = Join-Path $ComfyPortable ".configured"
+
 function Emit {
     param([string]$Type, [string]$Message = "")
     if ($Electron) {
@@ -186,6 +189,10 @@ function Test-CustomNodeReady {
 
 function Test-InspyReady {
     Test-CustomNodeReady -NodeDir $InspyNodeDir
+}
+
+function Test-ComfyUIConfigured {
+    Test-NonEmptyFile -Path $ComfyConfigSentinel
 }
 
 function Format-FileSize {
@@ -396,49 +403,33 @@ function Test-ComfyArchiveSizeReady {
     return $true
 }
 
-function Resolve-ComfyUIPortableCandidate {
-    param([string]$SearchRoot)
-
-    $mainFiles = @(Get-ChildItem -LiteralPath $SearchRoot -Recurse -Filter "main.py" -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -like "*\ComfyUI\main.py" })
-
-    foreach ($main in $mainFiles) {
-        $comfyDir = $main.Directory
-        if (-not $comfyDir) { continue }
-        $portableDir = $comfyDir.Parent
-        if (-not $portableDir) { continue }
-
-        $pythonExe = Join-Path $portableDir.FullName "python_embeded\python.exe"
-        if (Test-Path $pythonExe) {
-            return $portableDir.FullName
-        }
-    }
-
-    return $null
-}
-
 function Normalize-ComfyUIExtraction {
+    # 7z 解压后目录固定为 DestDir/ComfyUI_windows_portable
+    $extractedDir = Join-Path $DestDir "ComfyUI_windows_portable"
+
     if (Test-ComfyUIReady) { return }
 
-    $candidate = Resolve-ComfyUIPortableCandidate -SearchRoot $DestDir
-    if (-not $candidate) {
-        throw "ComfyUI/main.py not found after extraction"
+    if (-not (Test-Path $extractedDir)) {
+        throw "ComfyUI_windows_portable not found after extraction (expected: $extractedDir)"
     }
 
+    # 如果解压出来的路径恰好就是目标路径，无需挪动
     $expected = [System.IO.Path]::GetFullPath($ComfyPortable)
-    $actual = [System.IO.Path]::GetFullPath($candidate)
+    $actual = [System.IO.Path]::GetFullPath($extractedDir)
     if ($actual.TrimEnd('\') -ieq $expected.TrimEnd('\')) {
         return
     }
 
+    # 挪路径：套一层 ComfyUI_windows_portable_nvidia 父目录
     New-Item -ItemType Directory -Force -Path $ComfyRoot | Out-Null
     if (Test-Path $ComfyPortable) {
         Remove-Item -LiteralPath $ComfyPortable -Recurse -Force
     }
+    Move-Item -LiteralPath $extractedDir -Destination $ComfyPortable -Force
 
-    Move-Item -LiteralPath $candidate -Destination $ComfyPortable -Force
+    # 挪好之后再检查 main.py
     if (-not (Test-ComfyUIReady)) {
-        throw "ComfyUI/main.py not found after moving extracted directory"
+        throw "ComfyUI/main.py not found after moving to $ComfyPortable"
     }
 }
 
@@ -481,7 +472,7 @@ if (-not $Electron) {
 }
 
 Emit "READY"
-Emit "TOTAL" 5
+Emit "TOTAL" 6
 
 $okCount = 0
 $skipCount = 0
@@ -567,16 +558,16 @@ try {
         $skipCount++
     } else {
         Emit "START" "Extract_ComfyUI|local"
-        $existingCandidate = Resolve-ComfyUIPortableCandidate -SearchRoot $DestDir
-        if ($existingCandidate) {
+        $extractedDir = Join-Path $DestDir "ComfyUI_windows_portable"
+        if (Test-Path $extractedDir) {
             Write-Color "Use existing extracted ComfyUI portable" Yellow
-            Write-Step "found extracted folder: $existingCandidate"
+            Write-Step "found extracted folder: $extractedDir"
         } else {
             if (-not (Test-Path $ComfyArchive)) { throw "ComfyUI archive missing: $ComfyArchive" }
             Write-Color "Extract ComfyUI portable" Yellow
             Write-Step "this can take several minutes for the 2 GB archive"
             if (Test-Path $ComfyRoot) {
-                Write-Step "remove previous extracted directory"
+                Write-Step "remove previous normalized directory"
                 Remove-Item -LiteralPath $ComfyRoot -Recurse -Force
             }
             $exitCode = Invoke-SevenZipWithHeartbeat -SevenZipPath $SevenZipExe -WorkingDirectory $DestDir -ArgumentList @(
@@ -587,9 +578,8 @@ try {
             ) -Label "archive extraction"
             if ($exitCode -ne 0) { throw "7za extract failed with exit code $exitCode" }
         }
-        Write-Step "normalize extracted folder"
+        Write-Step "move extracted folder to $ComfyPortable"
         Normalize-ComfyUIExtraction
-        if (-not (Test-ComfyUIReady)) { throw "ComfyUI portable files not found after extraction" }
         Remove-Item -LiteralPath $ComfyArchive -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $ComfyArchiveComplete -Force -ErrorAction SilentlyContinue
         Finish-Ok "Extract_ComfyUI" "ready"
@@ -670,6 +660,29 @@ try {
         Remove-Item -LiteralPath $InspyZip -Force -ErrorAction SilentlyContinue
         Finish-Ok "ComfyUI-Inspyrenet-Rembg" $sz
         $okCount++
+    }
+
+    # 6. Configure ComfyUI (run configure script).
+    if (Test-ComfyUIConfigured) {
+        Finish-Skip "ComfyUI_config" "configured"
+        $skipCount++
+    } else {
+        Emit "START" "ComfyUI_config|script"
+        Write-Color "Configure ComfyUI" Yellow
+        if (-not (Test-Path $ComfyConfigScript)) {
+            Write-Step "configure script not found, skip: $ComfyConfigScript"
+            Finish-Skip "ComfyUI_config" "no-script"
+            $skipCount++
+        } else {
+            Write-Step "running: $ComfyConfigScript"
+            $configResult = & powershell -NoProfile -ExecutionPolicy Bypass -File $ComfyConfigScript
+            if ($LASTEXITCODE -ne 0) {
+                throw "ComfyUI configure script failed with exit code $LASTEXITCODE"
+            }
+            [void](New-Item -ItemType File -Force -Path $ComfyConfigSentinel)
+            Finish-Ok "ComfyUI_config" "done"
+            $okCount++
+        }
     }
 } catch {
     $failCount++
