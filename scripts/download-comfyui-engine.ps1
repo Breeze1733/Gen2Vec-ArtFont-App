@@ -492,6 +492,7 @@ try {
         Remove-Item -LiteralPath $tmpGguf -Recurse -Force -ErrorAction SilentlyContinue
         if (-not (Test-GgufReady)) { throw "ComfyUI-GGUF files not found after install" }
         $sz = Format-FileSize -Bytes (Get-Item $GgufZip).Length
+        Remove-Item -LiteralPath $GgufZip -Force -ErrorAction SilentlyContinue
         Finish-Ok "ComfyUI-GGUF" $sz
         $okCount++
     }
