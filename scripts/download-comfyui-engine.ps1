@@ -249,6 +249,52 @@ function Test-SevenZipArchive {
     }
 }
 
+function Resolve-ComfyUIPortableCandidate {
+    param([string]$SearchRoot)
+
+    $mainFiles = @(Get-ChildItem -LiteralPath $SearchRoot -Recurse -Filter "main.py" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -like "*\ComfyUI\main.py" })
+
+    foreach ($main in $mainFiles) {
+        $comfyDir = $main.Directory
+        if (-not $comfyDir) { continue }
+        $portableDir = $comfyDir.Parent
+        if (-not $portableDir) { continue }
+
+        $pythonExe = Join-Path $portableDir.FullName "python_embeded\python.exe"
+        if (Test-Path $pythonExe) {
+            return $portableDir.FullName
+        }
+    }
+
+    return $null
+}
+
+function Normalize-ComfyUIExtraction {
+    if (Test-Path $ComfyMain) { return }
+
+    $candidate = Resolve-ComfyUIPortableCandidate -SearchRoot $DestDir
+    if (-not $candidate) {
+        throw "ComfyUI/main.py not found after extraction"
+    }
+
+    $expected = [System.IO.Path]::GetFullPath($ComfyPortable)
+    $actual = [System.IO.Path]::GetFullPath($candidate)
+    if ($actual.TrimEnd('\') -ieq $expected.TrimEnd('\')) {
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path $ComfyRoot | Out-Null
+    if (Test-Path $ComfyPortable) {
+        Remove-Item -LiteralPath $ComfyPortable -Recurse -Force
+    }
+
+    Move-Item -LiteralPath $candidate -Destination $ComfyPortable -Force
+    if (-not (Test-Path $ComfyMain)) {
+        throw "ComfyUI/main.py not found after moving extracted directory"
+    }
+}
+
 function Ensure-ZipAssembly {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
 }
@@ -377,6 +423,7 @@ try {
             (Split-Path $ComfyArchive -Leaf)
         ) -NoNewWindow -Wait -PassThru
         if ($p.ExitCode -ne 0) { throw "7za extract failed with exit code $($p.ExitCode)" }
+        Normalize-ComfyUIExtraction
         if (-not (Test-Path $ComfyMain)) { throw "ComfyUI/main.py not found after extraction" }
         Remove-Item -LiteralPath $ComfyArchive -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $ComfyArchiveComplete -Force -ErrorAction SilentlyContinue
