@@ -407,24 +407,21 @@ function Normalize-ComfyUIExtraction {
     # 7z 解压后目录固定为 DestDir/ComfyUI_windows_portable
     $extractedDir = Join-Path $DestDir "ComfyUI_windows_portable"
 
-    if (Test-ComfyUIReady) { return }
+    # 目标路径已存在（上次挪好了）→ 只检查，不挪动
+    if (Test-Path $ComfyPortable) {
+        if (-not (Test-ComfyUIReady)) {
+            throw "ComfyUI/main.py not found at $ComfyPortable"
+        }
+        return
+    }
 
+    # 解压产物不存在 → 报错
     if (-not (Test-Path $extractedDir)) {
         throw "ComfyUI_windows_portable not found after extraction (expected: $extractedDir)"
     }
 
-    # 如果解压出来的路径恰好就是目标路径，无需挪动
-    $expected = [System.IO.Path]::GetFullPath($ComfyPortable)
-    $actual = [System.IO.Path]::GetFullPath($extractedDir)
-    if ($actual.TrimEnd('\') -ieq $expected.TrimEnd('\')) {
-        return
-    }
-
     # 挪路径：套一层 ComfyUI_windows_portable_nvidia 父目录
     New-Item -ItemType Directory -Force -Path $ComfyRoot | Out-Null
-    if (Test-Path $ComfyPortable) {
-        Remove-Item -LiteralPath $ComfyPortable -Recurse -Force
-    }
     Move-Item -LiteralPath $extractedDir -Destination $ComfyPortable -Force
 
     # 挪好之后再检查 main.py
