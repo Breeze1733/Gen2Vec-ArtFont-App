@@ -23,7 +23,7 @@ export const VECTOR_PRESETS = {
   },
   balanced: {
     preset: 'balanced',
-    color_precision: 4,
+    color_precision: 6,
     filter_speckle: 18,
     corner_threshold: 70,
     length_threshold: 12,

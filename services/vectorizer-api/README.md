@@ -59,7 +59,7 @@ png_transparency = (1 - mean(alpha) / 255) * 100
 
 ### SVG 还原度
 
-`SVG 还原度` 用于描述 SVG 回渲染 PNG 与透明 PNG 输入之间的结构相似程度。当前实现使用 SSIM（Structural Similarity，结构相似度）计算，并以百分数输出。
+`SVG 还原度` 用于描述 SVG 回渲染 PNG 与透明 PNG 输入之间的结构相似程度。当前实现使用加权混合评分算法，综合归一化像素误差、人眼感知权重和边缘结构保留度进行评估，并以百分数输出。
 
 计算位置：
 
@@ -70,29 +70,29 @@ _calculate_svg_fidelity()
 
 计算流程：
 
-1. 将透明 PNG 和 SVG 回渲染 PNG 都转换为 `RGBA`。
+1. 将透明 PNG 和 SVG 回渲染 PNG 都转换为 `RGB`。
 2. 如果两张图尺寸不一致，将 SVG 回渲染图 resize 到原图尺寸。
-3. 使用 `skimage.metrics.structural_similarity` 对 RGBA 四通道图像计算 SSIM。
-4. 将 `0..1` 的 SSIM 值转换为 `0..100` 的百分数。
+3. 计算三个子指标并加权融合：
+   - **NRMSE**（归一化均方根误差）：基础像素差异，比 SSIM 对矢量化平滑边缘的容忍度更高。
+   - **人眼加权 NRMSE**：按像素亮度加权，暗区色差权重降低，亮区色差权重提高，更符合人眼主观感受。
+   - **边缘结构保留度**：用 Sobel 算子提取边缘后比较差异，评估形状轮廓是否完整保留。
+4. 三个分量加权求和后转换为 `0..100` 的百分数。
 
 计算公式：
 
 ```text
-svg_fidelity = SSIM(original_rgba, rendered_svg_rgba) * 100
+nrmse = 1.0 - MSE(original, vector) / (255^2)
+luminance = 0.299*R + 0.587*G + 0.114*B
+weight = 0.3 + 0.7 * (luminance / 255)
+weighted_nrmse = 1.0 - MSE(weighted_diff) / (255^2)
+edge_score = 1.0 - mean(|Sobel(original) - Sobel(vector)|)
+svg_fidelity = nrmse * 0.60 + weighted_nrmse * 0.25 + edge_score * 0.15
 ```
 
-其中：
+保留 RGB 的原因：
 
-- `original_rgba` 是透明 PNG 的 RGBA 像素矩阵。
-- `rendered_svg_rgba` 是 SVG 回渲染 PNG 的 RGBA 像素矩阵。
-- `data_range = 255`。
-- 输出单位为百分数，保留 1 位小数。
-
-保留 RGBA 的原因：
-
-- 透明底艺术字的边缘抗锯齿、镂空区域和半透明阴影都存储在 alpha 通道中。
-- 只比较 RGB 会忽略透明区域差异，可能高估 SVG 的真实还原效果。
-- RGBA SSIM 更适合本项目的透明 PNG -> SVG 回渲染闭环核验。
+- 透明底艺术字的边缘抗锯齿、镂空区域和半透明阴影由人眼加权分量间接覆盖。
+- 仅比较 RGB 配合亮度权重，既避免 alpha 通道噪声干扰，又能反映人眼对边缘过渡区的真实感知。
 
 ## 接口
 

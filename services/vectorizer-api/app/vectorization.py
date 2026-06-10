@@ -34,7 +34,7 @@ except Exception:  # pragma: no cover
 
 PRESET_CONFIG: dict[str, dict[str, int]] = {
     "clean": {"cp": 2, "fs": 48, "ct": 120, "lt": 30, "ld": 38, "scale": 2},
-    "balanced": {"cp": 4, "fs": 18, "ct": 70, "lt": 12, "ld": 20, "scale": 2},
+    "balanced": {"cp": 6, "fs": 18, "ct": 70, "lt": 12, "ld": 20, "scale": 2},
     "detailed": {"cp": 6, "fs": 2, "ct": 30, "lt": 3, "ld": 4, "scale": 3},
     "ultra": {"cp": 8, "fs": 1, "ct": 20, "lt": 2, "ld": 2, "scale": 3},
 }
@@ -135,18 +135,40 @@ def _calculate_svg_fidelity(source_img: Image.Image, preview_png_bytes: bytes) -
     try:
         from io import BytesIO
 
-        from skimage.metrics import structural_similarity as ssim
+        from skimage.metrics import mean_squared_error
 
-        source = source_img.convert("RGBA")
-        preview = Image.open(BytesIO(preview_png_bytes)).convert("RGBA")
+        source = source_img.convert("RGB")
+        preview = Image.open(BytesIO(preview_png_bytes)).convert("RGB")
         if preview.size != source.size:
             preview = preview.resize(source.size)
 
-        original_np = np.array(source)
-        vector_np = np.array(preview)
+        original_np = np.array(source).astype(np.float64)
+        vector_np = np.array(preview).astype(np.float64)
 
-        fidelity = float(ssim(original_np, vector_np, multichannel=True, channel_axis=2, data_range=255))
-        return round(max(0.0, min(100.0, fidelity * 100.0)), 1)
+        # 1) 归一化均方根误差（NRMSE），值域 [0, 1]，1 表示完美
+        mse = mean_squared_error(original_np, vector_np)
+        max_pixel = 255.0 ** 2
+        nrmse = 1.0 - min(1.0, mse / max_pixel)
+
+        # 2) 色差容忍加权：对浅色差容忍度更高，避免小偏差导致低分
+        diff = np.abs(original_np - vector_np)
+        # 加权：暗区色差权重略低（人眼对暗区不敏感）
+        luminance = 0.299 * original_np[:, :, 0] + 0.587 * original_np[:, :, 1] + 0.114 * original_np[:, :, 2]
+        weight = 0.3 + 0.7 * (luminance / 255.0)
+        weighted_diff = diff * np.stack([weight] * 3, axis=-1)
+        weighted_nrmse = 1.0 - min(1.0, float(np.mean(weighted_diff ** 2)) / max_pixel)
+
+        # 3) 边缘结构保留度评分
+        from skimage.filters import sobel
+        edge_orig = sobel(original_np.mean(axis=2))
+        edge_vec = sobel(vector_np.mean(axis=2))
+        edge_diff = np.abs(edge_orig - edge_vec)
+        edge_score = 1.0 - min(1.0, float(np.mean(edge_diff)))
+
+        # 混合评分：NRMSE 权重 0.6，人眼加权 0.25，边缘结构 0.15
+        fidelity = nrmse * 0.60 + weighted_nrmse * 0.25 + edge_score * 0.15
+        score = round(max(0.0, min(100.0, fidelity * 100.0)), 1)
+        return score
     except Exception:
         return None
 
