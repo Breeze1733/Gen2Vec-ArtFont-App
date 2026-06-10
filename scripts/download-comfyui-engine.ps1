@@ -34,8 +34,24 @@ $SevenZipUrl = "https://www.7-zip.org/a/7za920.zip"
 
 $ComfyArchive = Join-Path $DestDir "ComfyUI_windows_portable_nvidia.7z"
 $ComfyGithubUrl = "https://github.com/Comfy-Org/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z"
-$ComfyMirrorUrl = "https://ghproxy.com/https://github.com/Comfy-Org/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z"
-$ComfyUrls = if ($NoMirror) { @($ComfyGithubUrl) } else { @($ComfyMirrorUrl, $ComfyGithubUrl) }
+$ComfyMirrorUrls = @(
+    "https://gh-proxy.com/$ComfyGithubUrl",
+    "https://gh.llkk.cc/$ComfyGithubUrl",
+    "https://ghproxy.net/$ComfyGithubUrl",
+    "https://ghfast.top/$ComfyGithubUrl",
+    "https://hub.gitmirror.com/$ComfyGithubUrl"
+)
+$EnvComfyUrls = @()
+if ($env:COMFYUI_ENGINE_URLS) {
+    $EnvComfyUrls = @($env:COMFYUI_ENGINE_URLS -split "[;,]" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+$ComfyUrls = if ($EnvComfyUrls.Count -gt 0) {
+    $EnvComfyUrls
+} elseif ($NoMirror) {
+    @($ComfyGithubUrl)
+} else {
+    @($ComfyMirrorUrls + $ComfyGithubUrl)
+}
 $ComfyRoot = Join-Path $DestDir "ComfyUI_windows_portable_nvidia"
 $ComfyPortable = Join-Path $ComfyRoot "ComfyUI_windows_portable"
 $ComfyMain = Join-Path $ComfyPortable "ComfyUI\main.py"
@@ -185,7 +201,8 @@ function Invoke-DownloadWithFallback {
     $errors = @()
     for ($u = 0; $u -lt $Urls.Count; $u++) {
         $url = $Urls[$u]
-        $label = if ($u -eq 0 -and $Urls.Count -gt 1) { "mirror" } elseif ($u -gt 0) { "github fallback" } else { "github" }
+        $label = $url
+        try { $label = ([System.Uri]$url).Host } catch {}
         Write-Color "  source: $label" DarkGray
         try {
             Invoke-DownloadWithRetry -Name $Name -Url $url -OutputPath $OutputPath -SizeText $SizeText
