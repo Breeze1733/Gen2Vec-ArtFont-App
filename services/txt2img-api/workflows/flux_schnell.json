@@ -100,11 +100,21 @@
   "8": {
     "inputs": {
       "filename_prefix": "flux-schnell",
-      "images": ["7", 0]
+      "images": ["10", 0]
     },
     "class_type": "SaveImage",
     "_meta": {
       "title": "保存图像"
+    }
+  },
+  "10": {
+    "inputs": {
+      "image": ["7", 0],
+      "torchscript_jit": "default"
+    },
+    "class_type": "InspyrenetRembg",
+    "_meta": {
+      "title": "Inspyrenet 背景移除"
     }
   }
 }

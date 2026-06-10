@@ -111,11 +111,21 @@
   "10": {
     "inputs": {
       "filename_prefix": "qwen-image-2512",
-      "images": ["9", 0]
+      "images": ["12", 0]
     },
     "class_type": "SaveImage",
     "_meta": {
       "title": "保存图像"
+    }
+  },
+  "12": {
+    "inputs": {
+      "image": ["9", 0],
+      "torchscript_jit": "default"
+    },
+    "class_type": "InspyrenetRembg",
+    "_meta": {
+      "title": "Inspyrenet 背景移除"
     }
   }
 }
