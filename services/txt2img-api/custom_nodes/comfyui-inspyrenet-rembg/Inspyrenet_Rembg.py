@@ -1,11 +1,12 @@
-from PIL import Image
-import torch
 import os
 import numpy as np
+import torch
+from PIL import Image
 
 # ═══════════════════════════════════════════════════════════════════
-# 环境变量必须在 import transparent_background 之前设置，
-# 否则 numba 会默认往 site-packages 写缓存 → 路径超长 → Errno 2
+# 环境变量 + numba monkey-patch 必须在 import transparent_background
+# 之前执行，否则 numba 往 site-packages __pycache__ 写内联缓存时
+# 路径超 Windows MAX_PATH (260) → FileNotFoundError
 # ═══════════════════════════════════════════════════════════════════
 _CUSTOM_NODE_DIR = os.path.dirname(os.path.abspath(__file__))
 _COMFYUI_DIR = os.path.dirname(os.path.dirname(_CUSTOM_NODE_DIR))
@@ -15,9 +16,32 @@ _INSPYRENET_MODEL_DIR = os.path.join(_COMFYUI_DIR, "models", "inspyrenet")
 if "TRANSPARENT_BACKGROUND_FILE_PATH" not in os.environ:
     os.environ["TRANSPARENT_BACKGROUND_FILE_PATH"] = _INSPYRENET_MODEL_DIR
 
-# numba JIT 缓存目录（Windows 下 site-packages 路径过长会写入失败）
+# numba 全局缓存目录（仅影响显式 API 缓存，不影响 pymatting 内联缓存）
 if "NUMBA_CACHE_DIR" not in os.environ:
     os.environ["NUMBA_CACHE_DIR"] = os.path.join(_INSPYRENET_MODEL_DIR, ".numba_cache")
+
+# ══ monkey-patch: 禁用 numba 内联文件缓存 ══
+# pymatting 源码中 @njit(cache=True) 会往源码旁 __pycache__/ 写缓存，
+# 该路径极易超 Windows MAX_PATH。NUMBA_CACHE_DIR 无法重定向内联缓存，
+# 因此必须在 import 前将 numba.njit/jit 的 cache 参数强制改为 False。
+# 副作用：首次 import 时 JIT 编译结果不持久化，下次进程重启重新编译。
+try:
+    import numba as _numba
+    _orig_njit = _numba.njit
+    _orig_jit = _numba.jit
+
+    def _njit_nocache(*args, **kwargs):
+        kwargs.pop("cache", None)
+        return _orig_njit(*args, **kwargs, cache=False)
+
+    def _jit_nocache(*args, **kwargs):
+        kwargs.pop("cache", None)
+        return _orig_jit(*args, **kwargs, cache=False)
+
+    _numba.njit = _njit_nocache
+    _numba.jit = _jit_nocache
+except Exception:
+    pass  # numba 不可用时静默跳过，不影响 transparent_background 降级
 
 from transparent_background import Remover
 from tqdm import tqdm
