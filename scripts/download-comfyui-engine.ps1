@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
 Downloads 7za.exe, ComfyUI Windows portable, extracts it, removes the archive,
-then downloads and installs the ComfyUI-GGUF custom node.
+then downloads and installs the ComfyUI-GGUF and ComfyUI-Inspyrenet-Rembg custom nodes.
 
 .PARAMETER DestDir
 Target backend directory. Defaults to the script directory.
@@ -59,10 +59,30 @@ $ComfyMain = Join-Path $ComfyPortable "ComfyUI\main.py"
 $ComfyPython = Join-Path $ComfyPortable "python_embeded\python.exe"
 
 $GgufZip = Join-Path $DestDir "ComfyUI-GGUF.zip"
-$GgufUrl = "https://github.com/city96/ComfyUI-GGUF/archive/refs/heads/main.zip"
+$GgufGithubUrl = "https://github.com/city96/ComfyUI-GGUF/archive/refs/heads/main.zip"
+$GgufMirrorUrls = @(
+    "https://gh-proxy.com/$GgufGithubUrl",
+    "https://gh.llkk.cc/$GgufGithubUrl",
+    "https://ghproxy.net/$GgufGithubUrl",
+    "https://ghfast.top/$GgufGithubUrl",
+    "https://hub.gitmirror.com/$GgufGithubUrl"
+)
+$GgufUrls = if ($NoMirror) { @($GgufGithubUrl) } else { @($GgufMirrorUrls + $GgufGithubUrl) }
 $CustomNodesDir = Join-Path $ComfyPortable "ComfyUI\custom_nodes"
 $GgufNodeDir = Join-Path $CustomNodesDir "ComfyUI-GGUF"
 $GgufSentinel = Join-Path $GgufNodeDir "nodes.py"
+
+$InspyZip = Join-Path $DestDir "ComfyUI-Inspyrenet-Rembg.zip"
+$InspyGithubUrl = "https://github.com/john-mnz/ComfyUI-Inspyrenet-Rembg/archive/refs/heads/main.zip"
+$InspyMirrorUrls = @(
+    "https://gh-proxy.com/$InspyGithubUrl",
+    "https://gh.llkk.cc/$InspyGithubUrl",
+    "https://ghproxy.net/$InspyGithubUrl",
+    "https://ghfast.top/$InspyGithubUrl",
+    "https://hub.gitmirror.com/$InspyGithubUrl"
+)
+$InspyUrls = if ($NoMirror) { @($InspyGithubUrl) } else { @($InspyMirrorUrls + $InspyGithubUrl) }
+$InspyNodeDir = Join-Path $CustomNodesDir "ComfyUI-Inspyrenet-Rembg"
 
 function Emit {
     param([string]$Type, [string]$Message = "")
@@ -102,6 +122,19 @@ function Test-ComfyUIReady {
 
 function Test-GgufReady {
     Test-NonEmptyFile -Path $GgufSentinel
+}
+
+function Test-CustomNodeReady {
+    param([string]$NodeDir)
+
+    if (-not (Test-Path $NodeDir)) { return $false }
+    $pyFiles = @(Get-ChildItem -LiteralPath $NodeDir -Recurse -Filter "*.py" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Length -gt 0 })
+    return $pyFiles.Count -gt 0
+}
+
+function Test-InspyReady {
+    Test-CustomNodeReady -NodeDir $InspyNodeDir
 }
 
 function Format-FileSize {
@@ -362,7 +395,7 @@ if (-not $Electron) {
 }
 
 Emit "READY"
-Emit "TOTAL" 4
+Emit "TOTAL" 5
 
 $okCount = 0
 $skipCount = 0
@@ -474,7 +507,7 @@ try {
             $sizeText = "200 KB"
             Emit "START" "ComfyUI-GGUF|$sizeText"
             Write-Color "Download ComfyUI-GGUF ($sizeText)" Yellow
-            Invoke-DownloadWithRetry -Name "ComfyUI-GGUF" -Url $GgufUrl -OutputPath $GgufZip -SizeText $sizeText
+            Invoke-DownloadWithFallback -Name "ComfyUI-GGUF" -Urls $GgufUrls -OutputPath $GgufZip -SizeText $sizeText
         } else {
             $sizeText = Format-FileSize -Bytes (Get-Item $GgufZip).Length
             Emit "START" "ComfyUI-GGUF|$sizeText"
@@ -494,6 +527,44 @@ try {
         $sz = Format-FileSize -Bytes (Get-Item $GgufZip).Length
         Remove-Item -LiteralPath $GgufZip -Force -ErrorAction SilentlyContinue
         Finish-Ok "ComfyUI-GGUF" $sz
+        $okCount++
+    }
+
+    # 5. Download and install ComfyUI-Inspyrenet-Rembg custom node.
+    if (Test-InspyReady) {
+        Finish-Skip "ComfyUI-Inspyrenet-Rembg" "installed"
+        $skipCount++
+    } else {
+        New-Item -ItemType Directory -Force -Path $CustomNodesDir | Out-Null
+        $needsDownload = $true
+        if (Test-Path $InspyZip) {
+            $needsDownload = $false
+        }
+
+        if ($needsDownload) {
+            $sizeText = "1 MB"
+            Emit "START" "ComfyUI-Inspyrenet-Rembg|$sizeText"
+            Write-Color "Download ComfyUI-Inspyrenet-Rembg ($sizeText)" Yellow
+            Invoke-DownloadWithFallback -Name "ComfyUI-Inspyrenet-Rembg" -Urls $InspyUrls -OutputPath $InspyZip -SizeText $sizeText
+        } else {
+            $sizeText = Format-FileSize -Bytes (Get-Item $InspyZip).Length
+            Emit "START" "ComfyUI-Inspyrenet-Rembg|$sizeText"
+            Write-Color "Use bundled ComfyUI-Inspyrenet-Rembg.zip ($sizeText)" Yellow
+        }
+
+        $tmpInspy = Join-Path $DestDir "_ComfyUI-Inspyrenet-Rembg_extract"
+        Expand-ZipToDirectory -ZipPath $InspyZip -Destination $tmpInspy
+        $sourceDir = Get-ChildItem -LiteralPath $tmpInspy -Directory | Select-Object -First 1
+        if (-not $sourceDir) { throw "ComfyUI-Inspyrenet-Rembg source directory not found after extraction" }
+        if (Test-Path $InspyNodeDir) {
+            Remove-Item -LiteralPath $InspyNodeDir -Recurse -Force
+        }
+        Move-Item -LiteralPath $sourceDir.FullName -Destination $InspyNodeDir -Force
+        Remove-Item -LiteralPath $tmpInspy -Recurse -Force -ErrorAction SilentlyContinue
+        if (-not (Test-InspyReady)) { throw "ComfyUI-Inspyrenet-Rembg files not found after install" }
+        $sz = Format-FileSize -Bytes (Get-Item $InspyZip).Length
+        Remove-Item -LiteralPath $InspyZip -Force -ErrorAction SilentlyContinue
+        Finish-Ok "ComfyUI-Inspyrenet-Rembg" $sz
         $okCount++
     }
 } catch {

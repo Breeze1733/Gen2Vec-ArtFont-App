@@ -87,6 +87,8 @@ function getEngineDownloadTrackPath(backendDir, taskName) {
     'ComfyUI_windows_portable_nvidia.7z': path.join(backendDir, 'ComfyUI_windows_portable_nvidia.7z'),
     'ComfyUI-GGUF': path.join(backendDir, 'ComfyUI-GGUF.zip'),
     'ComfyUI-GGUF.zip': path.join(backendDir, 'ComfyUI-GGUF.zip'),
+    'ComfyUI-Inspyrenet-Rembg': path.join(backendDir, 'ComfyUI-Inspyrenet-Rembg.zip'),
+    'ComfyUI-Inspyrenet-Rembg.zip': path.join(backendDir, 'ComfyUI-Inspyrenet-Rembg.zip'),
   }
   return taskPaths[taskName] || null
 }
@@ -364,6 +366,14 @@ function downloadComfyUIEngine(backendDir, onProgress) {
         reject(new Error('引擎下载后未找到 ComfyUI-GGUF custom node'))
         return
       }
+      const inspyrenetDir = path.join(getComfyUIPortableDir(backendDir), 'ComfyUI', 'custom_nodes', 'ComfyUI-Inspyrenet-Rembg')
+      const inspyrenetReady = fsSync.existsSync(inspyrenetDir) && fsSync
+        .readdirSync(inspyrenetDir, { withFileTypes: true })
+        .some((entry) => entry.isFile() && entry.name.endsWith('.py'))
+      if (!inspyrenetReady) {
+        reject(new Error('引擎下载后未找到 ComfyUI-Inspyrenet-Rembg custom node'))
+        return
+      }
       resolve(result)
     })
   })
@@ -376,37 +386,44 @@ function getComfyUIModelsDir(backendDir) {
 }
 
 const REQUIRED_MODEL_FILES = [
-  ['diffusion_models', 'z_image_turbo_bf16.safetensors', 10 * 1024 ** 3],
-  ['unet', 'flux1-schnell-fp8-e4m3fn.safetensors', 10 * 1024 ** 3],
-  ['text_encoders', 'qwen_2.5_vl_7b_fp8_scaled.safetensors', 8 * 1024 ** 3],
-  ['diffusion_models', 'qwen-image-2512-Q3_K_M.gguf', 7 * 1024 ** 3],
-  ['text_encoders', 'qwen_3_4b.safetensors', 6 * 1024 ** 3],
-  ['clip', 't5xxl_fp8_e4m3fn.safetensors', 4 * 1024 ** 3],
-  ['loras', 'Qwen-Image-Lightning-4steps-V1.0.safetensors', 1 * 1024 ** 3],
-  ['vae', 'ae.safetensors', 200 * 1024 ** 2],
-  ['vae', 'qwen_image_vae.safetensors', 150 * 1024 ** 2],
-  ['clip', 'clip_l.safetensors', 100 * 1024 ** 2],
+  ['diffusion_models', 'z_image_turbo_bf16.safetensors', 10 * 1024 ** 3, '12.3 GB'],
+  ['unet', 'flux1-schnell-fp8-e4m3fn.safetensors', 10 * 1024 ** 3, '11.9 GB'],
+  ['text_encoders', 'qwen_2.5_vl_7b_fp8_scaled.safetensors', 8 * 1024 ** 3, '9.4 GB'],
+  ['diffusion_models', 'qwen-image-2512-Q3_K_M.gguf', 7 * 1024 ** 3, '9 GB'],
+  ['text_encoders', 'qwen_3_4b.safetensors', 6 * 1024 ** 3, '8.0 GB'],
+  ['clip', 't5xxl_fp8_e4m3fn.safetensors', 4 * 1024 ** 3, '4.9 GB'],
+  ['loras', 'Qwen-Image-Lightning-4steps-V1.0.safetensors', 1 * 1024 ** 3, '1.7 GB'],
+  ['vae', 'ae.safetensors', 200 * 1024 ** 2, '335 MB'],
+  ['vae', 'qwen_image_vae.safetensors', 150 * 1024 ** 2, '254 MB'],
+  ['clip', 'clip_l.safetensors', 100 * 1024 ** 2, '246 MB'],
+  ['inspyrenet/.transparent-background', 'ckpt_base.pth', 150 * 1024 ** 2, '170 MB'],
 ]
 
 function getRequiredModelPaths(backendDir) {
   const modelsDir = getComfyUIModelsDir(backendDir)
-  return REQUIRED_MODEL_FILES.map(([subdir, filename, minBytes]) => {
+  return REQUIRED_MODEL_FILES.map(([subdir, filename, minBytes, sizeLabel]) => {
     const filePath = path.join(modelsDir, subdir, filename)
-    return { subdir, filename, filePath, completePath: `${filePath}.complete`, minBytes }
+    return { subdir, filename, filePath, completePath: `${filePath}.complete`, minBytes, sizeLabel }
   })
+}
+
+async function getMissingModels(backendDir) {
+  if (!backendDir) return []
+  const missing = []
+  for (const model of getRequiredModelPaths(backendDir)) {
+    try {
+      const stat = await fs.stat(model.filePath)
+      if (!stat.isFile() || stat.size < model.minBytes) missing.push(model)
+    } catch {
+      missing.push(model)
+    }
+  }
+  return missing
 }
 
 async function checkModelsExist(backendDir) {
   if (!backendDir) return true // 开发模式跳过
-  for (const model of getRequiredModelPaths(backendDir)) {
-    try {
-      const stat = await fs.stat(model.filePath)
-      if (!stat.isFile() || stat.size < model.minBytes) return false
-    } catch {
-      return false
-    }
-  }
-  return true
+  return (await getMissingModels(backendDir)).length === 0
 }
 
 function downloadModels(backendDir, onProgress) {
@@ -662,7 +679,7 @@ function downloadModels(backendDir, onProgress) {
         handleDownloadOutputLines([stdoutBuffer.trim()])
         stdoutBuffer = ''
       }
-      if (code !== 0 && failedFiles === 0) {
+      if (code !== 0 && failedFiles === 0 && !finalResult) {
         // 脚本自身退出非零但无具体文件错误
         reject(new Error(`模型下载脚本异常退出 (退出码: ${code})`))
         return
@@ -906,8 +923,8 @@ async function runStartupSequence(splashWin) {
       sendProgress({ step: 2, phase: 'done', message: '引擎未安装，跳过模型检查', percent: 100 })
       startupState.modelsSkipped = true
     } else {
-      const modelsExist = await checkModelsExist(backendDir)
-      if (!modelsExist && backendDir) {
+      const missingModels = backendDir ? await getMissingModels(backendDir) : []
+      if (missingModels.length > 0 && backendDir) {
         const ps1Path = path.join(backendDir, 'download-models.ps1')
         if (!fsSync.existsSync(ps1Path)) {
           sendProgress({ step: 2, phase: 'done', message: '未包含模型下载脚本，使用本地降级引擎', percent: 100 })
@@ -915,11 +932,11 @@ async function runStartupSequence(splashWin) {
         } else {
           sendProgress({
             step: 2, phase: 'prompt',
-            message: '首次运行需要下载 AI 模型 (约 58 GB)',
+            message: '需要下载本地 AI 模型',
             percent: 0,
             promptLabel: '跳过',
             promptConfirm: '开始下载',
-            promptDetail: '需要下载 10 个模型文件 (约 58 GB)'
+            promptDetail: '下载脚本会自动跳过已存在的模型'
           })
 
           const action = await waitForSplashAction()

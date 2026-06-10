@@ -572,7 +572,8 @@
         // Handle download summary
         if (phase === 'complete' && data.result) {
           const { ok = 0, skip = 0, fail = 0 } = data.result
-          setDownloadDetail(fail > 0 ? `${ok} 成功, ${skip} 跳过, ${fail} 失败` : `全部完成 (${ok} 个文件)`)
+          const totalDone = ok + skip
+          setDownloadDetail(fail > 0 ? `${ok} 成功, ${skip} 跳过, ${fail} 失败` : `全部完成 (${totalDone} 个文件，${skip} 跳过)`)
           setProgress(100)
           setDownloadStats('', '')
           setFileProgress(-1)

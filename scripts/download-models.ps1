@@ -1,7 +1,7 @@
 ﻿# -- download-models.ps1 — AI 模型下载脚本 --
 <#
 .SYNOPSIS
-# -- 下载 10 个 AI 模型文件到 ComfyUI 便携版的 models/ 目录。 --
+# -- 下载 11 个 AI 模型文件到 ComfyUI 便携版的 models/ 目录。 --
 
 .PARAMETER DestDir
 # -- 目标目录（默认：脚本所在目录）。 --
@@ -149,7 +149,10 @@ $Models = @(
        Size = "254 MB" },
     @{ Subdir = "clip";              Filename = "clip_l.safetensors"
        Url = "$HFBase/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors"
-       Size = "246 MB" }
+       Size = "246 MB" },
+    @{ Subdir = "inspyrenet\.transparent-background"; Filename = "ckpt_base.pth"
+       Url = "https://github.com/plemeri/transparent-background/releases/download/1.2.12/ckpt_base.pth"
+       Size = "170 MB" }
 )
 
 # -- 辅助函数 --
