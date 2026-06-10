@@ -9,11 +9,9 @@ node_modules/
 dist/
 release/
 dist-ssr/
-build/
 **/dist/
 **/release/
 **/dist-ssr/
-**/build/
 *.spec
 *.exe
 *.blockmap
@@ -50,6 +48,8 @@ logs/
 services/txt2img-api/input/
 services/txt2img-api/output/
 services/txt2img-api/temp/
+services/txt2img-api/build/
+services/vectorizer-api/build/
 
 # ComfyUI portable/runtime bundles
 services/txt2img-api/ComfyUI_windows_portable_nvidia/
