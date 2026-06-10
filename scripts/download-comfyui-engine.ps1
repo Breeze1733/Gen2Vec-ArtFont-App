@@ -148,7 +148,11 @@ function Invoke-SevenZipWithHeartbeat {
         Write-Host ("`r  {0} finished ({1})        " -f $Label, $elapsedText) -ForegroundColor DarkGray
     }
 
-    return $p.ExitCode
+    # 7za exit code 0 = success, 1 = warning (non-fatal), 2+ = fatal
+    if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 1) {
+        return $p.ExitCode
+    }
+    return 0
 }
 
 function Test-NonEmptyFile {
@@ -407,19 +411,6 @@ function Normalize-ComfyUIExtraction {
     # 7z 解压后目录固定为 DestDir/ComfyUI_windows_portable
     $extractedDir = Join-Path $DestDir "ComfyUI_windows_portable"
 
-    # 目标路径已存在（上次挪好了）→ 只检查，不挪动
-    if (Test-Path $ComfyPortable) {
-        if (-not (Test-ComfyUIReady)) {
-            throw "ComfyUI/main.py not found at $ComfyPortable"
-        }
-        return
-    }
-
-    # 解压产物不存在 → 报错
-    if (-not (Test-Path $extractedDir)) {
-        throw "ComfyUI_windows_portable not found after extraction (expected: $extractedDir)"
-    }
-
     # 挪路径：套一层 ComfyUI_windows_portable_nvidia 父目录
     New-Item -ItemType Directory -Force -Path $ComfyRoot | Out-Null
     Move-Item -LiteralPath $extractedDir -Destination $ComfyPortable -Force
@@ -556,10 +547,20 @@ try {
     }
 
     # 3. Extract ComfyUI archive and delete it after success.
-    if (Test-ComfyUIReady) {
-        Finish-Skip "Extract_ComfyUI" "installed"
-        $skipCount++
-    } else {
+    $extractedDir = Join-Path $DestDir "ComfyUI_windows_portable"
+    if (Test-Path $ComfyPortable) {
+        # 目标路径在且 main.py 就绪 → 跳过
+        if (Test-ComfyUIReady) {
+            Finish-Skip "Extract_ComfyUI" "installed"
+            $skipCount++
+        } else {
+            # 目录在但 main.py 不在说明上次挪坏了 → 删掉重建
+            Write-Step "corrupted $ComfyPortable, re-extract"
+            Remove-Item -LiteralPath $ComfyPortable -Recurse -Force
+            # 回退到 else 流程继续执行
+        }
+    }
+    if (-not (Test-Path $ComfyPortable)) {
         Emit "START" "Extract_ComfyUI|local"
         $extractedDir = Join-Path $DestDir "ComfyUI_windows_portable"
         if (Test-Path $extractedDir) {
