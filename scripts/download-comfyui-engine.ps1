@@ -504,49 +504,55 @@ try {
     if (Test-ComfyUIReady) {
         Finish-Skip "ComfyUI_portable" "installed"
         $skipCount++
-    } elseif (Test-Path $ComfyArchive) {
-        if (-not (Test-Path $ComfyArchiveComplete)) {
+    } else {
+        $needsDownload = $true
+        $sizeText = "2 GB"
+        $existingSize = if (Test-Path $ComfyArchive) { [long](Get-Item $ComfyArchive).Length } else { 0 }
+
+        if ($existingSize -gt 0) {
+            if (Test-Path $ComfyArchiveComplete) {
+                # 有 .complete 标记 → 下载已完整
+                $sz = Format-FileSize -Bytes $existingSize
+                Finish-Skip "ComfyUI_portable" $sz
+                $skipCount++
+                $needsDownload = $false
+            } else {
+                # 有残留文件但无 .complete 标记 → 比对远程大小
+                $remoteBytes = Get-RemoteFileSizeFromFallback -Urls $ComfyUrls
+                $localStr = Format-FileSize -Bytes $existingSize
+                if ($remoteBytes -gt 0 -and $existingSize -eq $remoteBytes) {
+                    # 大小与远程一致 → 补标记，跳过下载
+                    [void](New-Item -ItemType File -Force -Path $ComfyArchiveComplete)
+                    Finish-Skip "ComfyUI_portable" $localStr
+                    $skipCount++
+                    $needsDownload = $false
+                } else {
+                    # 大小不一致 → 续传
+                    $remoteStr = if ($remoteBytes -gt 0) { Format-FileSize -Bytes $remoteBytes } else { "?" }
+                    Emit "CHECK" "ComfyUI_portable|${localStr}|${remoteStr}"
+                    Write-Color "Check ComfyUI portable - local ${localStr} / remote ${remoteStr}" Cyan
+                    Emit "RESUME" "ComfyUI_portable|${localStr}"
+                    Write-Color "Resume ComfyUI portable (existing ${localStr})" Yellow
+                }
+            }
+        }
+
+        if ($needsDownload) {
+            Emit "START" "ComfyUI_portable|$sizeText"
+            Write-Color "Download ComfyUI portable ($sizeText)" Yellow
+
+            Invoke-DownloadWithFallback -Name "ComfyUI_portable" -Urls $ComfyUrls -OutputPath $ComfyArchive -SizeText $sizeText
             Emit "START" "ComfyUI_portable|checking size"
             if (-not (Test-ComfyArchiveSizeReady)) {
                 $actualSize = Format-FileSize -Bytes ([long](Get-Item -LiteralPath $ComfyArchive).Length)
                 $minSize = Format-FileSize -Bytes $ComfyArchiveMinBytes
-                throw "ComfyUI archive is too small: $actualSize, expected at least $minSize"
+                throw "ComfyUI archive is too small after download: $actualSize, expected at least $minSize"
             }
             [void](New-Item -ItemType File -Force -Path $ComfyArchiveComplete)
+            $sz = Format-FileSize -Bytes (Get-Item $ComfyArchive).Length
+            Finish-Ok "ComfyUI_portable" $sz
+            $okCount++
         }
-        $sz = Format-FileSize -Bytes (Get-Item $ComfyArchive).Length
-        Finish-Skip "ComfyUI_portable" $sz
-        $skipCount++
-    } else {
-        $sizeText = "2 GB"
-        Emit "START" "ComfyUI_portable|$sizeText"
-        Write-Color "Download ComfyUI portable ($sizeText)" Yellow
-
-        $existingSize = if (Test-Path $ComfyArchive) { [long](Get-Item $ComfyArchive).Length } else { 0 }
-        if ($existingSize -gt 0) {
-            $localStr = Format-FileSize -Bytes $existingSize
-            Emit "RESUME" "ComfyUI_portable|$localStr"
-            Write-Color "Resume ComfyUI portable (existing $localStr)" Yellow
-
-            $remoteBytes = Get-RemoteFileSizeFromFallback -Urls $ComfyUrls
-            if ($remoteBytes -gt 0) {
-                $remoteStr = Format-FileSize -Bytes $remoteBytes
-                Emit "CHECK" "ComfyUI_portable|$localStr|$remoteStr"
-                Write-Color "Check ComfyUI portable - local ${localStr} / remote ${remoteStr}" Cyan
-            }
-        }
-
-        Invoke-DownloadWithFallback -Name "ComfyUI_portable" -Urls $ComfyUrls -OutputPath $ComfyArchive -SizeText $sizeText
-        Emit "START" "ComfyUI_portable|checking size"
-        if (-not (Test-ComfyArchiveSizeReady)) {
-            $actualSize = Format-FileSize -Bytes ([long](Get-Item -LiteralPath $ComfyArchive).Length)
-            $minSize = Format-FileSize -Bytes $ComfyArchiveMinBytes
-            throw "ComfyUI archive is too small after download: $actualSize, expected at least $minSize"
-        }
-        [void](New-Item -ItemType File -Force -Path $ComfyArchiveComplete)
-        $sz = Format-FileSize -Bytes (Get-Item $ComfyArchive).Length
-        Finish-Ok "ComfyUI_portable" $sz
-        $okCount++
     }
 
     # 3. Extract ComfyUI archive and delete it after success.
