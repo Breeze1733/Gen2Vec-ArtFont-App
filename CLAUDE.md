@@ -249,7 +249,6 @@ cd services/vectorizer-api
 桌面端 `apps/desktop/package.json` 的 `build.extraResources` 当前会复制：
 
 - `txt2img-backend.exe`
-- `7za.exe`
 - `ComfyUI-GGUF.zip`
 - `download-comfyui-engine.ps1`
 - `download-models.ps1`

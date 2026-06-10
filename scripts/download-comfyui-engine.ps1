@@ -1,66 +1,56 @@
-# -- download-comfyui-engine.ps1 -- ComfyUI engine + GGUF download script --
+# download-comfyui-engine.ps1 - download and prepare ComfyUI portable runtime.
 <#
 .SYNOPSIS
-Downloads ComfyUI Windows portable engine and ComfyUI-GGUF custom node.
+Downloads 7za.exe, ComfyUI Windows portable, extracts it, removes the archive,
+then downloads and installs the ComfyUI-GGUF custom node.
 
 .PARAMETER DestDir
-Target directory (default: script directory). Engine extracts to {DestDir}/ComfyUI_windows_portable_nvidia/.
+Target backend directory. Defaults to the script directory.
 
 .PARAMETER Electron
-Electron integration mode: outputs ENGINEDL: structured lines.
+Electron integration mode: prints ENGINEDL: structured progress lines.
 
 .PARAMETER NoMirror
-Use github.com directly without trying domestic mirrors.
+Use github.com directly instead of trying the mirror first.
 
 .PARAMETER MaxRetries
-Max retries per download (default 3).
-
-.PARAMETER ComfyUIVersion
-ComfyUI version tag (default "latest").
+Maximum retries per download. Default: 3.
 #>
 
 param(
     [string]$DestDir = $PSScriptRoot,
     [switch]$Electron,
     [switch]$NoMirror,
-    [int]$MaxRetries = 3,
-    [string]$ComfyUIVersion = "latest"
+    [int]$MaxRetries = 3
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 $PREFIX = if ($Electron) { "ENGINEDL:" } else { "" }
 
-# -- Paths --
-$PortableParent = Join-Path $DestDir "ComfyUI_windows_portable_nvidia"
-$PortableDir    = Join-Path $PortableParent "ComfyUI_windows_portable"
-$ComfyUIDir     = Join-Path $PortableDir "ComfyUI"
-$CustomNodesDir = Join-Path $ComfyUIDir "custom_nodes"
-$GGUFDir        = Join-Path $CustomNodesDir "ComfyUI-GGUF"
+$SevenZipExe = Join-Path $DestDir "7za.exe"
+$SevenZipZip = Join-Path $DestDir "7za920.zip"
+$SevenZipUrl = "https://www.7-zip.org/a/7za920.zip"
 
-# -- Sentinel files --
-$ComfyUISentinel = Join-Path $ComfyUIDir "main.py"
-$GGUFSentinel    = Join-Path $GGUFDir "nodes.py"
+$ComfyArchive = Join-Path $DestDir "ComfyUI_windows_portable_nvidia.7z"
+$ComfyGithubUrl = "https://github.com/Comfy-Org/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z"
+$ComfyMirrorUrl = "https://ghproxy.com/https://github.com/Comfy-Org/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z"
+$ComfyUrls = if ($NoMirror) { @($ComfyGithubUrl) } else { @($ComfyMirrorUrl, $ComfyGithubUrl) }
+$ComfyRoot = Join-Path $DestDir "ComfyUI_windows_portable_nvidia"
+$ComfyPortable = Join-Path $ComfyRoot "ComfyUI_windows_portable"
+$ComfyMain = Join-Path $ComfyPortable "ComfyUI\main.py"
 
-# -- Detect aria2c --
-$UseAria2c = $null -ne (Get-Command "aria2c" -ErrorAction SilentlyContinue)
-
-# -- Download sources (ordered: domestic mirrors first, github.com fallback) --
-# ghproxy.com pattern: https://ghproxy.com/{full-github-url}
-# The Mirror prefix is just the base; Get-ComfyUIDownloadUrl appends the repo path.
-$GithubBase    = "https://github.com"
-$GhProxyBase   = "https://ghproxy.com/https://github.com"
-$MirrorSources = if ($NoMirror) { @($GithubBase) }
-                 else { @($GhProxyBase, $GithubBase) }
-
-# ====================================================================
-# Helper functions
-# ====================================================================
+$GgufZip = Join-Path $DestDir "ComfyUI-GGUF.zip"
+$GgufUrl = "https://github.com/city96/ComfyUI-GGUF/archive/refs/heads/main.zip"
+$CustomNodesDir = Join-Path $ComfyPortable "ComfyUI\custom_nodes"
+$GgufNodeDir = Join-Path $CustomNodesDir "ComfyUI-GGUF"
+$GgufSentinel = Join-Path $GgufNodeDir "nodes.py"
 
 function Emit {
     param([string]$Type, [string]$Message = "")
     if ($Electron) {
-        if ($Message) { Write-Output ($PREFIX + $Type + "|" + $Message) }
-        else { Write-Output ($PREFIX + $Type) }
+        if ($Message) { Write-Output "${PREFIX}${Type}|${Message}" }
+        else { Write-Output "${PREFIX}${Type}" }
     }
 }
 
@@ -76,344 +66,300 @@ function Format-FileSize {
     if ($Bytes -ge 1GB) { return "{0:N2} GB" -f ($Bytes / 1GB) }
     if ($Bytes -ge 1MB) { return "{0:N2} MB" -f ($Bytes / 1MB) }
     if ($Bytes -ge 1KB) { return "{0:N2} KB" -f ($Bytes / 1KB) }
-    return ($Bytes.ToString() + " B")
+    return "$Bytes B"
 }
 
-function Find-7zExe {
-    # 1. Bundled with installer (alongside this script)
-    $bundled7z = Join-Path $PSScriptRoot "7za.exe"
-    if (Test-Path $bundled7z) { return $bundled7z }
-    # 2. System PATH
-    $candidates = @(
-        (Get-Command "7z.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
-        (Get-Command "7z" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
-        (Join-Path $env:ProgramFiles "7-Zip\7z.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "7-Zip\7z.exe")
-    )
-    foreach ($c in $candidates) {
-        if ($c -and (Test-Path $c)) { return $c }
-    }
-    return $null
+function Get-RemoteFileSize {
+    param([string]$Url)
+    try {
+        $req = [System.Net.HttpWebRequest]::Create($Url)
+        $req.Method = "HEAD"
+        $req.Timeout = 30000
+        $req.AllowAutoRedirect = $true
+        $req.UserAgent = "Gen2Vec-ArtFont-EngineDownloader/1.0"
+        $resp = $req.GetResponse()
+        if ($resp.ContentLength -ge 0) {
+            $size = [long]$resp.ContentLength
+            $resp.Close()
+            return $size
+        }
+        $resp.Close()
+    } catch {}
+    return -1
 }
 
-function Ensure-7zExe {
-    return Find-7zExe
-}
-
-function Invoke-FileDownload {
+function Invoke-RangeDownload {
     param(
         [string]$Url,
         [string]$OutputPath
     )
 
-    $outDir = Split-Path $OutputPath -Parent
-    if (-not (Test-Path $outDir)) {
-        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    $existing = if (Test-Path $OutputPath) { [long](Get-Item $OutputPath).Length } else { 0 }
+    $request = [System.Net.HttpWebRequest]::Create($Url)
+    $request.Method = "GET"
+    $request.Timeout = 30000
+    $request.ReadWriteTimeout = 30000
+    $request.AllowAutoRedirect = $true
+    $request.UserAgent = "Gen2Vec-ArtFont-EngineDownloader/1.0"
+    if ($existing -gt 0) {
+        $request.AddRange($existing)
     }
 
-    for ($attempt = 0; $attempt -lt $MaxRetries; $attempt++) {
+    try {
+        $response = $request.GetResponse()
+    } catch [System.Net.WebException] {
+        $resp = $_.Exception.Response
+        if ($resp -and [int]$resp.StatusCode -eq 416) {
+            Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
+            $request = [System.Net.HttpWebRequest]::Create($Url)
+            $request.Method = "GET"
+            $request.Timeout = 30000
+            $request.ReadWriteTimeout = 30000
+            $request.AllowAutoRedirect = $true
+            $request.UserAgent = "Gen2Vec-ArtFont-EngineDownloader/1.0"
+            $response = $request.GetResponse()
+            $existing = 0
+        } else {
+            throw
+        }
+    }
+
+    try {
+        $status = [int]$response.StatusCode
+        if ($existing -gt 0 -and $status -eq 200) {
+            $fileMode = [System.IO.FileMode]::Create
+            $existing = 0
+        } else {
+            $fileMode = [System.IO.FileMode]::OpenOrCreate
+        }
+
+        $inputStream = $response.GetResponseStream()
+        $outputStream = [System.IO.File]::Open($OutputPath, $fileMode, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+        if ($existing -gt 0) {
+            [void]$outputStream.Seek($existing, [System.IO.SeekOrigin]::Begin)
+        } else {
+            $outputStream.SetLength(0)
+        }
+
+        $buffer = New-Object byte[] (1024 * 1024)
+        while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $outputStream.Write($buffer, 0, $read)
+        }
+    } finally {
+        if ($outputStream) { $outputStream.Dispose() }
+        if ($inputStream) { $inputStream.Dispose() }
+        if ($response) { $response.Close() }
+    }
+}
+
+function Invoke-DownloadWithRetry {
+    param(
+        [string]$Name,
+        [string]$Url,
+        [string]$OutputPath,
+        [string]$SizeText
+    )
+
+    for ($i = 0; $i -lt $MaxRetries; $i++) {
         try {
-            if ($UseAria2c) {
-                $outNameArg = Split-Path $OutputPath -Leaf
-                if (Test-Path $OutputPath) {
-                    Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
-                }
-                $ariaArgs = @(
-                    "--continue=false", "--auto-file-renaming=false",
-                    "--allow-overwrite=true", "--split=16", "--min-split-size=1M",
-                    "--max-connection-per-server=16", "--file-allocation=none",
-                    "--console-log-level=error",
-                    "--connect-timeout=10", "--timeout=30",
-                    ("--dir=" + $outDir), ("--out=" + $outNameArg), $Url
-                )
-                $p = Start-Process -FilePath "aria2c" -ArgumentList $ariaArgs -NoNewWindow -Wait -PassThru
-                if ($p.ExitCode -eq 0 -and (Test-Path $OutputPath)) {
-                    return @{ Success = $true; Size = (Get-Item $OutputPath).Length }
-                }
-                throw ("aria2c exited with code " + $p.ExitCode)
-            } else {
-                $request = [System.Net.HttpWebRequest]::Create($Url)
-                $request.Method = "GET"
-                $request.Timeout = 30000
-                $request.ReadWriteTimeout = 60000
-                $request.UserAgent = "Gen2Vec-ArtFont-EngineDownloader/1.0"
-
-                $response = $null
-                $inputStream = $null
-                $outputStream = $null
-                try {
-                    $response = $request.GetResponse()
-                    $status = [int]$response.StatusCode
-                    if ($status -ge 300) {
-                        throw ("HTTP " + $status)
-                    }
-
-                    $fileMode = [System.IO.FileMode]::Create
-                    $inputStream = $response.GetResponseStream()
-                    $outputStream = [System.IO.File]::Open($OutputPath, $fileMode, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-
-                    $buffer = New-Object byte[] (1024 * 1024)
-                    while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-                        $outputStream.Write($buffer, 0, $read)
-                    }
-                } finally {
-                    if ($outputStream) { $outputStream.Dispose() }
-                    if ($inputStream) { $inputStream.Dispose() }
-                    if ($response) { $response.Close() }
-                }
-
-                if (Test-Path $OutputPath) {
-                    $fileSize = (Get-Item $OutputPath).Length
-                    return @{ Success = $true; Size = $fileSize }
-                }
-                throw ("Download completed but file not found: " + $OutputPath)
-            }
+            Invoke-RangeDownload -Url $Url -OutputPath $OutputPath
+            return
         } catch {
-            if ($attempt -ge ($MaxRetries - 1)) {
-                return @{ Success = $false; Message = $_.Exception.Message }
+            $lastError = $_.Exception.Message
+            if ($i -ge $MaxRetries - 1) {
+                throw "${Name}: ${lastError}"
             }
-            Write-Color ("  retry " + ($attempt + 1) + "/" + $MaxRetries + " ...") Yellow
             Start-Sleep -Seconds 3
         }
     }
-    return @{ Success = $false; Message = "Max retries exceeded" }
 }
 
-function Get-ComfyUIDownloadUrl {
-    param([string]$Mirror, [string]$Version)
-    if ($Version -eq "latest") {
-        return ($Mirror + "/Comfy-Org/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z")
-    }
-    return ($Mirror + "/Comfy-Org/ComfyUI/releases/download/v" + $Version + "/ComfyUI_windows_portable_nvidia.7z")
-}
-
-
-# -- Try a download mirror; on failure, try fallbacks --
-function Try-DownloadWithFallback {
+function Invoke-DownloadWithFallback {
     param(
-        [string]$Component,         # "ComfyUI_portable" or "ComfyUI-GGUF"
-        [string[]]$FallbackUrls,    # ordered list of URLs to try
-        [string]$OutputPath,        # where to save
-        [long]$MinBytes = 1024      # minimum valid file size
+        [string]$Name,
+        [string[]]$Urls,
+        [string]$OutputPath,
+        [string]$SizeText
     )
 
-    for ($i = 0; $i -lt $FallbackUrls.Count; $i++) {
-        $url = $FallbackUrls[$i]
-        $label = if ($i -eq 0) { "primary" } else { "fallback #" + $i }
-        Write-Color ("  [" + $label + "] " + $url) DarkGray
-
-        $result = Invoke-FileDownload -Url $url -OutputPath $OutputPath
-        if (-not $result.Success) {
-            Write-Color ("  download failed: " + $result.Message) Yellow
-            Remove-Item $OutputPath -Force -ErrorAction SilentlyContinue
-            continue
+    $errors = @()
+    for ($u = 0; $u -lt $Urls.Count; $u++) {
+        $url = $Urls[$u]
+        $label = if ($u -eq 0 -and $Urls.Count -gt 1) { "mirror" } elseif ($u -gt 0) { "github fallback" } else { "github" }
+        Write-Color "  source: $label" DarkGray
+        try {
+            Invoke-DownloadWithRetry -Name $Name -Url $url -OutputPath $OutputPath -SizeText $SizeText
+            return
+        } catch {
+            $errors += "${label}: $($_.Exception.Message)"
+            Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
         }
-
-        if ($result.Size -lt $MinBytes) {
-            Write-Color ("  file too small (" + $result.Size + " bytes), likely bad response") Yellow
-            Remove-Item $OutputPath -Force -ErrorAction SilentlyContinue
-            continue
-        }
-
-        return @{ Success = $true; Size = $result.Size; Url = $url }
     }
 
-    return @{ Success = $false; Size = 0 }
+    throw "${Name}: all sources failed ($($errors -join '; '))"
 }
 
-# -- Download and install ComfyUI engine --
-function Install-ComfyUIEngine {
-    Emit "START" "ComfyUI_portable|~2 GB"
-
-    # Build ordered URL list: pmirror sources, then github.com fallback
-    $urls = ($MirrorSources | ForEach-Object { Get-ComfyUIDownloadUrl -Mirror $_ -Version $ComfyUIVersion } | Select-Object -Unique)
-
-    $zipPath = Join-Path $DestDir "ComfyUI_windows_portable_nvidia.7z"
-    $dl = Try-DownloadWithFallback -Component "ComfyUI_portable" -FallbackUrls $urls -OutputPath $zipPath -MinBytes (1024 * 1024)
-
-    if (-not $dl.Success) {
-        Emit "ERROR" "ComfyUI_portable|download|all sources failed"
-        Write-Color "  all download sources failed." Red
-        return $false
-    }
-
-    $sz = Format-FileSize -Bytes $dl.Size
-    Write-Color ("  download complete (" + $sz + "), extracting...") Green
-
-    # -- Extract --
-    $sevenZip = Ensure-7zExe
-    if ($sevenZip) {
-        Write-Color ("  using 7z: " + $sevenZip) DarkGray
-        New-Item -ItemType Directory -Force -Path $PortableParent | Out-Null
-        $extractArgs = @("x", $zipPath, ("-o" + $PortableParent), "-y", "-mmt=on")
-        $extractProc = Start-Process -FilePath $sevenZip -ArgumentList $extractArgs -NoNewWindow -Wait -PassThru
-        if ($extractProc.ExitCode -ne 0) {
-            Emit "ERROR" ("ComfyUI_portable|extract|7z exit code " + $extractProc.ExitCode)
-            Write-Color ("  7z extraction failed (exit code " + $extractProc.ExitCode + ")") Red
-            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-            return $false
-        }
-    } else {
-        Write-Color "  failed to obtain 7z.exe (system not found + download failed)" Red
-        Emit "ERROR" "ComfyUI_portable|extract|7z not found"
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-        return $false
-    }
-
-    Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-
-    # -- Verify --
-    if (-not (Test-Path $ComfyUISentinel)) {
-        Emit "ERROR" ("ComfyUI_portable|verify|sentinel not found: " + $ComfyUISentinel)
-        Write-Color "  ComfyUI/main.py not found after extraction, check file structure" Red
-        return $false
-    }
-
-    Emit "DONE" ("ComfyUI_portable|" + $sz)
-    Write-Color ("  ComfyUI engine ready (" + $sz + ")") Green
-    return $true
+function Ensure-ZipAssembly {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
 }
 
-# -- Install ComfyUI-GGUF (local zip first, network fallback) --
-function Install-ComfyUIGGUF {
-    Emit "START" "ComfyUI-GGUF|~50 KB"
-
-    $zipPath = $null
-    $isLocalZip = $false
-
-    # 1. Check bundled zip alongside this script
-    $localZip = Join-Path $PSScriptRoot "ComfyUI-GGUF.zip"
-    if (Test-Path $localZip) {
-        $header = [System.IO.File]::ReadAllBytes($localZip)[0..1]
-        if ($header[0] -eq 0x50 -and $header[1] -eq 0x4B) {
-            Write-Color "  using bundled ComfyUI-GGUF.zip" DarkGray
-            $zipPath = $localZip
-            $isLocalZip = $true
-        }
+function Expand-ZipToDirectory {
+    param([string]$ZipPath, [string]$Destination)
+    Ensure-ZipAssembly
+    if (Test-Path $Destination) {
+        Remove-Item -LiteralPath $Destination -Recurse -Force
     }
-
-    # 2. Bundled zip not found — hard fail (no network fallback)
-    if (-not $zipPath) {
-        Write-Color "  ComfyUI-GGUF.zip not found alongside script." Red
-        Write-Color "  This file is bundled with the installer. Please reinstall the application." Red
-        Emit "ERROR" "ComfyUI-GGUF|missing|bundled zip not found"
-        return $false
-    }
-
-    $sz = Format-FileSize -Bytes (Get-Item $zipPath).Length
-    Write-Color ("  installing to custom_nodes... (" + $sz + ")") Green
-
-    New-Item -ItemType Directory -Force -Path $CustomNodesDir | Out-Null
-
-    try {
-        $tempExtract = Join-Path $DestDir "_gguf_extract_temp"
-        if (Test-Path $tempExtract) {
-            Remove-Item -Recurse -Force $tempExtract -ErrorAction SilentlyContinue
-        }
-
-        Expand-Archive -Path $zipPath -DestinationPath $tempExtract -Force
-
-        $extractedDir = Get-ChildItem -Path $tempExtract -Directory | Select-Object -First 1
-        if (-not $extractedDir) {
-            throw "No directory found in zip"
-        }
-
-        if (Test-Path $GGUFDir) {
-            Remove-Item -Recurse -Force $GGUFDir -ErrorAction SilentlyContinue
-        }
-        Move-Item -Path $extractedDir.FullName -Destination $GGUFDir -Force
-
-        Remove-Item -Recurse -Force $tempExtract -ErrorAction SilentlyContinue
-        if (-not $isLocalZip) {
-            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-        }
-    } catch {
-        $errMsg = $_.Exception.Message
-        Remove-Item -Recurse -Force $tempExtract -ErrorAction SilentlyContinue
-        if (-not $isLocalZip) {
-            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-        }
-        Emit "ERROR" ("ComfyUI-GGUF|extract|" + $errMsg)
-        Write-Color ("  GGUF install failed: " + $errMsg) Red
-        return $false
-    }
-
-    if (-not (Test-Path $GGUFSentinel)) {
-        Emit "ERROR" ("ComfyUI-GGUF|verify|sentinel not found: " + $GGUFSentinel)
-        Write-Color "  custom_nodes/ComfyUI-GGUF/nodes.py not found after install" Red
-        return $false
-    }
-
-    Emit "DONE" ("ComfyUI-GGUF|" + $sz)
-    Write-Color ("  ComfyUI-GGUF ready (" + $sz + ")") Green
-    return $true
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $Destination)
 }
 
-# ====================================================================
-# Main
-# ====================================================================
+function Finish-Ok {
+    param([string]$Name, [string]$Size = "")
+    if ($Size) { Emit "DONE" "${Name}|${Size}" }
+    else { Emit "DONE" $Name }
+    Write-Color "OK $Name" Green
+}
+
+function Finish-Skip {
+    param([string]$Name, [string]$Size = "")
+    if ($Size) { Emit "SKIP" "${Name}|${Size}" }
+    else { Emit "SKIP" $Name }
+    Write-Color "Skip $Name" DarkGray
+}
+
+New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
 
 if (-not $Electron) {
     Write-Host "============================================" -ForegroundColor Cyan
-    Write-Host "  ComfyUI Engine + GGUF Downloader" -ForegroundColor White
-    Write-Host ("  Target: " + $DestDir) -ForegroundColor White
-    $toolName = if ($UseAria2c) { "aria2c" } else { "PowerShell Range HTTP" }
-    Write-Host ("  Tool:   " + $toolName) -ForegroundColor White
-    $srcLabel = if ($NoMirror) { "github.com" } else { "ghproxy.com -> github.com" }
-    Write-Host ("  Source: " + $srcLabel) -ForegroundColor White
+    Write-Host "  ComfyUI engine downloader" -ForegroundColor White
+    Write-Host "  Target: $DestDir" -ForegroundColor White
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host ""
 }
 
 Emit "READY"
-
-$components = @()
-if (-not (Test-Path $ComfyUISentinel)) { $components += "ComfyUI" }
-if (-not (Test-Path $GGUFSentinel))    { $components += "GGUF" }
-
-$totalCount = $components.Count
-Emit "TOTAL" ($totalCount.ToString())
-
-if ($totalCount -eq 0) {
-    Write-Color "All components ready, nothing to download." Green
-    Emit "COMPLETE" "0|0|0"
-    if (-not $Electron) { Read-Host "Press Enter to exit" }
-    exit 0
-}
+Emit "TOTAL" 4
 
 $okCount = 0
+$skipCount = 0
 $failCount = 0
 
-if (-not (Test-Path $ComfyUISentinel)) {
-    Write-Color "`n[1/2] Downloading ComfyUI engine..." Yellow
-    if (Install-ComfyUIEngine) { $okCount++ } else { $failCount++ }
-} else {
-    Write-Color "`n[1/2] ComfyUI engine already exists, skip." DarkGray
-    Emit "SKIP" "ComfyUI_portable"
-    $okCount++
+try {
+    # 1. Download 7za.exe.
+    $sevenZipReady = Test-Path $SevenZipExe
+    if ($sevenZipReady) {
+        $sz = Format-FileSize -Bytes (Get-Item $SevenZipExe).Length
+        Finish-Skip "7za.exe" $sz
+        $skipCount++
+    } else {
+        $sizeText = "1.10 MB"
+        Emit "START" "7za.exe|$sizeText"
+        Write-Color "Download 7za.exe ($sizeText)" Yellow
+        Invoke-DownloadWithRetry -Name "7za.exe" -Url $SevenZipUrl -OutputPath $SevenZipZip -SizeText $sizeText
+
+        $tmp7z = Join-Path $DestDir "_7za_extract"
+        Expand-ZipToDirectory -ZipPath $SevenZipZip -Destination $tmp7z
+        $extracted = Get-ChildItem -LiteralPath $tmp7z -Recurse -Filter "7za.exe" -File | Select-Object -First 1
+        if (-not $extracted) { throw "7za.exe not found inside downloaded archive" }
+        Copy-Item -LiteralPath $extracted.FullName -Destination $SevenZipExe -Force
+        Remove-Item -LiteralPath $tmp7z -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $SevenZipZip -Force -ErrorAction SilentlyContinue
+        $sz = Format-FileSize -Bytes (Get-Item $SevenZipExe).Length
+        Finish-Ok "7za.exe" $sz
+        $okCount++
+    }
+
+    # 2. Download ComfyUI portable archive.
+    if (Test-Path $ComfyMain) {
+        Finish-Skip "ComfyUI_portable" "installed"
+        $skipCount++
+    } else {
+        $sizeText = "2 GB"
+        Emit "START" "ComfyUI_portable|$sizeText"
+        Write-Color "Download ComfyUI portable ($sizeText)" Yellow
+        Invoke-DownloadWithFallback -Name "ComfyUI_portable" -Urls $ComfyUrls -OutputPath $ComfyArchive -SizeText $sizeText
+        $sz = Format-FileSize -Bytes (Get-Item $ComfyArchive).Length
+        Finish-Ok "ComfyUI_portable" $sz
+        $okCount++
+    }
+
+    # 3. Extract ComfyUI archive and delete it after success.
+    if (Test-Path $ComfyMain) {
+        Finish-Skip "Extract_ComfyUI" "installed"
+        $skipCount++
+    } else {
+        if (-not (Test-Path $ComfyArchive)) { throw "ComfyUI archive missing: $ComfyArchive" }
+        Emit "START" "Extract_ComfyUI|local"
+        Write-Color "Extract ComfyUI portable" Yellow
+        if (Test-Path $ComfyRoot) {
+            Remove-Item -LiteralPath $ComfyRoot -Recurse -Force
+        }
+        $p = Start-Process -FilePath $SevenZipExe -ArgumentList @(
+            'x',
+            '-y',
+            "-o$DestDir",
+            $ComfyArchive
+        ) -NoNewWindow -Wait -PassThru
+        if ($p.ExitCode -ne 0) { throw "7za extract failed with exit code $($p.ExitCode)" }
+        if (-not (Test-Path $ComfyMain)) { throw "ComfyUI/main.py not found after extraction" }
+        Remove-Item -LiteralPath $ComfyArchive -Force -ErrorAction SilentlyContinue
+        Finish-Ok "Extract_ComfyUI" "ready"
+        $okCount++
+    }
+
+    # 4. Download and install ComfyUI-GGUF custom node.
+    if (Test-Path $GgufSentinel) {
+        Finish-Skip "ComfyUI-GGUF" "installed"
+        $skipCount++
+    } else {
+        New-Item -ItemType Directory -Force -Path $CustomNodesDir | Out-Null
+        $needsDownload = $true
+        if (Test-Path $GgufZip) {
+            $needsDownload = $false
+        }
+
+        if ($needsDownload) {
+            $sizeText = "200 KB"
+            Emit "START" "ComfyUI-GGUF|$sizeText"
+            Write-Color "Download ComfyUI-GGUF ($sizeText)" Yellow
+            Invoke-DownloadWithRetry -Name "ComfyUI-GGUF" -Url $GgufUrl -OutputPath $GgufZip -SizeText $sizeText
+        } else {
+            $sizeText = Format-FileSize -Bytes (Get-Item $GgufZip).Length
+            Emit "START" "ComfyUI-GGUF|$sizeText"
+            Write-Color "Use bundled ComfyUI-GGUF.zip ($sizeText)" Yellow
+        }
+
+        $tmpGguf = Join-Path $DestDir "_ComfyUI-GGUF_extract"
+        Expand-ZipToDirectory -ZipPath $GgufZip -Destination $tmpGguf
+        $sourceDir = Get-ChildItem -LiteralPath $tmpGguf -Directory | Select-Object -First 1
+        if (-not $sourceDir) { throw "ComfyUI-GGUF source directory not found after extraction" }
+        if (Test-Path $GgufNodeDir) {
+            Remove-Item -LiteralPath $GgufNodeDir -Recurse -Force
+        }
+        Move-Item -LiteralPath $sourceDir.FullName -Destination $GgufNodeDir -Force
+        Remove-Item -LiteralPath $tmpGguf -Recurse -Force -ErrorAction SilentlyContinue
+        if (-not (Test-Path $GgufSentinel)) { throw "ComfyUI-GGUF nodes.py not found after install" }
+        $sz = Format-FileSize -Bytes (Get-Item $GgufZip).Length
+        Finish-Ok "ComfyUI-GGUF" $sz
+        $okCount++
+    }
+} catch {
+    $failCount++
+    $msg = $_.Exception.Message -replace "\|", ":"
+    $name = if ($_.InvocationInfo -and $_.InvocationInfo.MyCommand) { $_.InvocationInfo.MyCommand.Name } else { "script" }
+    Emit "ERROR" "${name}|1|$msg"
+    Write-Color "Error: $msg" Red
 }
 
-if (-not (Test-Path $GGUFSentinel)) {
-    Write-Color "`n[2/2] Downloading ComfyUI-GGUF..." Yellow
-    if (Install-ComfyUIGGUF) { $okCount++ } else { $failCount++ }
-} else {
-    Write-Color "`n[2/2] ComfyUI-GGUF already exists, skip." DarkGray
-    Emit "SKIP" "ComfyUI-GGUF"
-    $okCount++
-}
-
-$skipCount = $totalCount - $okCount - $failCount
-if ($skipCount -lt 0) { $skipCount = 0 }
-Emit "COMPLETE" ($okCount.ToString() + "|" + $skipCount.ToString() + "|" + $failCount.ToString())
+Emit "COMPLETE" "${okCount}|${skipCount}|${failCount}"
 
 if (-not $Electron) {
     Write-Host ""
     if ($failCount -gt 0) {
-        Write-Host ("Done: " + $okCount + " ok, " + $skipCount + " skip, " + $failCount + " fail") -ForegroundColor Yellow
+        Write-Host "Finished with failures: $okCount ok, $skipCount skipped, $failCount failed" -ForegroundColor Yellow
     } else {
-        Write-Host ("Done! " + $okCount + " downloaded, " + $skipCount + " skipped.") -ForegroundColor Green
+        Write-Host "All done: $okCount ok, $skipCount skipped" -ForegroundColor Green
     }
-    Read-Host "Press Enter to exit"
 }
 
 if ($failCount -gt 0) { exit 1 } else { exit 0 }

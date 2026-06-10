@@ -80,6 +80,17 @@ function isComfyUIReady(backendDir) {
   return fsSync.existsSync(sentinel)
 }
 
+function getEngineDownloadTrackPath(backendDir, taskName) {
+  const taskPaths = {
+    '7za.exe': path.join(backendDir, '7za920.zip'),
+    'ComfyUI_portable': path.join(backendDir, 'ComfyUI_windows_portable_nvidia.7z'),
+    'ComfyUI_windows_portable_nvidia.7z': path.join(backendDir, 'ComfyUI_windows_portable_nvidia.7z'),
+    'ComfyUI-GGUF': path.join(backendDir, 'ComfyUI-GGUF.zip'),
+    'ComfyUI-GGUF.zip': path.join(backendDir, 'ComfyUI-GGUF.zip'),
+  }
+  return taskPaths[taskName] || null
+}
+
 function downloadComfyUIEngine(backendDir, onProgress) {
   return new Promise((resolve, reject) => {
     const ps1Path = path.join(backendDir, 'download-comfyui-engine.ps1')
@@ -132,18 +143,18 @@ function downloadComfyUIEngine(backendDir, onProgress) {
             currentFileSize = parts[2] || ''
             startedDownloading = true
             // 添加到文件大小跟踪列表
-            const engineFilePath = path.join(backendDir, currentFileName === 'ComfyUI_portable'
-              ? 'ComfyUI_windows_portable_nvidia.7z'
-              : 'ComfyUI-GGUF.zip')
-            let initialSize = 0
-            try { if (fsSync.existsSync(engineFilePath)) initialSize = fsSync.statSync(engineFilePath).size } catch (_) {}
-            trackedFiles.push({
-              name: currentFileName,
-              fullPath: engineFilePath,
-              lastSize: initialSize,
-              lastTime: Date.now(),
-              remoteSize: 0
-            })
+            const engineFilePath = getEngineDownloadTrackPath(backendDir, currentFileName)
+            if (engineFilePath) {
+              let initialSize = 0
+              try { if (fsSync.existsSync(engineFilePath)) initialSize = fsSync.statSync(engineFilePath).size } catch (_) {}
+              trackedFiles.push({
+                name: currentFileName,
+                fullPath: engineFilePath,
+                lastSize: initialSize,
+                lastTime: Date.now(),
+                remoteSize: 0
+              })
+            }
             if (onProgress) {
               onProgress({
                 step: 1, phase: 'downloading',
