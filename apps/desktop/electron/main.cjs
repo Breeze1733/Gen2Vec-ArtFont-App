@@ -376,23 +376,23 @@ function getComfyUIModelsDir(backendDir) {
 }
 
 const REQUIRED_MODEL_FILES = [
-  ['diffusion_models', 'z_image_turbo_bf16.safetensors'],
-  ['unet', 'flux1-schnell-fp8-e4m3fn.safetensors'],
-  ['text_encoders', 'qwen_2.5_vl_7b_fp8_scaled.safetensors'],
-  ['diffusion_models', 'qwen-image-2512-Q3_K_M.gguf'],
-  ['text_encoders', 'qwen_3_4b.safetensors'],
-  ['clip', 't5xxl_fp8_e4m3fn.safetensors'],
-  ['loras', 'Qwen-Image-Lightning-4steps-V1.0.safetensors'],
-  ['vae', 'ae.safetensors'],
-  ['vae', 'qwen_image_vae.safetensors'],
-  ['clip', 'clip_l.safetensors'],
+  ['diffusion_models', 'z_image_turbo_bf16.safetensors', 10 * 1024 ** 3],
+  ['unet', 'flux1-schnell-fp8-e4m3fn.safetensors', 10 * 1024 ** 3],
+  ['text_encoders', 'qwen_2.5_vl_7b_fp8_scaled.safetensors', 8 * 1024 ** 3],
+  ['diffusion_models', 'qwen-image-2512-Q3_K_M.gguf', 7 * 1024 ** 3],
+  ['text_encoders', 'qwen_3_4b.safetensors', 6 * 1024 ** 3],
+  ['clip', 't5xxl_fp8_e4m3fn.safetensors', 4 * 1024 ** 3],
+  ['loras', 'Qwen-Image-Lightning-4steps-V1.0.safetensors', 1 * 1024 ** 3],
+  ['vae', 'ae.safetensors', 200 * 1024 ** 2],
+  ['vae', 'qwen_image_vae.safetensors', 150 * 1024 ** 2],
+  ['clip', 'clip_l.safetensors', 100 * 1024 ** 2],
 ]
 
 function getRequiredModelPaths(backendDir) {
   const modelsDir = getComfyUIModelsDir(backendDir)
-  return REQUIRED_MODEL_FILES.map(([subdir, filename]) => {
+  return REQUIRED_MODEL_FILES.map(([subdir, filename, minBytes]) => {
     const filePath = path.join(modelsDir, subdir, filename)
-    return { subdir, filename, filePath, completePath: `${filePath}.complete` }
+    return { subdir, filename, filePath, completePath: `${filePath}.complete`, minBytes }
   })
 }
 
@@ -400,8 +400,8 @@ async function checkModelsExist(backendDir) {
   if (!backendDir) return true // 开发模式跳过
   for (const model of getRequiredModelPaths(backendDir)) {
     try {
-      await fs.access(model.filePath)
-      await fs.access(model.completePath)
+      const stat = await fs.stat(model.filePath)
+      if (!stat.isFile() || stat.size < model.minBytes) return false
     } catch {
       return false
     }

@@ -56,6 +56,7 @@ $ComfyUrls = if ($EnvComfyUrls.Count -gt 0) {
 $ComfyRoot = Join-Path $DestDir "ComfyUI_windows_portable_nvidia"
 $ComfyPortable = Join-Path $ComfyRoot "ComfyUI_windows_portable"
 $ComfyMain = Join-Path $ComfyPortable "ComfyUI\main.py"
+$ComfyPython = Join-Path $ComfyPortable "python_embeded\python.exe"
 
 $GgufZip = Join-Path $DestDir "ComfyUI-GGUF.zip"
 $GgufUrl = "https://github.com/city96/ComfyUI-GGUF/archive/refs/heads/main.zip"
@@ -74,6 +75,33 @@ function Emit {
 function Write-Color {
     param([string]$Text, [string]$Color = "White")
     if (-not $Electron) { Write-Host $Text -ForegroundColor $Color }
+}
+
+function Test-NonEmptyFile {
+    param(
+        [string]$Path,
+        [long]$MinBytes = 1
+    )
+
+    if (-not (Test-Path $Path)) { return $false }
+    try {
+        $item = Get-Item -LiteralPath $Path
+        return $item.PSIsContainer -eq $false -and $item.Length -ge $MinBytes
+    } catch {
+        return $false
+    }
+}
+
+function Test-SevenZipReady {
+    Test-NonEmptyFile -Path $SevenZipExe -MinBytes (100 * 1024)
+}
+
+function Test-ComfyUIReady {
+    (Test-NonEmptyFile -Path $ComfyMain) -and (Test-NonEmptyFile -Path $ComfyPython -MinBytes (100 * 1024))
+}
+
+function Test-GgufReady {
+    Test-NonEmptyFile -Path $GgufSentinel
 }
 
 function Format-FileSize {
@@ -232,7 +260,7 @@ function Test-SevenZipArchive {
         [string]$SevenZipPath
     )
 
-    if (-not (Test-Path $ArchivePath) -or -not (Test-Path $SevenZipPath)) {
+    if (-not (Test-NonEmptyFile -Path $ArchivePath) -or -not (Test-NonEmptyFile -Path $SevenZipPath -MinBytes (100 * 1024))) {
         return $false
     }
 
@@ -242,7 +270,7 @@ function Test-SevenZipArchive {
         $p = Start-Process -FilePath $SevenZipPath -WorkingDirectory $archiveDir -ArgumentList @(
             't',
             $archiveName
-        ) -NoNewWindow -Wait -PassThru
+        ) -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:TEMP\gen2vec-7za-test.out" -RedirectStandardError "$env:TEMP\gen2vec-7za-test.err"
         return $p.ExitCode -eq 0
     } catch {
         return $false
@@ -271,7 +299,7 @@ function Resolve-ComfyUIPortableCandidate {
 }
 
 function Normalize-ComfyUIExtraction {
-    if (Test-Path $ComfyMain) { return }
+    if (Test-ComfyUIReady) { return }
 
     $candidate = Resolve-ComfyUIPortableCandidate -SearchRoot $DestDir
     if (-not $candidate) {
@@ -290,7 +318,7 @@ function Normalize-ComfyUIExtraction {
     }
 
     Move-Item -LiteralPath $candidate -Destination $ComfyPortable -Force
-    if (-not (Test-Path $ComfyMain)) {
+    if (-not (Test-ComfyUIReady)) {
         throw "ComfyUI/main.py not found after moving extracted directory"
     }
 }
@@ -342,7 +370,7 @@ $failCount = 0
 
 try {
     # 1. Download 7za.exe.
-    $sevenZipReady = Test-Path $SevenZipExe
+    $sevenZipReady = Test-SevenZipReady
     if ($sevenZipReady) {
         $sz = Format-FileSize -Bytes (Get-Item $SevenZipExe).Length
         Finish-Skip "7za.exe" $sz
@@ -366,7 +394,7 @@ try {
     }
 
     # 2. Download ComfyUI portable archive.
-    if (Test-Path $ComfyMain) {
+    if (Test-ComfyUIReady) {
         Finish-Skip "ComfyUI_portable" "installed"
         $skipCount++
     } elseif ((Test-Path $ComfyArchive) -and ((Test-Path $ComfyArchiveComplete) -or (Test-SevenZipArchive -ArchivePath $ComfyArchive -SevenZipPath $SevenZipExe))) {
@@ -406,7 +434,7 @@ try {
     }
 
     # 3. Extract ComfyUI archive and delete it after success.
-    if (Test-Path $ComfyMain) {
+    if (Test-ComfyUIReady) {
         Finish-Skip "Extract_ComfyUI" "installed"
         $skipCount++
     } else {
@@ -424,7 +452,7 @@ try {
         ) -NoNewWindow -Wait -PassThru
         if ($p.ExitCode -ne 0) { throw "7za extract failed with exit code $($p.ExitCode)" }
         Normalize-ComfyUIExtraction
-        if (-not (Test-Path $ComfyMain)) { throw "ComfyUI/main.py not found after extraction" }
+        if (-not (Test-ComfyUIReady)) { throw "ComfyUI portable files not found after extraction" }
         Remove-Item -LiteralPath $ComfyArchive -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $ComfyArchiveComplete -Force -ErrorAction SilentlyContinue
         Finish-Ok "Extract_ComfyUI" "ready"
@@ -432,7 +460,7 @@ try {
     }
 
     # 4. Download and install ComfyUI-GGUF custom node.
-    if (Test-Path $GgufSentinel) {
+    if (Test-GgufReady) {
         Finish-Skip "ComfyUI-GGUF" "installed"
         $skipCount++
     } else {
@@ -462,7 +490,7 @@ try {
         }
         Move-Item -LiteralPath $sourceDir.FullName -Destination $GgufNodeDir -Force
         Remove-Item -LiteralPath $tmpGguf -Recurse -Force -ErrorAction SilentlyContinue
-        if (-not (Test-Path $GgufSentinel)) { throw "ComfyUI-GGUF nodes.py not found after install" }
+        if (-not (Test-GgufReady)) { throw "ComfyUI-GGUF files not found after install" }
         $sz = Format-FileSize -Bytes (Get-Item $GgufZip).Length
         Finish-Ok "ComfyUI-GGUF" $sz
         $okCount++
