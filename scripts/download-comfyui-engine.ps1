@@ -33,6 +33,7 @@ $SevenZipZip = Join-Path $DestDir "7za920.zip"
 $SevenZipUrl = "https://www.7-zip.org/a/7za920.zip"
 
 $ComfyArchive = Join-Path $DestDir "ComfyUI_windows_portable_nvidia.7z"
+$ComfyArchiveComplete = "$ComfyArchive.complete"
 $ComfyGithubUrl = "https://github.com/Comfy-Org/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z"
 $ComfyMirrorUrls = @(
     "https://gh-proxy.com/$ComfyGithubUrl",
@@ -209,11 +210,43 @@ function Invoke-DownloadWithFallback {
             return
         } catch {
             $errors += "${label}: $($_.Exception.Message)"
-            Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
         }
     }
 
     throw "${Name}: all sources failed ($($errors -join '; '))"
+}
+
+function Get-RemoteFileSizeFromFallback {
+    param([string[]]$Urls)
+
+    foreach ($url in $Urls) {
+        $size = Get-RemoteFileSize -Url $url
+        if ($size -gt 0) { return $size }
+    }
+    return -1
+}
+
+function Test-SevenZipArchive {
+    param(
+        [string]$ArchivePath,
+        [string]$SevenZipPath
+    )
+
+    if (-not (Test-Path $ArchivePath) -or -not (Test-Path $SevenZipPath)) {
+        return $false
+    }
+
+    try {
+        $archiveDir = Split-Path $ArchivePath -Parent
+        $archiveName = Split-Path $ArchivePath -Leaf
+        $p = Start-Process -FilePath $SevenZipPath -WorkingDirectory $archiveDir -ArgumentList @(
+            't',
+            $archiveName
+        ) -NoNewWindow -Wait -PassThru
+        return $p.ExitCode -eq 0
+    } catch {
+        return $false
+    }
 }
 
 function Ensure-ZipAssembly {
@@ -290,11 +323,37 @@ try {
     if (Test-Path $ComfyMain) {
         Finish-Skip "ComfyUI_portable" "installed"
         $skipCount++
+    } elseif ((Test-Path $ComfyArchive) -and ((Test-Path $ComfyArchiveComplete) -or (Test-SevenZipArchive -ArchivePath $ComfyArchive -SevenZipPath $SevenZipExe))) {
+        if (-not (Test-Path $ComfyArchiveComplete)) {
+            [void](New-Item -ItemType File -Force -Path $ComfyArchiveComplete)
+        }
+        $sz = Format-FileSize -Bytes (Get-Item $ComfyArchive).Length
+        Finish-Skip "ComfyUI_portable" $sz
+        $skipCount++
     } else {
         $sizeText = "2 GB"
         Emit "START" "ComfyUI_portable|$sizeText"
         Write-Color "Download ComfyUI portable ($sizeText)" Yellow
+
+        $existingSize = if (Test-Path $ComfyArchive) { [long](Get-Item $ComfyArchive).Length } else { 0 }
+        if ($existingSize -gt 0) {
+            $localStr = Format-FileSize -Bytes $existingSize
+            Emit "RESUME" "ComfyUI_portable|$localStr"
+            Write-Color "Resume ComfyUI portable (existing $localStr)" Yellow
+
+            $remoteBytes = Get-RemoteFileSizeFromFallback -Urls $ComfyUrls
+            if ($remoteBytes -gt 0) {
+                $remoteStr = Format-FileSize -Bytes $remoteBytes
+                Emit "CHECK" "ComfyUI_portable|$localStr|$remoteStr"
+                Write-Color "Check ComfyUI portable - local ${localStr} / remote ${remoteStr}" Cyan
+            }
+        }
+
         Invoke-DownloadWithFallback -Name "ComfyUI_portable" -Urls $ComfyUrls -OutputPath $ComfyArchive -SizeText $sizeText
+        if (-not (Test-SevenZipArchive -ArchivePath $ComfyArchive -SevenZipPath $SevenZipExe)) {
+            throw "ComfyUI archive failed integrity test: $ComfyArchive"
+        }
+        [void](New-Item -ItemType File -Force -Path $ComfyArchiveComplete)
         $sz = Format-FileSize -Bytes (Get-Item $ComfyArchive).Length
         Finish-Ok "ComfyUI_portable" $sz
         $okCount++
@@ -311,15 +370,16 @@ try {
         if (Test-Path $ComfyRoot) {
             Remove-Item -LiteralPath $ComfyRoot -Recurse -Force
         }
-        $p = Start-Process -FilePath $SevenZipExe -ArgumentList @(
+        $p = Start-Process -FilePath $SevenZipExe -WorkingDirectory $DestDir -ArgumentList @(
             'x',
             '-y',
-            "-o$DestDir",
-            $ComfyArchive
+            '-o.',
+            (Split-Path $ComfyArchive -Leaf)
         ) -NoNewWindow -Wait -PassThru
         if ($p.ExitCode -ne 0) { throw "7za extract failed with exit code $($p.ExitCode)" }
         if (-not (Test-Path $ComfyMain)) { throw "ComfyUI/main.py not found after extraction" }
         Remove-Item -LiteralPath $ComfyArchive -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $ComfyArchiveComplete -Force -ErrorAction SilentlyContinue
         Finish-Ok "Extract_ComfyUI" "ready"
         $okCount++
     }
