@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import atexit
 import configparser
 import logging
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -19,6 +21,44 @@ from .generator import generate_artwork, warmup_comfyui_connection
 from .models import GenerationRequest, GenerationResponse
 
 logger = logging.getLogger(__name__)
+
+# 存储 ComfyUI 子进程引用，用于 Ctrl+C 时自动清理
+_comfyui_proc: subprocess.Popen | None = None
+
+
+def _cleanup_comfyui() -> None:
+    """退出时强制终止 ComfyUI 子进程树。"""
+    global _comfyui_proc
+    if _comfyui_proc is None or _comfyui_proc.poll() is not None:
+        return
+    logger.info("正在关闭 ComfyUI (pid %d)...", _comfyui_proc.pid)
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(_comfyui_proc.pid)],
+            capture_output=True,
+        )
+    else:
+        _comfyui_proc.terminate()
+        try:
+            _comfyui_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _comfyui_proc.kill()
+            _comfyui_proc.wait(timeout=3)
+    logger.info("ComfyUI 已关闭")
+
+
+atexit.register(_cleanup_comfyui)
+
+# Ctrl+C 时先清理再退出（Windows 上 atexit 也生效，这里是双保险）
+def _signal_handler(signum: int, frame: object) -> None:
+    _cleanup_comfyui()
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, _signal_handler)
+if hasattr(signal, "SIGTERM"):
+    signal.signal(signal.SIGTERM, _signal_handler)
+
 
 # ComfyUI portable bundle lives as a sibling of the running EXE (frozen) or
 # the service checkout root (dev). Keeping it out of `_MEIPASS` lets users
@@ -184,6 +224,7 @@ def _launch_and_wait(
     cwd: Path,
 ) -> None:
     """Spawn ComfyUI subprocess and poll until the API is reachable."""
+    global _comfyui_proc
     try:
         if isinstance(cmd, Path):
             # .bat launcher — needs shell
@@ -205,6 +246,8 @@ def _launch_and_wait(
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
+
+        _comfyui_proc = proc  # 保存引用，供 Ctrl+C 时清理
 
         start = time.monotonic()
         while time.monotonic() - start < timeout:
