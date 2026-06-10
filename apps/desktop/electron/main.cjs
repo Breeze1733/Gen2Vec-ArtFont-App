@@ -893,7 +893,7 @@ async function runStartupSequence(splashWin) {
       } else if (!isComfyUIReady(backendDir)) {
         sendProgress({
           step: 1, phase: 'prompt',
-          message: '需要下载推理引擎 (ComfyUI + GGUF，约 2 GB)',
+          message: '需要下载并配置推理引擎ComfyUI',
           percent: 0,
           promptLabel: '跳过',
           promptConfirm: '开始下载',

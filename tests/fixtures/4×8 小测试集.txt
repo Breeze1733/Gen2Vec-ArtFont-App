@@ -1,33 +1,33 @@
-满庭芳 | 三个中文艺术字，柔美婉约，胭脂红渐变，点缀盛开的桃花与飘落的花瓣，透明背景。
-蝶恋花 | 三个中文艺术字，精致小篆，玉石雕刻质感，绿色通透，饰以写实斑斓蝴蝶，透明背景。
-念奴娇 | 三个中文艺术字，霸气狂草，黑白泼墨风格，红色飞扬线条勾勒，金戈铁马之感，透明背景。
-墨心堂 | 三个中文艺术字，水墨晕染风格，黑色毛笔质感，饰以红色印章与宣纸飞白，透明背景。
-归园田居 | 四个中文艺术字，清新田园风，原木质感，饰以绿色藤蔓与金色稻穗，透明背景。
-醉太平 | 三个中文艺术字，豪放行书风格，暗红与烫金双色，微醺洒脱感，点缀酒盏祥云，透明背景。
-云水谣 | 三个中文艺术字，行草字体，蓝白渐变如行云流水，边缘带有细微水波纹，透明背景。
-精忠报国 | 四个中文艺术字，岳飞刺字风，麦穗黄与铁血红，字形如刀刻，带宋代岳家军战旗，透明背景。
-春季游园会 | 中文艺术字，漫天樱花雨，野餐垫格子纹理，清新马卡龙粉绿，透明背景。
-草地音乐节 | 中文艺术字，吉他拨片与音符，摇滚黑加荧光绿，朋克撕纸字体，透明背景。
-夏日祭 | 中文艺术字，日系动漫风，和风折扇与锦鲤，烟火大会璀璨背景，透明背景。
-冰雪大世界 | 中文艺术字，剔透冰雕，企鹅与雪人卡通，亮蓝色渐变带雪花，透明背景。
-国潮市集 | 中文艺术字，霓虹灯中国结，新国潮撞色，招财猫与瓦当结合，透明背景。
-灯谜大会 | 中文艺术字，各式走马灯旋转，谜面竹签垂吊，红黄暖光穿透，透明背景。
-毕业季 | 中文艺术字，学士帽冲天抛起，黑板报粉笔手绘，青春校园蓝绿，透明背景。
-开学典礼 | 中文艺术字，红领巾与红旗，打开的书本与铅笔，字体端正激昂，透明背景。
-ICE CRUSH | frozen typography, cracked ice shards, translucent blue crystals, polar frost texture, transparent background.
-TECHNO CORE | sci-fi font, glowing circuit board patterns, metallic silver plating, laser green lines, transparent background.
-MONSTER ATTACK | horror style, dripping green slime, jagged tooth-like edges, comic pop art shading, transparent background.
-SWEET CANDY | pink marshmallow text, glossy lollipop glaze, sprinkles and jelly beans decoration, transparent background.
-URBAN GRAFFITI | street art style, spray paint drips, wildstyle lettering, concrete textured border, transparent background.
-VINTAGE CAFE | classic retro script, distressed copper plating, coffee bean flourishes, elegant curves, transparent background.
-MAGIC SPELL | fantasy wizard style, purple mystical smoke, glowing golden ancient runes embedded, transparent background.
-SPEED RACE | aerodynamic font, checkered flag motif, motion blur fire streaks, bold forward tilt, transparent background.
-明星同款 | 艺术字，时尚杂志封面风，芭比粉与亮黑，镁光灯闪烁，优雅修长字体，透明背景。
-镇店之宝 | 艺术字，中国风黄金印章，盘龙纽，大红底座，隶书雕刻艺术字，权威尊贵，透明背景。
-官方正品 | 艺术字，防伪蓝色激光防伪标签质感，科技蓝绿渐变，带盾牌安全勾边，透明背景。
-假一赔十 | 艺术字，一字千金，纯铜古币与算盘珠散落，楷书字体苍劲，粗黑钢笔边，透明背景。
-限量发售 | 艺术字，钢印刻字，带流水编号科技感，黑红配色，四周带有危险警戒线，透明背景。
-绝版珍藏 | 艺术字，欧式复古火漆印章，暗红蜡质，带烫金玫瑰花边，哥特体变体，透明背景。
-抢先体验 | 艺术字，充满未来感的流体金属汞质感，水银般流动，折射全息幻彩，透明背景。
-优先发货 | 艺术字，绿色火箭发射卡通，冲天火光，字形像被火箭带向斜上方，透明背景。
+满庭芳 | 柔美婉约，胭脂红渐变，点缀盛开的桃花与飘落的花瓣。
+蝶恋花 | 精致小篆，玉石雕刻质感，绿色通透，饰以写实斑斓蝴蝶。
+念奴娇 | 霸气狂草，黑白泼墨风格，红色飞扬线条勾勒，金戈铁马之感。
+墨心堂 | 水墨晕染风格，黑色毛笔质感，饰以红色印章与宣纸飞白。
+归园田居 | 清新田园风，原木质感，饰以绿色藤蔓与金色稻穗。
+醉太平 | 豪放行书风格，暗红与烫金双色，微醺洒脱感，点缀酒盏祥云。
+云水谣 | 行草字体，蓝白渐变如行云流水，边缘带有细微水波纹。
+精忠报国 | 岳飞刺字风，麦穗黄与铁血红，字形如刀刻，带宋代岳家军战旗。
+春季游园会 | 漫天樱花雨，野餐垫格子纹理，清新马卡龙粉绿。
+草地音乐节 | 吉他拨片与音符，摇滚黑加荧光绿，朋克撕纸字体。
+夏日祭 | 日系动漫风，和风折扇与锦鲤，烟火大会璀璨背景。
+冰雪大世界 | 剔透冰雕，企鹅与雪人卡通，亮蓝色渐变带雪花。
+国潮市集 | 霓虹灯中国结，新国潮撞色，招财猫与瓦当结合。
+灯谜大会 | 各式走马灯旋转，谜面竹签垂吊，红黄暖光穿透。
+毕业季 | 学士帽冲天抛起，黑板报粉笔手绘，青春校园蓝绿。
+开学典礼 | 红领巾与红旗，打开的书本与铅笔，字体端正激昂。
+ICE CRUSH | frozen typography, cracked ice shards, translucent blue crystals, polar frost texture.
+TECHNO CORE | sci-fi font, glowing circuit board patterns, metallic silver plating, laser green lines.
+MONSTER ATTACK | horror style, dripping green slime, jagged tooth-like edges, comic pop art shading.
+SWEET CANDY | pink marshmallow text, glossy lollipop glaze, sprinkles and jelly beans decoration.
+URBAN GRAFFITI | street art style, spray paint drips, wildstyle lettering, concrete textured border.
+VINTAGE CAFE | classic retro script, distressed copper plating, coffee bean flourishes, elegant curves.
+MAGIC SPELL | fantasy wizard style, purple mystical smoke, glowing golden ancient runes embedded.
+SPEED RACE | aerodynamic font, checkered flag motif, motion blur fire streaks, bold forward tilt.
+明星同款 | 时尚杂志封面风，芭比粉与亮黑，镁光灯闪烁，优雅修长字体。
+镇店之宝 | 中国风黄金印章，盘龙纽，大红底座，隶书雕刻艺术字，权威尊贵。
+官方正品 | 防伪蓝色激光防伪标签质感，科技蓝绿渐变，带盾牌安全勾边。
+假一赔十 | 一字千金，纯铜古币与算盘珠散落，楷书字体苍劲，粗黑钢笔边。
+限量发售 | 钢印刻字，带流水编号科技感，黑红配色，四周带有危险警戒线。
+绝版珍藏 | 欧式复古火漆印章，暗红蜡质，带烫金玫瑰花边，哥特体变体。
+抢先体验 | 充满未来感的流体金属汞质感，水银般流动，折射全息幻彩。
+优先发货 | 绿色火箭发射卡通，冲天火光，字形像被火箭带向斜上方。
 

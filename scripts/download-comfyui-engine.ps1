@@ -34,6 +34,7 @@ $SevenZipUrl = "https://www.7-zip.org/a/7za920.zip"
 
 $ComfyArchive = Join-Path $DestDir "ComfyUI_windows_portable_nvidia.7z"
 $ComfyArchiveComplete = "$ComfyArchive.complete"
+$ComfyArchiveMinBytes = 1800MB
 $ComfyGithubUrl = "https://github.com/Comfy-Org/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z"
 $ComfyMirrorUrls = @(
     "https://gh-proxy.com/$ComfyGithubUrl",
@@ -95,6 +96,56 @@ function Emit {
 function Write-Color {
     param([string]$Text, [string]$Color = "White")
     if (-not $Electron) { Write-Host $Text -ForegroundColor $Color }
+}
+
+function Write-Step {
+    param([string]$Text)
+    Write-Color "  $Text" DarkGray
+}
+
+function Format-Elapsed {
+    param([timespan]$Elapsed)
+    if ($Elapsed.TotalHours -ge 1) { return "{0:hh\:mm\:ss}" -f $Elapsed }
+    return "{0:mm\:ss}" -f $Elapsed
+}
+
+function Invoke-SevenZipWithHeartbeat {
+    param(
+        [string]$SevenZipPath,
+        [string]$WorkingDirectory,
+        [string[]]$ArgumentList,
+        [string]$Label,
+        [string]$StdoutPath = "",
+        [string]$StderrPath = ""
+    )
+
+    $start = Get-Date
+    $args = @{
+        FilePath = $SevenZipPath
+        WorkingDirectory = $WorkingDirectory
+        ArgumentList = $ArgumentList
+        NoNewWindow = $true
+        PassThru = $true
+    }
+    if ($StdoutPath) { $args.RedirectStandardOutput = $StdoutPath }
+    if ($StderrPath) { $args.RedirectStandardError = $StderrPath }
+
+    $p = Start-Process @args
+    while (-not $p.HasExited) {
+        Start-Sleep -Seconds 3
+        if (-not $Electron) {
+            $elapsedText = Format-Elapsed -Elapsed ((Get-Date) - $start)
+            Write-Host ("`r  {0} still running ({1})    " -f $Label, $elapsedText) -NoNewline -ForegroundColor DarkGray
+        }
+        try { $p.Refresh() } catch {}
+    }
+
+    if (-not $Electron) {
+        $elapsedText = Format-Elapsed -Elapsed ((Get-Date) - $start)
+        Write-Host ("`r  {0} finished ({1})        " -f $Label, $elapsedText) -ForegroundColor DarkGray
+    }
+
+    return $p.ExitCode
 }
 
 function Test-NonEmptyFile {
@@ -220,8 +271,24 @@ function Invoke-RangeDownload {
         }
 
         $buffer = New-Object byte[] (1024 * 1024)
+        $lastProgressAt = Get-Date
+        $lastBytes = $existing
         while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
             $outputStream.Write($buffer, 0, $read)
+            if (-not $Electron) {
+                $now = Get-Date
+                if (($now - $lastProgressAt).TotalSeconds -ge 2) {
+                    $currentBytes = $outputStream.Position
+                    $deltaBytes = $currentBytes - $lastBytes
+                    $speedText = if ($deltaBytes -gt 0) { "$(Format-FileSize -Bytes ([long]($deltaBytes / [Math]::Max(1, ($now - $lastProgressAt).TotalSeconds))))/s" } else { "0 B/s" }
+                    Write-Host ("`r  Downloaded {0} ({1})    " -f (Format-FileSize -Bytes $currentBytes), $speedText) -NoNewline -ForegroundColor DarkGray
+                    $lastProgressAt = $now
+                    $lastBytes = $currentBytes
+                }
+            }
+        }
+        if (-not $Electron) {
+            Write-Host ("`r  Downloaded {0} complete        " -f (Format-FileSize -Bytes $outputStream.Position)) -ForegroundColor DarkGray
         }
     } finally {
         if ($outputStream) { $outputStream.Dispose() }
@@ -240,6 +307,9 @@ function Invoke-DownloadWithRetry {
 
     for ($i = 0; $i -lt $MaxRetries; $i++) {
         try {
+            if ($i -gt 0) {
+                Write-Step "retry $($i + 1)/$MaxRetries for $Name"
+            }
             Invoke-RangeDownload -Url $Url -OutputPath $OutputPath
             return
         } catch {
@@ -281,6 +351,9 @@ function Get-RemoteFileSizeFromFallback {
     param([string[]]$Urls)
 
     foreach ($url in $Urls) {
+        $label = $url
+        try { $label = ([System.Uri]$url).Host } catch {}
+        Write-Step "check remote size: $label"
         $size = Get-RemoteFileSize -Url $url
         if ($size -gt 0) { return $size }
     }
@@ -300,14 +373,27 @@ function Test-SevenZipArchive {
     try {
         $archiveDir = Split-Path $ArchivePath -Parent
         $archiveName = Split-Path $ArchivePath -Leaf
-        $p = Start-Process -FilePath $SevenZipPath -WorkingDirectory $archiveDir -ArgumentList @(
+        Write-Step "test archive integrity: $archiveName"
+        $exitCode = Invoke-SevenZipWithHeartbeat -SevenZipPath $SevenZipPath -WorkingDirectory $archiveDir -ArgumentList @(
             't',
             $archiveName
-        ) -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:TEMP\gen2vec-7za-test.out" -RedirectStandardError "$env:TEMP\gen2vec-7za-test.err"
-        return $p.ExitCode -eq 0
+        ) -Label "archive integrity test" -StdoutPath "$env:TEMP\gen2vec-7za-test.out" -StderrPath "$env:TEMP\gen2vec-7za-test.err"
+        return $exitCode -eq 0
     } catch {
         return $false
     }
+}
+
+function Test-ComfyArchiveSizeReady {
+    if (-not (Test-NonEmptyFile -Path $ComfyArchive -MinBytes $ComfyArchiveMinBytes)) {
+        return $false
+    }
+
+    $localBytes = [long](Get-Item -LiteralPath $ComfyArchive).Length
+    $localText = Format-FileSize -Bytes $localBytes
+    $minText = Format-FileSize -Bytes $ComfyArchiveMinBytes
+    Write-Step "archive size accepted: $localText (minimum $minText)"
+    return $true
 }
 
 function Resolve-ComfyUIPortableCandidate {
@@ -430,8 +516,14 @@ try {
     if (Test-ComfyUIReady) {
         Finish-Skip "ComfyUI_portable" "installed"
         $skipCount++
-    } elseif ((Test-Path $ComfyArchive) -and ((Test-Path $ComfyArchiveComplete) -or (Test-SevenZipArchive -ArchivePath $ComfyArchive -SevenZipPath $SevenZipExe))) {
+    } elseif (Test-Path $ComfyArchive) {
         if (-not (Test-Path $ComfyArchiveComplete)) {
+            Emit "START" "ComfyUI_portable|checking size"
+            if (-not (Test-ComfyArchiveSizeReady)) {
+                $actualSize = Format-FileSize -Bytes ([long](Get-Item -LiteralPath $ComfyArchive).Length)
+                $minSize = Format-FileSize -Bytes $ComfyArchiveMinBytes
+                throw "ComfyUI archive is too small: $actualSize, expected at least $minSize"
+            }
             [void](New-Item -ItemType File -Force -Path $ComfyArchiveComplete)
         }
         $sz = Format-FileSize -Bytes (Get-Item $ComfyArchive).Length
@@ -457,8 +549,11 @@ try {
         }
 
         Invoke-DownloadWithFallback -Name "ComfyUI_portable" -Urls $ComfyUrls -OutputPath $ComfyArchive -SizeText $sizeText
-        if (-not (Test-SevenZipArchive -ArchivePath $ComfyArchive -SevenZipPath $SevenZipExe)) {
-            throw "ComfyUI archive failed integrity test: $ComfyArchive"
+        Emit "START" "ComfyUI_portable|checking size"
+        if (-not (Test-ComfyArchiveSizeReady)) {
+            $actualSize = Format-FileSize -Bytes ([long](Get-Item -LiteralPath $ComfyArchive).Length)
+            $minSize = Format-FileSize -Bytes $ComfyArchiveMinBytes
+            throw "ComfyUI archive is too small after download: $actualSize, expected at least $minSize"
         }
         [void](New-Item -ItemType File -Force -Path $ComfyArchiveComplete)
         $sz = Format-FileSize -Bytes (Get-Item $ComfyArchive).Length
@@ -471,19 +566,28 @@ try {
         Finish-Skip "Extract_ComfyUI" "installed"
         $skipCount++
     } else {
-        if (-not (Test-Path $ComfyArchive)) { throw "ComfyUI archive missing: $ComfyArchive" }
         Emit "START" "Extract_ComfyUI|local"
-        Write-Color "Extract ComfyUI portable" Yellow
-        if (Test-Path $ComfyRoot) {
-            Remove-Item -LiteralPath $ComfyRoot -Recurse -Force
+        $existingCandidate = Resolve-ComfyUIPortableCandidate -SearchRoot $DestDir
+        if ($existingCandidate) {
+            Write-Color "Use existing extracted ComfyUI portable" Yellow
+            Write-Step "found extracted folder: $existingCandidate"
+        } else {
+            if (-not (Test-Path $ComfyArchive)) { throw "ComfyUI archive missing: $ComfyArchive" }
+            Write-Color "Extract ComfyUI portable" Yellow
+            Write-Step "this can take several minutes for the 2 GB archive"
+            if (Test-Path $ComfyRoot) {
+                Write-Step "remove previous extracted directory"
+                Remove-Item -LiteralPath $ComfyRoot -Recurse -Force
+            }
+            $exitCode = Invoke-SevenZipWithHeartbeat -SevenZipPath $SevenZipExe -WorkingDirectory $DestDir -ArgumentList @(
+                'x',
+                '-y',
+                '-o.',
+                (Split-Path $ComfyArchive -Leaf)
+            ) -Label "archive extraction"
+            if ($exitCode -ne 0) { throw "7za extract failed with exit code $exitCode" }
         }
-        $p = Start-Process -FilePath $SevenZipExe -WorkingDirectory $DestDir -ArgumentList @(
-            'x',
-            '-y',
-            '-o.',
-            (Split-Path $ComfyArchive -Leaf)
-        ) -NoNewWindow -Wait -PassThru
-        if ($p.ExitCode -ne 0) { throw "7za extract failed with exit code $($p.ExitCode)" }
+        Write-Step "normalize extracted folder"
         Normalize-ComfyUIExtraction
         if (-not (Test-ComfyUIReady)) { throw "ComfyUI portable files not found after extraction" }
         Remove-Item -LiteralPath $ComfyArchive -Force -ErrorAction SilentlyContinue
