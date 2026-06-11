@@ -54,6 +54,32 @@ function getBackendDir() {
   return null
 }
 
+function getAcceptanceScriptCandidates() {
+  const candidates = []
+
+  if (app.isPackaged) {
+    const installDir = path.dirname(process.execPath)
+    candidates.push(path.join(installDir, 'tests', 'run-acceptance.bat'))
+    candidates.push(path.join(process.resourcesPath, '..', 'tests', 'run-acceptance.bat'))
+    candidates.push(path.join(process.resourcesPath, 'tests', 'run-acceptance.bat'))
+  }
+
+  candidates.push(path.resolve(__dirname, '..', '..', '..', 'tests', 'run-acceptance.bat'))
+  candidates.push(path.resolve(process.cwd(), 'tests', 'run-acceptance.bat'))
+  candidates.push(path.resolve(process.cwd(), '..', '..', 'tests', 'run-acceptance.bat'))
+
+  return [...new Set(candidates)]
+}
+
+function resolveAcceptanceScriptPath() {
+  for (const candidate of getAcceptanceScriptCandidates()) {
+    if (fsSync.existsSync(candidate)) {
+      return candidate
+    }
+  }
+  throw new Error('未找到 run-acceptance.bat。请确认安装目录下存在 tests\\run-acceptance.bat。')
+}
+
 // ── 端口检测 ──
 
 function isPortInUse(port) {
@@ -1419,6 +1445,18 @@ ipcMain.handle('art-text/open-path', async (event, targetPath) => {
     throw new Error(errorMessage)
   }
   return { ok: true }
+})
+
+ipcMain.handle('art-text/launch-acceptance-test', async () => {
+  if (process.platform !== 'win32') {
+    throw new Error('验收测试批处理脚本仅支持 Windows。')
+  }
+  const scriptPath = resolveAcceptanceScriptPath()
+  const errorMessage = await shell.openPath(scriptPath)
+  if (errorMessage) {
+    throw new Error(errorMessage)
+  }
+  return { ok: true, path: scriptPath }
 })
 
 ipcMain.handle('art-text/prepare-output-task', async (event, options) => {

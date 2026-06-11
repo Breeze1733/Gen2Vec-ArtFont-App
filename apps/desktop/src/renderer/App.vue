@@ -25,6 +25,13 @@
           >
             历史任务
           </button>
+          <button
+            class="tab-button"
+            type="button"
+            @click="handleAcceptanceTest"
+          >
+            验收测试
+          </button>
         </div>
       </div>
 
@@ -146,7 +153,7 @@ import GenerationForm from './components/GenerationForm.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import VectorParams from './components/VectorParams.vue'
-import { generateArtBitmap, openPath, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, vectorizeArtImage, writeTaskArtifacts, getStartupStatus, downloadModels, onSplashProgress, removeSplashProgressListener } from './api'
+import { generateArtBitmap, openPath, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, vectorizeArtImage, writeTaskArtifacts, getStartupStatus, downloadModels, launchAcceptanceTest, onSplashProgress, removeSplashProgressListener } from './api'
 import { makeThumbnail } from './utils/storage'
 
 // 渲染进程中无法使用 Node.js path 模块，用纯字符串操作替代
@@ -369,6 +376,14 @@ const modelDownloadResultText = computed(() => {
   if (!result) return ''
   return `${result.ok || 0} 成功，${result.skip || 0} 跳过，${result.fail || 0} 失败`
 })
+
+const handleAcceptanceTest = async () => {
+  try {
+    await launchAcceptanceTest()
+  } catch (err) {
+    console.error('启动验收测试失败:', err)
+  }
+}
 
 const applyVectorPreset = (presetName) => {
   const preset = vectorPresets[presetName] || vectorPresets.balanced

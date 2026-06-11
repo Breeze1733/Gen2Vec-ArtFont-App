@@ -19,6 +19,7 @@ const API_METHODS = [
   'openExternal',
   'getStartupStatus',
   'downloadModels',
+  'launchAcceptanceTest',
   'shutdownBackends'
 ]
 
@@ -58,6 +59,7 @@ contextBridge.exposeInMainWorld('artTextApp', {
   // Startup & model management (生产打包模式)
   getStartupStatus: () => ipcRenderer.invoke('art-text/get-startup-status'),
   downloadModels: () => ipcRenderer.invoke('art-text/download-models'),
+  launchAcceptanceTest: () => ipcRenderer.invoke('art-text/launch-acceptance-test'),
 
   // Splash / progress events (send/on 模式，非 invoke)
   onSplashProgress: (callback) => {

@@ -292,6 +292,15 @@ export async function downloadModels() {
 }
 
 /**
+ * 启动 Windows 验收测试脚本。
+ * @returns {Promise<{ok: boolean, path: string}>}
+ */
+export async function launchAcceptanceTest() {
+  ensureElectronApi('launchAcceptanceTest')
+  return window.artTextApp.launchAcceptanceTest()
+}
+
+/**
  * 监听启动/下载进度事件。
  * @param {Function} callback - 接收进度数据对象
  */
