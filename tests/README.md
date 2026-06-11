@@ -6,15 +6,15 @@
 
 | 套件 | 文件 | 条数 | 用途 |
 | --- | --- | ---: | --- |
-| art_text_prompts | `tests/fixtures/art_text_prompts.txt` | 300 | 标准批量验收，满足赛题“≥100 条”要求 |
+| acceptance | `tests/fixtures/acceptance.txt` | 300 | 标准批量验收，满足赛题”≥100 条”要求 |
 
 安装包中的 `tests\` 目录会进一步精简，只包含：
 
 ```text
 tests/
-├─ art_text_prompts.txt
-├─ run-art-text-prompts.ps1
-└─ run-art-text-prompts.bat
+├─ acceptance.txt
+├─ run-acceptance.ps1
+└─ run-acceptance.bat
 ```
 
 ## 运行方式
@@ -22,19 +22,19 @@ tests/
 确保桌面端已启动两个后端，或手动启动 `txt2img-api:9001` 和 `vectorizer-api:8000` 后执行。评审可直接双击 `.bat`，也可以在 PowerShell 中运行 `.ps1`：
 
 ```powershell
-.\tests\run-art-text-prompts.ps1
+.\tests\run-acceptance.ps1
 ```
 
 对应的双击入口：
 
 ```bat
-tests\run-art-text-prompts.bat
+tests\run-acceptance.bat
 ```
 
 脚本会自动在安装目录、仓库根目录和 `apps\cli\dist\` 中查找 `gen2vec_cli.exe`。如果评审把脚本放在其他位置，可显式指定：
 
 ```powershell
-.\tests\run-art-text-prompts.ps1 -CliPath "C:\Program Files\矢量艺术字生成器\gen2vec_cli.exe"
+.\tests\run-acceptance.ps1 -CliPath "C:\Program Files\矢量艺术字生成器\gen2vec_cli.exe"
 ```
 
 默认输出写入 `outputs\cli-acceptance\`，该目录已由根 `.gitignore` 忽略。
@@ -54,11 +54,11 @@ tests\run-art-text-prompts.bat
 
 ```powershell
 # 只生成规范化输入并打印 CLI 命令，不实际调用后端
-.\tests\run-art-text-prompts.ps1 -DryRun
+.\tests\run-acceptance.ps1 -DryRun
 
 # 核验已经跑完的一份 batch_summary.csv
-.\tests\run-art-text-prompts.ps1 -VerifyOnly outputs\cli-acceptance\...\batch_summary.csv
+.\tests\run-acceptance.ps1 -VerifyOnly outputs\cli-acceptance\...\batch_summary.csv
 
 # 不做矢量化，只验 original.png、metadata、日志和汇总表
-.\tests\run-art-text-prompts.ps1 -NoVectorize
+.\tests\run-acceptance.ps1 -NoVectorize
 ```

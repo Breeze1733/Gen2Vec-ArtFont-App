@@ -141,7 +141,7 @@ npm run electron:build
 node apps/cli/bin/gen2vec.mjs health
 node apps/cli/bin/gen2vec.mjs pipeline --text "七里香" --prompt "清新国风，墨绿色金边"
 node apps/cli/bin/gen2vec.mjs vectorize --input artwork.png --preset detailed
-node apps/cli/bin/gen2vec.mjs batch --input-file tests/fixtures/art_text_prompts.txt
+node apps/cli/bin/gen2vec.mjs batch --input-file tests/fixtures/acceptance.txt
 ```
 
 构建 CLI 单文件 EXE：
@@ -257,9 +257,9 @@ cd services/vectorizer-api
 - `vectorizer-backend.exe`
 - `models/`
 - `gen2vec_cli.exe`
-- `tests/art_text_prompts.txt`
-- `tests/run-art-text-prompts.ps1`
-- `tests/run-art-text-prompts.bat`
+- `tests/acceptance.txt`
+- `tests/run-acceptance.ps1`
+- `tests/run-acceptance.bat`
 
 `electron/main.cjs` 已实现 ComfyUI 引擎下载（`download-comfyui-engine.ps1`）和模型下载（`download-models.ps1`）流程。打包时不再需要包含 ComfyUI-Engine.exe（7z SFX），引擎从 GitHub Releases 自动下载。
 

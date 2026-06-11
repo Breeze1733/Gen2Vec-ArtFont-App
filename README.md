@@ -320,7 +320,7 @@ node apps/cli/bin/gen2vec.mjs <command> [options]
 | `pipeline` | 完整流水线：文本 -> 位图 -> SVG | `pipeline --text "七里香" --prompt "清新国风"` |
 | `generate` | 仅生成位图 | `generate --text "Hello" --prompt "neon sign"` |
 | `vectorize` | 仅矢量化已有图片 | `vectorize --input artwork.png --preset detailed` |
-| `batch` | 批量流水线 | `batch --input-file tests/art_text_prompts.txt` |
+| `batch` | 批量流水线 | `batch --input-file tests/acceptance.txt` |
 | `health` | 后端健康检查 | `health` |
 | `env` | 显示环境信息 | `env` |
 | `shutdown` | 关闭后端服务 | `shutdown` |
@@ -338,7 +338,7 @@ node apps/cli/bin/gen2vec.mjs generate --text "Hello" --prompt "neon sign, clean
 node apps/cli/bin/gen2vec.mjs vectorize --input artwork.png --preset ultra --preview
 
 # 批量生成
-node apps/cli/bin/gen2vec.mjs batch --input-file tests/fixtures/art_text_prompts.txt --output-dir outputs/cli-batch
+node apps/cli/bin/gen2vec.mjs batch --input-file tests/fixtures/acceptance.txt --output-dir outputs/cli-batch
 ```
 
 批量 TXT 输入格式：
@@ -669,7 +669,7 @@ npm run electron:build
 | `vectorizer-backend.exe` | `services/vectorizer-api/dist/` |
 | `models/` | `services/vectorizer-api/dist/models` |
 | `gen2vec_cli.exe` | `apps/cli/dist/` |
-| `tests/` 标准验收脚本与 `art_text_prompts.txt` | 仓库 `tests/run-art-text-prompts.*`、`tests/fixtures/art_text_prompts.txt` |
+| `tests/` 标准验收脚本与 `acceptance.txt` | 仓库 `tests/run-acceptance.*`、`tests/fixtures/acceptance.txt` |
 
 注意：`electron/main.cjs` 已包含检测和解压 `ComfyUI-Engine.exe` 的逻辑。如果交付包需要内置 ComfyUI 自解压包，需要确认 `apps/desktop/package.json` 的 `extraResources` 同步包含该文件。
 

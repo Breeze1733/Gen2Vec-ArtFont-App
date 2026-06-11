@@ -76,9 +76,9 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
     │       └── README.md
     ├── gen2vec_cli.exe              (CLI 自动化验收控制台)
     ├── tests/                       (标准验收脚本与测试集)
-    │   ├── art_text_prompts.txt
-    │   ├── run-art-text-prompts.bat
-    │   └── run-art-text-prompts.ps1
+    │   ├── acceptance.txt
+    │   ├── run-acceptance.bat
+    │   └── run-acceptance.ps1
     └── ... (Electron 运行时文件)
 ```
 
@@ -89,9 +89,9 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
 ├── 矢量艺术字生成器.exe
 ├── gen2vec_cli.exe
 ├── tests/
-│   ├── art_text_prompts.txt
-│   ├── run-art-text-prompts.bat
-│   └── run-art-text-prompts.ps1
+│   ├── acceptance.txt
+│   ├── run-acceptance.bat
+│   └── run-acceptance.ps1
 ├── resources/
 │   ├── app.asar
 │   └── backend/
@@ -320,9 +320,9 @@ async function isPortInUse(port) {
       { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
       { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" },
       { "from": "../../apps/cli/dist/gen2vec_cli.exe", "to": "../gen2vec_cli.exe" },
-      { "from": "../../tests/run-art-text-prompts.ps1", "to": "../tests/run-art-text-prompts.ps1" },
-      { "from": "../../tests/run-art-text-prompts.bat", "to": "../tests/run-art-text-prompts.bat" },
-      { "from": "../../tests/fixtures/art_text_prompts.txt", "to": "../tests/art_text_prompts.txt" }
+      { "from": "../../tests/run-acceptance.ps1", "to": "../tests/run-acceptance.ps1" },
+      { "from": "../../tests/run-acceptance.bat", "to": "../tests/run-acceptance.bat" },
+      { "from": "../../tests/fixtures/acceptance.txt", "to": "../tests/acceptance.txt" }
     ],
     "win": { "target": "nsis" },
     "nsis": {

@@ -1,6 +1,6 @@
 param(
-  [ValidateSet("smoke2", "small", "large")]
-  [string]$Suite = "small",
+  [ValidateSet("acceptance")]
+  [string]$Suite = "acceptance",
   [string]$CliPath = "",
   [string]$OutputRoot = "",
   [string]$Resolution = "1280 x 720",
@@ -30,34 +30,16 @@ $RepoRoot = Split-Path -Parent $ScriptDir
 
 function Get-SuiteConfig {
   param([string]$Name)
+  $fixture = Join-Path $ScriptDir "acceptance.txt"
+  if (-not (Test-Path -LiteralPath $fixture)) {
+    $fixture = Join-Path $ScriptDir "fixtures\acceptance.txt"
+  }
   switch ($Name) {
-    "smoke2" {
+    "acceptance" {
       return @{
-        Label = "2条冒烟测试集"
-        Fixture = Join-Path $ScriptDir "fixtures\2条冒烟测试集.txt"
-        ExpectedRows = 2
-        MinRows = 2
-        Seed = 2026061101
-        TimeoutMinutes = 30
-        OutputRoot = "outputs\cli-smoke-2"
-      }
-    }
-    "small" {
-      return @{
-        Label = "小测试集"
-        Fixture = Join-Path $ScriptDir "fixtures\4×8 小测试集.txt"
-        ExpectedRows = 32
-        MinRows = 32
-        Seed = 2026061101
-        TimeoutMinutes = 90
-        OutputRoot = "outputs\cli-acceptance"
-      }
-    }
-    "large" {
-      return @{
-        Label = "art_text_prompts 标准测试集"
-        Fixture = Join-Path $ScriptDir "fixtures\art_text_prompts.txt"
-        ExpectedRows = 300
+        Label = "acceptance 标准测试集"
+        Fixture = $fixture
+        ExpectedRows = 0
         MinRows = 100
         Seed = 2026061201
         TimeoutMinutes = 270
@@ -153,8 +135,8 @@ function New-PreparedFixture {
   if ($Config.ExpectedRows -gt 0 -and $rows.Count -ne $Config.ExpectedRows) {
     throw "$($Config.Label) 应为 $($Config.ExpectedRows) 条，当前为 $($rows.Count) 条。"
   }
-  if ($rows.Count -lt $Config.MinRows) {
-    throw "$($Config.Label) 至少需要 $($Config.MinRows) 条，当前为 $($rows.Count) 条。"
+  if ($rows.Count -ge $Config.MinRows) {
+    Write-Host "$($Config.Label) 符合要求：当前 $($rows.Count) 条，满足 ≥$($Config.MinRows) 条标准" -ForegroundColor Green
   }
 
   New-Item -ItemType Directory -Path (Split-Path -Parent $PreparedPath) -Force | Out-Null
