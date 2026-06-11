@@ -59,7 +59,9 @@ png_transparency = (1 - mean(alpha) / 255) * 100
 
 ### SVG 还原度
 
-`SVG 还原度` 用于描述 SVG 回渲染 PNG 与透明 PNG 输入之间的结构相似程度。当前实现使用加权混合评分算法，综合归一化像素误差、人眼感知权重和边缘结构保留度进行评估，并以百分数输出。
+`SVG 还原度` 用于描述 SVG 回渲染 PNG 与透明 PNG 输入之间的结构相似程度。当前实现以 **SSIM（结构相似性）** 为核心，辅以边缘结构保留度进行加权评分，并以百分数输出。
+
+> **为什么不用 MSE？** 逐像素均方误差对矢量化场景过于严苛——抗锯齿、颜色量化和路径简化必然引入像素级偏差，即使肉眼几乎无差别的结果也可能只得 30%+。SSIM 从亮度、对比度、结构三个维度评估相似性，与人类视觉感知高度一致，是学术界公认的感知图像质量指标。
 
 计算位置：
 
@@ -71,28 +73,27 @@ _calculate_svg_fidelity()
 计算流程：
 
 1. 将透明 PNG 和 SVG 回渲染 PNG 都转换为 `RGB`。
-2. 如果两张图尺寸不一致，将 SVG 回渲染图 resize 到原图尺寸。
-3. 计算三个子指标并加权融合：
-   - **NRMSE**（归一化均方根误差）：基础像素差异，比 SSIM 对矢量化平滑边缘的容忍度更高。
-   - **人眼加权 NRMSE**：按像素亮度加权，暗区色差权重降低，亮区色差权重提高，更符合人眼主观感受。
-   - **边缘结构保留度**：用 Sobel 算子提取边缘后比较差异，评估形状轮廓是否完整保留。
-4. 三个分量加权求和后转换为 `0..100` 的百分数。
+2. 如果两张图尺寸不一致，将 SVG 回渲染图用 LANCZOS 缩放至原图尺寸。
+3. 计算两个子指标并加权融合：
+   - **SSIM**（结构相似性）：从亮度、对比度、结构三维度评估图像相似性。默认使用 7×7 滑动窗口，小图自动缩小窗口以保证计算有效。权重 0.8。
+   - **边缘结构保留度**：用 Sobel 算子提取边缘后比较差异，评估形状轮廓是否完整保留。权重 0.2。
+4. 两个分量加权求和后转换为 `0..100` 的百分数。SSIM 值为负时裁剪至 0。
 
 计算公式：
 
 ```text
-nrmse = 1.0 - MSE(original, vector) / (255^2)
-luminance = 0.299*R + 0.587*G + 0.114*B
-weight = 0.3 + 0.7 * (luminance / 255)
-weighted_nrmse = 1.0 - MSE(weighted_diff) / (255^2)
-edge_score = 1.0 - mean(|Sobel(original) - Sobel(vector)|)
-svg_fidelity = nrmse * 0.60 + weighted_nrmse * 0.25 + edge_score * 0.15
+ssim_val = SSIM(original, vector, data_range=255)       # 值域 [0, 1]，1 为完美
+edge_orig = Sobel(grayscale(original))
+edge_vec  = Sobel(grayscale(vector))
+edge_score = 1.0 - mean(|edge_orig - edge_vec|)          # 值域 [0, 1]
+svg_fidelity = ssim_val * 0.80 + edge_score * 0.20       # 值域 [0, 1]，映射为 0..100
 ```
 
-保留 RGB 的原因：
+注意：
 
-- 透明底艺术字的边缘抗锯齿、镂空区域和半透明阴影由人眼加权分量间接覆盖。
-- 仅比较 RGB 配合亮度权重，既避免 alpha 通道噪声干扰，又能反映人眼对边缘过渡区的真实感知。
+- SSIM 已内置亮度、对比度和结构比较，不需要额外的人眼加权 NRMSE 分量。
+- 新旧版 `scikit-image` API（`channel_axis` vs `multichannel`）自动适配。
+- 仅比较 RGB 是因为透明区域在预处理阶段已统一填充为白色，alpha 通道本身不参与矢量化渲染。
 
 ## 接口
 

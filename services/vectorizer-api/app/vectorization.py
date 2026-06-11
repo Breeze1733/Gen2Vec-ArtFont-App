@@ -132,41 +132,71 @@ def _pretty_svg_text(svg_text: str) -> str:
 
 
 def _calculate_svg_fidelity(source_img: Image.Image, preview_png_bytes: bytes) -> float | None:
+    """计算 SVG 矢量化还原度，基于 SSIM（结构相似性）。
+
+    SSIM 从亮度、对比度、结构三个维度评估图像相似性，
+    比逐像素 MSE 更接近人眼感知，能正确评价矢量化质量。
+    """
     try:
         from io import BytesIO
 
-        from skimage.metrics import mean_squared_error
+        from skimage.metrics import structural_similarity as ssim
 
         source = source_img.convert("RGB")
         preview = Image.open(BytesIO(preview_png_bytes)).convert("RGB")
         if preview.size != source.size:
-            preview = preview.resize(source.size)
+            preview = preview.resize(source.size, Image.Resampling.LANCZOS)
 
-        original_np = np.array(source).astype(np.float64)
-        vector_np = np.array(preview).astype(np.float64)
+        original_np = np.array(source)
+        vector_np = np.array(preview)
 
-        # 1) 归一化均方根误差（NRMSE），值域 [0, 1]，1 表示完美
-        mse = mean_squared_error(original_np, vector_np)
-        max_pixel = 255.0 ** 2
-        nrmse = 1.0 - min(1.0, mse / max_pixel)
+        h, w = original_np.shape[:2]
+        min_dim = min(h, w)
 
-        # 2) 色差容忍加权：对浅色差容忍度更高，避免小偏差导致低分
-        diff = np.abs(original_np - vector_np)
-        # 加权：暗区色差权重略低（人眼对暗区不敏感）
-        luminance = 0.299 * original_np[:, :, 0] + 0.587 * original_np[:, :, 1] + 0.114 * original_np[:, :, 2]
-        weight = 0.3 + 0.7 * (luminance / 255.0)
-        weighted_diff = diff * np.stack([weight] * 3, axis=-1)
-        weighted_nrmse = 1.0 - min(1.0, float(np.mean(weighted_diff ** 2)) / max_pixel)
+        # SSIM 默认窗口为 7x7，小图需要缩小窗口
+        if min_dim >= 7:
+            win_size = 7
+        elif min_dim >= 5:
+            win_size = 5
+        elif min_dim >= 3:
+            win_size = 3
+        else:
+            # 图像极小，退化为简单的像素对比
+            diff = np.abs(original_np.astype(np.float64) - vector_np.astype(np.float64))
+            mae = float(np.mean(diff))
+            score = round(max(0.0, min(100.0, (1.0 - mae / 255.0) * 100.0)), 1)
+            return score
 
-        # 3) 边缘结构保留度评分
+        # 尝试新版 API（channel_axis），失败则回退旧版（multichannel）
+        try:
+            ssim_val = ssim(
+                original_np, vector_np,
+                channel_axis=2,
+                win_size=win_size,
+                data_range=255,
+            )
+        except TypeError:
+            ssim_val = ssim(
+                original_np, vector_np,
+                multichannel=True,
+                win_size=win_size,
+                data_range=255,
+            )
+
+        # SSIM 值域 [-1, 1]，正常图像不会出现负值，但做保护性裁剪
+        ssim_val = max(0.0, float(ssim_val))
+
+        # 边缘结构保留度作为补充：衡量轮廓/纹理是否被保留
         from skimage.filters import sobel
+
         edge_orig = sobel(original_np.mean(axis=2))
         edge_vec = sobel(vector_np.mean(axis=2))
         edge_diff = np.abs(edge_orig - edge_vec)
-        edge_score = 1.0 - min(1.0, float(np.mean(edge_diff)))
+        edge_score = max(0.0, 1.0 - min(1.0, float(np.mean(edge_diff))))
 
-        # 混合评分：NRMSE 权重 0.6，人眼加权 0.25，边缘结构 0.15
-        fidelity = nrmse * 0.60 + weighted_nrmse * 0.25 + edge_score * 0.15
+        # SSIM 为主（0.8），边缘结构为辅（0.2）
+        # SSIM 本身已覆盖亮度/对比度/结构，边缘得分提供轮廓级别的补充校验
+        fidelity = ssim_val * 0.8 + edge_score * 0.2
         score = round(max(0.0, min(100.0, fidelity * 100.0)), 1)
         return score
     except Exception:
