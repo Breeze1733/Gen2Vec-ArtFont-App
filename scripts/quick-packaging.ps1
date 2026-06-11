@@ -13,8 +13,14 @@ Push-Location "$root\services\vectorizer-api"
 & "$root\services\vectorizer-api\scripts\build-backend-exe.ps1"
 Pop-Location
 
+# 构建 CLI 单文件 EXE
+Write-Host "=== [3/4] Building gen2vec_cli.exe ==="
+Push-Location "$root\apps\cli"
+& "$root\apps\cli\scripts\build-cli-exe.ps1"
+Pop-Location
+
 # 打包安装包
-Write-Host "=== [3/3] Building desktop installer ==="
+Write-Host "=== [4/4] Building desktop installer ==="
 Push-Location "$root\apps\desktop"
 npm run electron:build
 Pop-Location
