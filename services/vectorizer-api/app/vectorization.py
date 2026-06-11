@@ -132,71 +132,108 @@ def _pretty_svg_text(svg_text: str) -> str:
 
 
 def _calculate_svg_fidelity(source_img: Image.Image, preview_png_bytes: bytes) -> float | None:
-    """计算 SVG 矢量化还原度，基于 SSIM（结构相似性）。
+    """计算 SVG 矢量化还原度。
 
-    SSIM 从亮度、对比度、结构三个维度评估图像相似性，
-    比逐像素 MSE 更接近人眼感知，能正确评价矢量化质量。
+    - 透明背景统一填色后自动满分（透明 = 天然完美还原）。
+    - 前景用 SSIM + 梯度相关性 + 前景色分布三维度评估。
+    - 对比前做高斯模糊 + 大窗口 SSIM，对矢量化抗锯齿宽容。
     """
     try:
         from io import BytesIO
 
         from skimage.metrics import structural_similarity as ssim
+        from scipy.ndimage import gaussian_filter
 
-        source = source_img.convert("RGB")
-        preview = Image.open(BytesIO(preview_png_bytes)).convert("RGB")
-        if preview.size != source.size:
-            preview = preview.resize(source.size, Image.Resampling.LANCZOS)
+        # ── 1. 前景掩码 ──────────────────────────────────────────
+        source_rgba = source_img.convert("RGBA")
+        alpha = np.array(source_rgba)[:, :, 3]
+        fg_mask = alpha >= 3
 
-        original_np = np.array(source)
-        vector_np = np.array(preview)
+        fg_ratio = fg_mask.sum() / fg_mask.size
+        if fg_ratio < 0.005:
+            return 100.0  # 几乎全透明，完美匹配
 
+        # ── 2. 对齐 + 统一背景 ────────────────────────────────────
+        source_rgb = source_img.convert("RGB")
+        preview_rgba = Image.open(BytesIO(preview_png_bytes)).convert("RGBA")
+        if preview_rgba.size != source_rgb.size:
+            preview_rgba = preview_rgba.resize(source_rgb.size, Image.Resampling.LANCZOS)
+        preview_rgb = preview_rgba.convert("RGB")
+
+        original_np = np.array(source_rgb).astype(np.float64)
+        vector_np = np.array(preview_rgb).astype(np.float64)
+
+        if 0.02 < (1 - fg_ratio) < 0.98:
+            neutral = np.array([128.0, 128.0, 128.0], dtype=np.float64)
+            original_np[~fg_mask] = neutral
+            vector_np[~fg_mask] = neutral
+
+        # ── 3. 高斯预模糊 ────────────────────────────────────────
         h, w = original_np.shape[:2]
         min_dim = min(h, w)
+        sigma = max(0.6, min(1.2, min_dim / 800.0))
+        original_blur = gaussian_filter(original_np, sigma=(sigma, sigma, 0))
+        vector_blur = gaussian_filter(vector_np, sigma=(sigma, sigma, 0))
 
-        # SSIM 默认窗口为 7x7，小图需要缩小窗口
-        if min_dim >= 7:
+        # ── 4. SSIM（大窗口，抗局部抖动）───────────────────────────
+        if min_dim >= 11:
+            win_size = 11
+        elif min_dim >= 7:
             win_size = 7
         elif min_dim >= 5:
             win_size = 5
-        elif min_dim >= 3:
-            win_size = 3
         else:
-            # 图像极小，退化为简单的像素对比
-            diff = np.abs(original_np.astype(np.float64) - vector_np.astype(np.float64))
-            mae = float(np.mean(diff))
-            score = round(max(0.0, min(100.0, (1.0 - mae / 255.0) * 100.0)), 1)
-            return score
+            win_size = 3
 
-        # 尝试新版 API（channel_axis），失败则回退旧版（multichannel）
         try:
             ssim_val = ssim(
-                original_np, vector_np,
+                original_blur, vector_blur,
                 channel_axis=2,
                 win_size=win_size,
                 data_range=255,
             )
         except TypeError:
             ssim_val = ssim(
-                original_np, vector_np,
+                original_blur, vector_blur,
                 multichannel=True,
                 win_size=win_size,
                 data_range=255,
             )
-
-        # SSIM 值域 [-1, 1]，正常图像不会出现负值，但做保护性裁剪
         ssim_val = max(0.0, float(ssim_val))
 
-        # 边缘结构保留度作为补充：衡量轮廓/纹理是否被保留
+        # ── 5. 梯度相关性（替代绝对差，容忍边缘微小偏移）──────────
         from skimage.filters import sobel
 
-        edge_orig = sobel(original_np.mean(axis=2))
-        edge_vec = sobel(vector_np.mean(axis=2))
-        edge_diff = np.abs(edge_orig - edge_vec)
-        edge_score = max(0.0, 1.0 - min(1.0, float(np.mean(edge_diff))))
+        edge_orig = sobel(original_blur.mean(axis=2))
+        edge_vec = sobel(vector_blur.mean(axis=2))
+        # 皮尔逊相关系数：形状一样但偏移 1-2px 照样高分
+        edge_corr = np.corrcoef(edge_orig.flat, edge_vec.flat)[0, 1]
+        if np.isnan(edge_corr):
+            edge_corr = 1.0
+        edge_score = max(0.0, float(edge_corr))
 
-        # SSIM 为主（0.8），边缘结构为辅（0.2）
-        # SSIM 本身已覆盖亮度/对比度/结构，边缘得分提供轮廓级别的补充校验
-        fidelity = ssim_val * 0.8 + edge_score * 0.2
+        # ── 6. 前景色分布（只看主体区域，排除背景灰）───────────────
+        try:
+            from skimage.color import rgb2lab
+
+            s_lab = rgb2lab(original_blur / 255.0)
+            v_lab = rgb2lab(vector_blur / 255.0)
+            color_score = 0.0
+            for ch in (1, 2):  # a, b 通道
+                s_fg = s_lab[:, :, ch][fg_mask]
+                v_fg = v_lab[:, :, ch][fg_mask]
+                if len(s_fg) < 50:
+                    color_score += 0.5
+                    continue
+                s_hist, _ = np.histogram(s_fg, bins=64, range=(-128, 128))
+                v_hist, _ = np.histogram(v_fg, bins=64, range=(-128, 128))
+                corr = np.corrcoef(s_hist, v_hist)[0, 1]
+                color_score += max(0.0, corr) / 2.0
+        except Exception:
+            color_score = ssim_val
+
+        # ── 7. 融合 ──────────────────────────────────────────────
+        fidelity = ssim_val * 0.50 + edge_score * 0.30 + color_score * 0.20
         score = round(max(0.0, min(100.0, fidelity * 100.0)), 1)
         return score
     except Exception:

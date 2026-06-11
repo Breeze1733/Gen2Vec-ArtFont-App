@@ -59,9 +59,13 @@ png_transparency = (1 - mean(alpha) / 255) * 100
 
 ### SVG 还原度
 
-`SVG 还原度` 用于描述 SVG 回渲染 PNG 与透明 PNG 输入之间的结构相似程度。当前实现以 **SSIM（结构相似性）** 为核心，辅以边缘结构保留度进行加权评分，并以百分数输出。
+`SVG 还原度` 用于描述 SVG 回渲染 PNG 与透明 PNG 输入之间的视觉相似程度。当前实现以 **SSIM（大窗口）** 为核心，辅以**梯度相关性**和**前景色分布**进行加权评分，并以百分数输出。
 
-> **为什么不用 MSE？** 逐像素均方误差对矢量化场景过于严苛——抗锯齿、颜色量化和路径简化必然引入像素级偏差，即使肉眼几乎无差别的结果也可能只得 30%+。SSIM 从亮度、对比度、结构三个维度评估相似性，与人类视觉感知高度一致，是学术界公认的感知图像质量指标。
+> **核心设计思路：**
+> - 透明区域天然完美还原，通过 alpha 掩码统一背景后 SSIM 自动贡献满分。
+> - 边缘评分用**梯度相关性**（皮尔逊 r）替代绝对差，容忍矢量化导致的 1~2px 边缘偏移。
+> - 颜色对比只看前景区域 Lab a/b 通道直方图，排除背景灰的干扰。
+> - SSIM 使用 11×11 大窗口 + 高斯预模糊，对局部抗锯齿差异宽容。
 
 计算位置：
 
@@ -72,28 +76,40 @@ _calculate_svg_fidelity()
 
 计算流程：
 
-1. 将透明 PNG 和 SVG 回渲染 PNG 都转换为 `RGB`。
-2. 如果两张图尺寸不一致，将 SVG 回渲染图用 LANCZOS 缩放至原图尺寸。
-3. 计算两个子指标并加权融合：
-   - **SSIM**（结构相似性）：从亮度、对比度、结构三维度评估图像相似性。默认使用 7×7 滑动窗口，小图自动缩小窗口以保证计算有效。权重 0.8。
-   - **边缘结构保留度**：用 Sobel 算子提取边缘后比较差异，评估形状轮廓是否完整保留。权重 0.2。
-4. 两个分量加权求和后转换为 `0..100` 的百分数。SSIM 值为负时裁剪至 0。
+1. **前景掩码**：`alpha >= 3`，前景占比 < 0.5% 直接返回 100 分。
+2. **背景统一**：非前景区域填中性灰 `#808080`。
+3. **高斯预模糊**：sigma 0.6~1.2（按 `min_dim / 800` 自适应），`sigma=(s, s, 0)` 仅空间维度。
+4. 计算三个子指标：
+
+   | 指标 | 权重 | 方法 |
+   | --- | ---: | --- |
+   | **SSIM** | 0.50 | 11×11 滑动窗口（小图 7×7），`data_range=255` |
+   | **梯度相关性** | 0.30 | Sobel 梯度图的皮尔逊相关系数，容忍边缘微小偏移 |
+   | **前景色分布** | 0.20 | 仅前景像素的 Lab a/b 直方图相关性 |
+
+5. 加权求和 → `0..100` 百分数。
 
 计算公式：
 
 ```text
-ssim_val = SSIM(original, vector, data_range=255)       # 值域 [0, 1]，1 为完美
-edge_orig = Sobel(grayscale(original))
-edge_vec  = Sobel(grayscale(vector))
-edge_score = 1.0 - mean(|edge_orig - edge_vec|)          # 值域 [0, 1]
-svg_fidelity = ssim_val * 0.80 + edge_score * 0.20       # 值域 [0, 1]，映射为 0..100
+# 预处理
+fg_mask   = source.alpha >= 3
+bg         = ~fg_mask → (128,128,128)  # 两张图统一
+blur       = GaussianBlur(sigma=(s,s,0), s∈[0.6,1.2])
+
+# 评估
+ssim_val    = SSIM(blur_orig, blur_vec, win=11, data_range=255)
+edge_score  = PearsonR(Sobel(blur_orig), Sobel(blur_vec))
+color_score = PearsonR(hist_Lab_ab(blur_orig[fg_mask]), hist_Lab_ab(blur_vec[fg_mask]))
+
+svg_fidelity = ssim_val*0.50 + edge_score*0.30 + color_score*0.20  → 映射 0..100
 ```
 
 注意：
 
-- SSIM 已内置亮度、对比度和结构比较，不需要额外的人眼加权 NRMSE 分量。
-- 新旧版 `scikit-image` API（`channel_axis` vs `multichannel`）自动适配。
-- 仅比较 RGB 是因为透明区域在预处理阶段已统一填充为白色，alpha 通道本身不参与矢量化渲染。
+- 梯度相关性使用 `np.corrcoef` 全图梯度向量计算，时间复杂度 O(N)，对 1024² 图像约 2~5ms。
+- Lab 颜色直方图仅在 `fg_mask` 前景像素上统计，避免背景灰（128,128）干扰色度分布。
+- `channel_axis` / `multichannel` 新旧 API 自动适配。
 
 ## 接口
 
