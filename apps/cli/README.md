@@ -119,7 +119,7 @@ gen2vec-cli vectorize -i input.png --preset ultra --preview
 常用：
 
 ```powershell
-gen2vec-cli batch --input-file testdata/art_text_prompts_150.txt --output-dir ./outputs/cli-batch-150
+gen2vec-cli batch --input-file tests/art_text_prompts.txt --output-dir ./outputs/cli-batch
 gen2vec-cli batch --text "七里香|清新国风`n夏日冰饮 50%|清爽蓝白" --seed 20260605 --seed-step 1
 gen2vec-cli batch --input-file batch.csv --no-vectorize
 ```

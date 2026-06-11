@@ -30,7 +30,10 @@
       { "from": "../../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
       { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
       { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" },
-      { "from": "../../apps/cli/dist/gen2vec_cli.exe", "to": "../gen2vec_cli.exe" }
+      { "from": "../../apps/cli/dist/gen2vec_cli.exe", "to": "../gen2vec_cli.exe" },
+      { "from": "../../tests/run-art-text-prompts.ps1", "to": "../tests/run-art-text-prompts.ps1" },
+      { "from": "../../tests/run-art-text-prompts.bat", "to": "../tests/run-art-text-prompts.bat" },
+      { "from": "../../tests/fixtures/art_text_prompts.txt", "to": "../tests/art_text_prompts.txt" }
     ],
     "win": {
       "target": "nsis",

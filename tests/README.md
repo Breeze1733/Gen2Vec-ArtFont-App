@@ -1,32 +1,43 @@
 # 测试集与 CLI 验收
 
-本目录提供面向评审验收的批量提示词集合与 CLI 自动化核验脚本。脚本会先把测试集规范化为 CLI 支持的 `文本 | 风格提示词 | 负面提示词 | seed | resolution` 文本格式，再调用 `gen2vec-cli batch`，最后核验输出产物是否满足赛题要求。
+本目录提供面向评审验收的标准测试集与 Windows 原生验收脚本。脚本会先把测试集规范化为 CLI 支持的 `文本 | 风格提示词 | 负面提示词 | seed | resolution` 文本格式，再调用安装包交付的 `gen2vec_cli.exe batch`，最后核验输出产物是否满足赛题要求。
 
 ## 测试集
 
 | 套件 | 文件 | 条数 | 用途 |
 | --- | --- | ---: | --- |
-| small | `tests/fixtures/4×8 小测试集.txt` | 32 | 快速冒烟验收，覆盖国风、节日、英文、促销等类型 |
-| large | `tests/fixtures/art_text_prompts_150.txt` | 150 | 标准批量验收，满足赛题“≥100 条”要求 |
-| stress | `tests/fixtures/大测试集.txt` | 300 | 压力测试，默认不随 `all` 一起运行 |
+| art_text_prompts | `tests/fixtures/art_text_prompts.txt` | 300 | 标准批量验收，满足赛题“≥100 条”要求 |
+
+安装包中的 `tests\` 目录会进一步精简，只包含：
+
+```text
+tests/
+├─ art_text_prompts.txt
+├─ run-art-text-prompts.ps1
+└─ run-art-text-prompts.bat
+```
 
 ## 运行方式
 
-确保桌面端已启动两个后端，或手动启动 `txt2img-api:9001` 和 `vectorizer-api:8000` 后执行：
+确保桌面端已启动两个后端，或手动启动 `txt2img-api:9001` 和 `vectorizer-api:8000` 后执行。评审可直接双击 `.bat`，也可以在 PowerShell 中运行 `.ps1`：
 
-```bash
-node tests/cli-smoke-2.mjs
-node tests/cli-acceptance.mjs --suite small
-node tests/cli-acceptance.mjs --suite large
+```powershell
+.\tests\run-art-text-prompts.ps1
 ```
 
-也可以一次运行小集与标准大集：
+对应的双击入口：
 
-```bash
-node tests/cli-acceptance.mjs --suite all
+```bat
+tests\run-art-text-prompts.bat
 ```
 
-默认输出写入 `outputs/cli-acceptance/`，该目录已由根 `.gitignore` 忽略。
+脚本会自动在安装目录、仓库根目录和 `apps\cli\dist\` 中查找 `gen2vec_cli.exe`。如果评审把脚本放在其他位置，可显式指定：
+
+```powershell
+.\tests\run-art-text-prompts.ps1 -CliPath "C:\Program Files\矢量艺术字生成器\gen2vec_cli.exe"
+```
+
+默认输出写入 `outputs\cli-acceptance\`，该目录已由根 `.gitignore` 忽略。
 
 ## 核验内容
 
@@ -41,13 +52,13 @@ node tests/cli-acceptance.mjs --suite all
 
 常用调试参数：
 
-```bash
+```powershell
 # 只生成规范化输入并打印 CLI 命令，不实际调用后端
-node tests/cli-acceptance.mjs --suite small --dry-run
+.\tests\run-art-text-prompts.ps1 -DryRun
 
 # 核验已经跑完的一份 batch_summary.csv
-node tests/cli-acceptance.mjs --suite small --verify-only outputs/cli-acceptance/.../batch_summary.csv
+.\tests\run-art-text-prompts.ps1 -VerifyOnly outputs\cli-acceptance\...\batch_summary.csv
 
-# 运行压力大集合
-node tests/cli-acceptance.mjs --suite stress --timeout-minutes 540
+# 不做矢量化，只验 original.png、metadata、日志和汇总表
+.\tests\run-art-text-prompts.ps1 -NoVectorize
 ```

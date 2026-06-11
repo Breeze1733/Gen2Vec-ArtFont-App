@@ -74,6 +74,11 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
     │       ├── download-comfyui-engine.ps1 (ComfyUI 引擎 + GGUF 下载脚本)
     │       ├── download-models.ps1   (模型下载脚本)
     │       └── README.md
+    ├── gen2vec_cli.exe              (CLI 自动化验收控制台)
+    ├── tests/                       (标准验收脚本与测试集)
+    │   ├── art_text_prompts.txt
+    │   ├── run-art-text-prompts.bat
+    │   └── run-art-text-prompts.ps1
     └── ... (Electron 运行时文件)
 ```
 
@@ -82,6 +87,11 @@ Electron ──spawn──→ txt2img-backend.exe ──spawn──→ ComfyUI (
 ```
 {安装目录}/
 ├── 矢量艺术字生成器.exe
+├── gen2vec_cli.exe
+├── tests/
+│   ├── art_text_prompts.txt
+│   ├── run-art-text-prompts.bat
+│   └── run-art-text-prompts.ps1
 ├── resources/
 │   ├── app.asar
 │   └── backend/
@@ -305,10 +315,14 @@ async function isPortInUse(port) {
       { "from": "../../services/txt2img-api/dist/ComfyUI-GGUF.zip",     "to": "backend/ComfyUI-GGUF.zip" },
       { "from": "../../scripts/download-comfyui-engine.ps1",            "to": "backend/download-comfyui-engine.ps1" },
       { "from": "../../scripts/download-models.ps1", "to": "backend/download-models.ps1" },
+      { "from": "../../scripts/configure-comfyui.ps1", "to": "backend/configure-comfyui.ps1" },
       { "from": "../../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
       { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
       { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" },
-      { "from": "../../apps/cli/dist/gen2vec_cli.exe", "to": "../gen2vec_cli.exe" }
+      { "from": "../../apps/cli/dist/gen2vec_cli.exe", "to": "../gen2vec_cli.exe" },
+      { "from": "../../tests/run-art-text-prompts.ps1", "to": "../tests/run-art-text-prompts.ps1" },
+      { "from": "../../tests/run-art-text-prompts.bat", "to": "../tests/run-art-text-prompts.bat" },
+      { "from": "../../tests/fixtures/art_text_prompts.txt", "to": "../tests/art_text_prompts.txt" }
     ],
     "win": { "target": "nsis" },
     "nsis": {
