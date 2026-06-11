@@ -598,7 +598,8 @@ const startGeneration = async () => {
         negative: payload.negative.trim(),
         resolution: payload.resolution,
         format: payload.format,
-        seed: payload.seed
+        seed: payload.seed,
+        __timeoutMs: 300000
       }
       const t1 = Date.now()
       const respA = await generateArtBitmap(payloadA)
@@ -761,8 +762,8 @@ const startGeneration = async () => {
         batchProgress.current = i + 1
 
         try {
-          // Stage 1: 生成位图
-          const payloadA = { text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed }
+          // Stage 1: 生成位图（批量首条含模型加载，超时放宽到 600s）
+          const payloadA = { text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed, __timeoutMs: 600000 }
           const t1 = Date.now()
           const respA = await generateArtBitmap(payloadA)
           const s1Ms = Date.now() - t1
@@ -790,7 +791,7 @@ const startGeneration = async () => {
             negative: payload.negative || '',
             resolution: payload.resolution, format: payload.format, seed: payload.seed,
             vector: { ...payload.vector },
-            __timeoutMs: 120000,
+            __timeoutMs: 300000,
             generated_image: { file_path: itemTaskInfo.paths.original },
             image_base64: itemTaskInfo?.paths?.original ? undefined : respA.png,
             image_name: respA.image_name || `${safeName(text || 'batch')}-orig.png`
