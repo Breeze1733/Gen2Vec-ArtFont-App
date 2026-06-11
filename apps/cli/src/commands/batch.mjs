@@ -317,7 +317,7 @@ export async function run(args) {
           }),
           usesTxt2Img: true,
           summaryRow: {
-            ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: batchStatus, text, prompt, seed, resolution: itemResolution }),
+            ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: batchStatus, text, prompt, seed, resolution: itemResolution, metadata }),
             summary_path: summaryPath,
           },
           workflowArtifacts,
@@ -347,7 +347,7 @@ export async function run(args) {
           }),
           usesTxt2Img: true,
           summaryRow: {
-            ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: batchStatus, text, prompt, seed, resolution: itemResolution }),
+            ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: batchStatus, text, prompt, seed, resolution: itemResolution, metadata }),
             summary_path: summaryPath,
           },
           workflowArtifacts,

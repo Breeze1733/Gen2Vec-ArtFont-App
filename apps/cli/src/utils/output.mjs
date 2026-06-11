@@ -193,9 +193,13 @@ function csvEscape(value) {
 }
 
 function extractQualityMetrics(metadata = {}) {
+  const generationMs = metadata?.generation?.duration_ms
+  const vectorMs = metadata?.stats?.elapsed_ms
   const pngTransparency = metadata?.preprocess?.png_transparency
   const svgFidelity = metadata?.quality?.svg_fidelity
   return {
+    generation_ms: generationMs === undefined || generationMs === null ? '' : generationMs,
+    vector_ms: vectorMs === undefined || vectorMs === null ? '' : vectorMs,
     png_transparency: pngTransparency === undefined || pngTransparency === null ? '' : pngTransparency,
     svg_fidelity: svgFidelity === undefined || svgFidelity === null ? '' : svgFidelity,
   }
@@ -212,7 +216,12 @@ function appendQualityMetricsToRunLog(runLog = '', metadata = {}) {
     }
     return `${text}\n${line}`
   }
-  return upsertMetric(upsertMetric(runLog, 'png_transparency', metrics.png_transparency), 'svg_fidelity', metrics.svg_fidelity)
+  return [
+    ['generation_ms', metrics.generation_ms],
+    ['vector_ms', metrics.vector_ms],
+    ['png_transparency', metrics.png_transparency],
+    ['svg_fidelity', metrics.svg_fidelity],
+  ].reduce((text, [key, value]) => upsertMetric(text, key, value), runLog)
 }
 
 export async function appendBatchSummaryCsv(summaryPath, row = {}) {
@@ -232,6 +241,8 @@ export async function appendBatchSummaryCsv(summaryPath, row = {}) {
     'preview_path',
     'metadata_path',
     'run_log_path',
+    'generation_ms',
+    'vector_ms',
     'png_transparency',
     'svg_fidelity',
     'error',
@@ -392,8 +403,8 @@ export async function writeTaskArtifacts({
     const summaryTarget = summaryRow.summary_path || targetPaths.summary
     if (summaryTarget) {
       await appendBatchSummaryCsv(summaryTarget, {
-        ...summaryRow,
         ...extractQualityMetrics(metadataPayload || {}),
+        ...summaryRow,
         task_name: summaryRow.task_name || taskName || path.basename(resolvedTaskDir),
         task_dir: summaryRow.task_dir || resolvedTaskDir,
         original_path: summaryRow.original_path || targetPaths.original,
@@ -539,6 +550,8 @@ export function buildSummaryRow({
     preview_path: taskInfo?.paths?.preview || '',
     metadata_path: taskInfo?.paths?.metadata || '',
     run_log_path: taskInfo?.paths?.log || '',
+    generation_ms: metrics.generation_ms,
+    vector_ms: metrics.vector_ms,
     png_transparency: metrics.png_transparency,
     svg_fidelity: metrics.svg_fidelity,
     error,

@@ -169,6 +169,11 @@ const basename = (p) => {
   const parts = p.replace(/\\/g, '/').split('/')
   return parts[parts.length - 1] || ''
 }
+const dirname = (p) => {
+  if (!p) return ''
+  const slash = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+  return slash >= 0 ? p.slice(0, slash) : ''
+}
 
 // GPU 检测
 const gpuInfo = ref('检测中...')
@@ -830,7 +835,21 @@ const startGeneration = async () => {
             metadata: item.metadata,
             runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, stage2Duration: s2Ms, status: batchStatus, usesTxt2Img: true, engine: batchEngine }),
             usesTxt2Img: true,
-            summaryRow: { ...buildSummaryRow({ task, taskInfo: itemTaskInfo, modeName: 'batch', status: batchStatus, text, prompt, seed: payload.seed }), summary_path: batchSummaryPath },
+            summaryRow: {
+              ...buildSummaryRow({
+                task,
+                taskInfo: itemTaskInfo,
+                modeName: 'batch',
+                status: batchStatus,
+                text,
+                prompt,
+                seed: payload.seed,
+                metadata: item.metadata,
+                generationMs: s1Ms,
+                vectorMs: s2Ms
+              }),
+              summary_path: batchSummaryPath
+            },
             workflowArtifacts: batchWorkflowArtifacts
           })
 
@@ -872,16 +891,7 @@ const startGeneration = async () => {
       }
 
       // 构建文件列表：批量根目录、汇总 CSV，以及每条成功/失败的子任务目录。
-      const files = [
-        { key: 'batchRoot', name: batchTaskInfo.taskName, data: batchSummaryDir, isPath: true },
-        { key: 'batchSummary', name: 'batch_summary.csv', data: batchSummaryPath, isPath: true }
-      ]
-      const successItems = batchItems.value.filter(b => b.status === 'success')
-      batchItems.value.forEach((b, idx) => {
-        if (!b.taskDir) return
-        files.push({ key: `task${idx + 1}`, name: b.taskName || `task_${idx + 1}`, data: b.taskDir, isPath: true })
-      })
-      currentFiles.value = files
+      currentFiles.value = buildBatchCurrentFiles(batchSummaryDir, batchSummaryPath, batchItems.value)
       currentTaskDir.value = batchSummaryDir
       currentOutputRoot.value = batchTaskInfo.outputRoot
       currentTaskPaths.value = { ...batchTaskInfo.paths, summary: batchSummaryPath, summaryDir: batchSummaryDir }
@@ -1013,6 +1023,91 @@ const readTextPath = async (filePath) => {
   }
 }
 
+const parseCsvRows = (csvText) => {
+  const rows = []
+  let row = []
+  let field = ''
+  let inQuotes = false
+
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i]
+    const next = csvText[i + 1]
+
+    if (inQuotes) {
+      if (char === '"' && next === '"') {
+        field += '"'
+        i++
+      } else if (char === '"') {
+        inQuotes = false
+      } else {
+        field += char
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inQuotes = true
+    } else if (char === ',') {
+      row.push(field)
+      field = ''
+    } else if (char === '\n') {
+      row.push(field)
+      rows.push(row)
+      row = []
+      field = ''
+    } else if (char !== '\r') {
+      field += char
+    }
+  }
+
+  if (field || row.length) {
+    row.push(field)
+    rows.push(row)
+  }
+
+  const [rawHeader = [], ...body] = rows.filter(r => r.some(cell => String(cell || '').trim() !== ''))
+  const header = rawHeader.map(key => String(key || '').replace(/^\uFEFF/, ''))
+  return body.map(values => Object.fromEntries(header.map((key, index) => [key, values[index] || ''])))
+}
+
+const isAbsoluteOutputPath = (value) => (
+  /^[a-zA-Z]:[\\/]/.test(value || '') ||
+  String(value || '').startsWith('\\\\') ||
+  String(value || '').startsWith('/')
+)
+
+const resolveSummaryRelativePath = (value, summaryPath) => {
+  if (!value) return ''
+  if (isAbsoluteOutputPath(value)) return value
+  return joinPath(dirname(summaryPath), value)
+}
+
+const toNumberOrZero = (value) => {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : 0
+}
+
+const parseKeyValueLog = (text) => {
+  const map = {}
+  String(text || '').split(/\r?\n/).forEach((line) => {
+    const idx = line.indexOf('=')
+    if (idx > 0) map[line.slice(0, idx)] = line.slice(idx + 1)
+  })
+  return map
+}
+
+const buildMetricMetadata = ({ text = '', prompt = '', seed = 0, generationMs = 0, vectorMs = 0, pngTransparency = '', svgFidelity = '' } = {}) => ({
+  generation: {
+    text,
+    prompt,
+    seed,
+    ...(generationMs ? { duration_ms: generationMs } : {})
+  },
+  stats: vectorMs ? { elapsed_ms: vectorMs } : {},
+  preprocess: pngTransparency !== '' ? { png_transparency: pngTransparency } : {},
+  quality: svgFidelity !== '' ? { svg_fidelity: svgFidelity } : {}
+})
+
 const resolveStatus = (metadata) => {
   if (!metadata) return 'success'
   if (metadata.engine === 'local-studio') return 'stub'
@@ -1138,28 +1233,51 @@ const writeFailedTask = async ({ task, taskInfo, modeName, text = '', prompt = '
     metadata,
     runLog: buildRunLog({ task, taskInfo, modeName, text, prompt, seed, stage1Duration, stage2Duration, status: 'failed', error: errorMessage, usesTxt2Img }),
     usesTxt2Img,
-    summaryRow: { ...buildSummaryRow({ task, taskInfo, modeName, status: 'failed', text, prompt, seed, error: errorMessage }), summary_path: summaryTarget }
+    summaryRow: {
+      ...buildSummaryRow({
+        task,
+        taskInfo,
+        modeName,
+        status: 'failed',
+        text,
+        prompt,
+        seed,
+        error: errorMessage,
+        generationMs: stage1Duration,
+        vectorMs: stage2Duration
+      }),
+      summary_path: summaryTarget
+    }
   })
 }
 
-const buildSummaryRow = ({ task, taskInfo, modeName, status = 'success', text = '', prompt = '', seed = 0, error = '' }) => ({
-  task_id: String(task?.id || ''),
-  task_name: taskInfo?.taskName || '',
-  mode: modeName,
-  status,
-  text,
-  prompt,
-  seed,
-  resolution: payload.resolution,
-  task_dir: taskInfo?.taskDir || '',
-  original_path: taskInfo?.paths?.original || '',
-  transparent_path: taskInfo?.paths?.transparent || '',
-  result_svg_path: taskInfo?.paths?.svg || '',
-  preview_path: taskInfo?.paths?.preview || '',
-  metadata_path: taskInfo?.paths?.metadata || '',
-  run_log_path: taskInfo?.paths?.log || '',
-  error
-})
+const buildSummaryRow = ({ task, taskInfo, modeName, status = 'success', text = '', prompt = '', seed = 0, error = '', metadata = null, generationMs = 0, vectorMs = 0 }) => {
+  const metrics = {
+    generation_ms: generationMs || metadata?.generation?.duration_ms || '',
+    vector_ms: vectorMs || metadata?.stats?.elapsed_ms || '',
+    png_transparency: metadata?.preprocess?.png_transparency ?? '',
+    svg_fidelity: metadata?.quality?.svg_fidelity ?? ''
+  }
+  return {
+    task_id: String(task?.id || ''),
+    task_name: taskInfo?.taskName || '',
+    mode: modeName,
+    status,
+    text,
+    prompt,
+    seed,
+    resolution: payload.resolution,
+    task_dir: taskInfo?.taskDir || '',
+    original_path: taskInfo?.paths?.original || '',
+    transparent_path: taskInfo?.paths?.transparent || '',
+    result_svg_path: taskInfo?.paths?.svg || '',
+    preview_path: taskInfo?.paths?.preview || '',
+    metadata_path: taskInfo?.paths?.metadata || '',
+    run_log_path: taskInfo?.paths?.log || '',
+    ...metrics,
+    error
+  }
+}
 
 const downloadFile = (filename, blob) => {
   const url = URL.createObjectURL(blob)
@@ -1364,10 +1482,159 @@ const startModelDownload = async () => {
   }
 }
 
-const selectBatchItem = (index) => {
+const ensureBatchItemArtifacts = async (item) => {
+  if (!item || item.assetsLoaded || !item.paths) return
+
+  const [original, transparent, preview, svg, metadataText] = await Promise.all([
+    pathToDataUrl(item.paths.original),
+    pathToDataUrl(item.paths.transparent),
+    pathToDataUrl(item.paths.preview),
+    readTextPath(item.paths.svg),
+    readTextPath(item.paths.metadata)
+  ])
+
+  item.original = original || item.original || ''
+  item.transparent = transparent || item.transparent || ''
+  item.preview = preview || item.preview || ''
+  item.svg = svg || item.svg || ''
+
+  const parsedMetadata = metadataText ? safeJsonParse(metadataText) : null
+  if (parsedMetadata) {
+    parsedMetadata.generation = parsedMetadata.generation || {}
+    parsedMetadata.stats = parsedMetadata.stats || {}
+    parsedMetadata.preprocess = parsedMetadata.preprocess || {}
+    parsedMetadata.quality = parsedMetadata.quality || {}
+    if (item.stage1Ms && !parsedMetadata.generation.duration_ms) parsedMetadata.generation.duration_ms = item.stage1Ms
+    if (item.stage2Ms && !parsedMetadata.stats.elapsed_ms) parsedMetadata.stats.elapsed_ms = item.stage2Ms
+    if (item.metadata?.preprocess?.png_transparency !== undefined && parsedMetadata.preprocess.png_transparency === undefined) {
+      parsedMetadata.preprocess.png_transparency = item.metadata.preprocess.png_transparency
+    }
+    if (item.metadata?.quality?.svg_fidelity !== undefined && parsedMetadata.quality.svg_fidelity === undefined) {
+      parsedMetadata.quality.svg_fidelity = item.metadata.quality.svg_fidelity
+    }
+    item.metadata = parsedMetadata
+  }
+
+  item.assetsLoaded = true
+}
+
+const buildBatchCurrentFiles = (batchRoot, summaryPath, items) => {
+  const files = [
+    { key: 'batchRoot', name: basename(batchRoot) || 'batch-run', data: batchRoot, isPath: true },
+    { key: 'batchSummary', name: 'batch_summary.csv', data: summaryPath, isPath: true }
+  ]
+  items.forEach((entry, idx) => {
+    if (!entry.taskDir) return
+    files.push({ key: `task${idx + 1}`, name: entry.taskName || `task_${idx + 1}`, data: entry.taskDir, isPath: true })
+  })
+  return files
+}
+
+const restoreBatchHistory = async (item, saved) => {
+  const summaryPath = saved.paths?.summary || joinPath(saved.taskDir, 'batch_summary.csv')
+  const summaryText = await readTextPath(summaryPath)
+  if (!summaryText) throw new Error('batch_summary.csv is missing or unreadable')
+
+  const rows = parseCsvRows(summaryText)
+  if (!rows.length) throw new Error('batch_summary.csv has no rows')
+
+  const restoredItems = []
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const paths = {
+      original: resolveSummaryRelativePath(row.original_path, summaryPath),
+      transparent: resolveSummaryRelativePath(row.transparent_path, summaryPath),
+      svg: resolveSummaryRelativePath(row.result_svg_path, summaryPath),
+      preview: resolveSummaryRelativePath(row.preview_path, summaryPath),
+      metadata: resolveSummaryRelativePath(row.metadata_path, summaryPath),
+      log: resolveSummaryRelativePath(row.run_log_path, summaryPath),
+      summary: summaryPath,
+      summaryDir: dirname(summaryPath)
+    }
+
+    const runLog = parseKeyValueLog(await readTextPath(paths.log))
+    const generationMs = toNumberOrZero(row.generation_ms || runLog.generation_ms || runLog.stage1_ms)
+    const vectorMs = toNumberOrZero(row.vector_ms || runLog.vector_ms || runLog.stage2_ms)
+    const status = row.status === 'failed' || row.error ? 'failed' : 'success'
+
+    restoredItems.push({
+      index: i,
+      text: row.text || '',
+      prompt: row.prompt || '',
+      status,
+      rawStatus: row.status || '',
+      error: row.error || '',
+      original: '',
+      transparent: '',
+      preview: '',
+      svg: '',
+      metadata: buildMetricMetadata({
+        text: row.text || '',
+        prompt: row.prompt || '',
+        seed: toNumberOrZero(row.seed),
+        generationMs,
+        vectorMs,
+        pngTransparency: row.png_transparency,
+        svgFidelity: row.svg_fidelity
+      }),
+      stage1Ms: generationMs,
+      stage2Ms: vectorMs,
+      taskDir: resolveSummaryRelativePath(row.task_dir, summaryPath),
+      outputRoot: saved.outputRoot || dirname(summaryPath),
+      taskName: row.task_name || basename(row.task_dir) || `task_${i + 1}`,
+      paths,
+      assetsLoaded: false
+    })
+  }
+
+  mode.value = 'batch'
+  batchItems.value = restoredItems
+  batchProgress.total = restoredItems.length
+  batchProgress.completed = restoredItems.filter(entry => entry.status === 'success').length
+  batchProgress.failed = restoredItems.filter(entry => entry.status === 'failed').length
+  batchProgress.current = restoredItems.length
+
+  currentFiles.value = buildBatchCurrentFiles(saved.taskDir, summaryPath, restoredItems)
+  currentTaskDir.value = saved.taskDir
+  currentOutputRoot.value = saved.outputRoot || dirname(summaryPath)
+  currentTaskPaths.value = { ...(saved.paths || {}), summary: summaryPath, summaryDir: dirname(summaryPath) }
+
+  applyInputParamsToForm(saved.inputParams, 'batch')
+  activeTab.value = 'output'
+
+  const firstSuccess = restoredItems.findIndex(entry => entry.status === 'success')
+  if (firstSuccess >= 0) {
+    await selectBatchItem(firstSuccess)
+  } else {
+    selectedBatchIndex.value = 0
+    result.original = ''
+    result.transparent = ''
+    result.preview = ''
+    result.image = ''
+    result.svg = ''
+    result.metadata = null
+  }
+}
+
+const selectBatchItem = async (index) => {
   const item = batchItems.value[index]
-  if (!item || item.status !== 'success') return
   selectedBatchIndex.value = index
+  if (!item) return
+
+  if (item.status !== 'success') {
+    result.original = ''
+    result.transparent = ''
+    result.preview = ''
+    result.image = ''
+    result.svg = ''
+    result.metadata = null
+    currentTaskDir.value = item.taskDir || currentTaskDir.value
+    currentOutputRoot.value = item.outputRoot || currentOutputRoot.value
+    currentTaskPaths.value = item.paths || currentTaskPaths.value
+    return
+  }
+
+  await ensureBatchItemArtifacts(item)
   result.original = item.original || ''
   result.transparent = item.transparent || ''
   result.preview = item.preview || ''
@@ -1495,6 +1762,11 @@ const restoreHistoryItem = async (id) => {
   // 新数据：{ taskDir, paths, inputParams } —— 任务目录是真正的产物源
   if (saved.taskDir && saved.paths) {
     try {
+      if (restoredMode === 'batch') {
+        await restoreBatchHistory(item, saved)
+        return
+      }
+
       mode.value = restoredMode === 'vectorize' ? 'vectorize' : restoredMode === 'batch' ? 'batch' : 'single'
       result.original = await pathToDataUrl(saved.paths.original)
       result.transparent = await pathToDataUrl(saved.paths.transparent)
