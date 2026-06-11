@@ -1550,9 +1550,15 @@ ipcMain.handle('art-text/write-task-artifacts', async (event, options) => {
     const wfApi = workflowArtifacts?.workflowApi || workflowArtifacts?.workflow_api
     const wfDeps = workflowArtifacts?.modelDependencies || workflowArtifacts?.model_dependencies
     const hasRealData = wfApi && typeof wfApi === 'object' && Object.keys(wfApi).length > 2
-    const workflow = hasRealData
-      ? workflowArtifacts
-      : buildWorkflowArtifacts({ metadata: metadataPayload || {}, taskName, seed: metadataPayload?.generation?.seed, mode: metadataPayload?.mode })
+    const fallbackWorkflow = buildWorkflowArtifacts({
+      metadata: metadataPayload || {},
+      taskName,
+      seed: metadataPayload?.generation?.seed,
+      mode: metadataPayload?.mode,
+      workflowApi: wfApi,
+      modelDependencies: wfDeps
+    })
+    const workflow = hasRealData ? { ...fallbackWorkflow, ...workflowArtifacts } : fallbackWorkflow
     const wfSaved = await writeArtifactFile(targetPaths.workflowApi, workflow.workflowApi || workflow.workflow_api || {}, true)
     const nodesSaved = await writeArtifactFile(targetPaths.workflowNodes, workflow.workflowNodes || workflow.nodes || '', true)
     const depsSaved = await writeArtifactFile(targetPaths.modelDependencies, workflow.modelDependencies || workflow.model_dependencies || {}, true)

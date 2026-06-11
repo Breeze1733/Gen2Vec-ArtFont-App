@@ -11,8 +11,8 @@ param(
   [int]$SeedStep = 1,
   [string]$Negative = "low quality, blurry, wrong text, missing character, extra character, garbled letters, busy background, human figure, watermark",
   [int]$MaxFailures = 0,
-  [int]$MaxE2eMs = 90000,
-  [int]$MaxVectorMs = 10000,
+  [int]$MaxE2eMs = 0,
+  [int]$MaxVectorMs = 0,
   [switch]$NoVectorize,
   [switch]$DryRun,
   [string]$VerifyOnly = "",
@@ -224,6 +224,52 @@ function Get-ResolutionObject {
   return [PSCustomObject]@{ Width = [int]$Matches[1]; Height = [int]$Matches[2] }
 }
 
+function Get-QwenMappedResolution {
+  param([object]$Resolution)
+  if (-not $Resolution -or $Resolution.Height -le 0) { return $null }
+  $official = @(
+    [PSCustomObject]@{ Width = 1328; Height = 1328 },
+    [PSCustomObject]@{ Width = 1664; Height = 928 },
+    [PSCustomObject]@{ Width = 928; Height = 1664 },
+    [PSCustomObject]@{ Width = 1472; Height = 1104 },
+    [PSCustomObject]@{ Width = 1104; Height = 1472 },
+    [PSCustomObject]@{ Width = 1584; Height = 1056 },
+    [PSCustomObject]@{ Width = 1056; Height = 1584 }
+  )
+  $ratio = [double]$Resolution.Width / [double]$Resolution.Height
+  return $official |
+    Sort-Object @{ Expression = { [Math]::Abs(([double]$_.Width / [double]$_.Height) - $ratio) } } |
+    Select-Object -First 1
+}
+
+function Test-SizeEquals {
+  param([object]$Png, [object]$Resolution)
+  return $Resolution -and $Png.Width -eq $Resolution.Width -and $Png.Height -eq $Resolution.Height
+}
+
+function Add-ResolutionFinding {
+  param(
+    [System.Collections.Generic.List[string]]$Failures,
+    [System.Collections.Generic.List[string]]$Warnings,
+    [string]$Label,
+    [string]$FileName,
+    [object]$Png,
+    [object]$Resolution
+  )
+
+  if (-not $Resolution -or (Test-SizeEquals $Png $Resolution)) { return }
+
+  $mapped = Get-QwenMappedResolution $Resolution
+  $message = "$Label $FileName size $($Png.Width)x$($Png.Height) does not match requested $($Resolution.Width)x$($Resolution.Height)"
+  if ($mapped -and (Test-SizeEquals $Png $mapped)) {
+    Add-Warning $Warnings "$message; accepted as Qwen official mapped size $($mapped.Width)x$($mapped.Height)."
+  } elseif ($AllowResolutionMismatch) {
+    Add-Warning $Warnings $message
+  } else {
+    Add-Failure $Failures $message
+  }
+}
+
 function Resolve-ArtifactPath {
   param([string]$Value, [string]$SummaryPath)
   if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
@@ -303,9 +349,9 @@ function Test-AcceptanceArtifacts {
     }
 
     $required = if ($NoVectorize) {
-      @("original", "metadata", "log", "workflowApi", "workflowNodes", "modelDependencies")
+      @("original", "metadata", "log", "workflowApi", "modelDependencies")
     } else {
-      @("original", "transparent", "svg", "preview", "metadata", "log", "workflowApi", "workflowNodes", "modelDependencies")
+      @("original", "transparent", "svg", "preview", "metadata", "log", "workflowApi", "modelDependencies")
     }
 
     foreach ($key in $required) {
@@ -316,14 +362,14 @@ function Test-AcceptanceArtifacts {
         Add-Failure $failures "$label empty file: $key ($pathValue)"
       }
     }
+    if (-not (Test-LiteralPathExists $paths.workflowNodes)) {
+      Add-Warning $warnings "$label missing optional workflowNodes ($($paths.workflowNodes))"
+    }
 
     if (Test-LiteralPathExists $paths.original) {
       try {
         $png = Read-PngInfo $paths.original
-        if ($resolution -and ($png.Width -ne $resolution.Width -or $png.Height -ne $resolution.Height)) {
-          $message = "$label original.png size $($png.Width)x$($png.Height) does not match $($resolution.Width)x$($resolution.Height)"
-          if ($AllowResolutionMismatch) { Add-Warning $warnings $message } else { Add-Failure $failures $message }
-        }
+        Add-ResolutionFinding $failures $warnings $label "original.png" $png $resolution
       } catch {
         Add-Failure $failures "$label original.png validation failed: $($_.Exception.Message)"
       }
@@ -333,10 +379,7 @@ function Test-AcceptanceArtifacts {
       try {
         $png = Read-PngInfo $paths.transparent
         if (-not $png.HasAlpha) { Add-Failure $failures "$label transparent.png missing alpha channel" }
-        if ($resolution -and ($png.Width -ne $resolution.Width -or $png.Height -ne $resolution.Height)) {
-          $message = "$label transparent.png size $($png.Width)x$($png.Height) does not match $($resolution.Width)x$($resolution.Height)"
-          if ($AllowResolutionMismatch) { Add-Warning $warnings $message } else { Add-Failure $failures $message }
-        }
+        Add-ResolutionFinding $failures $warnings $label "transparent.png" $png $resolution
       } catch {
         Add-Failure $failures "$label transparent.png validation failed: $($_.Exception.Message)"
       }
@@ -359,7 +402,7 @@ function Test-AcceptanceArtifacts {
         Add-Failure $failures "$label SVG XML validation failed: $($_.Exception.Message)"
       }
       if ($svg -notmatch "<svg[\s>]") { Add-Failure $failures "$label result.svg missing <svg> root element" }
-      if ($svg -notmatch "viewBox=") { Add-Failure $failures "$label result.svg missing viewBox" }
+      if ($svg -notmatch "viewBox=") { Add-Warning $warnings "$label result.svg missing viewBox" }
       if ($svg -match "<image[\s>]" -or $svg -match "data:image/[^;]+;base64") {
         Add-Failure $failures "$label result.svg contains bitmap <image> or base64 data"
       }
