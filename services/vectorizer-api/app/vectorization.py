@@ -130,19 +130,6 @@ def _pretty_svg_text(svg_text: str) -> str:
     except Exception:
         return svg_text
 
-
-def _ensure_svg_viewbox(svg_text: str, width: int, height: int) -> str:
-    try:
-        parsed = minidom.parseString(svg_text.encode("utf-8"))
-        root = parsed.documentElement
-        if root and root.tagName.lower().endswith("svg") and not root.hasAttribute("viewBox"):
-            root.setAttribute("viewBox", f"0 0 {int(width)} {int(height)}")
-            return parsed.toxml(encoding="utf-8").decode("utf-8")
-    except Exception:
-        return svg_text
-    return svg_text
-
-
 def _calculate_svg_fidelity(source_img: Image.Image, preview_png_bytes: bytes) -> float | None:
     """计算 SVG 矢量化还原度。
 
@@ -399,8 +386,7 @@ def vectorize_image(transparent_image: Image.Image, vector: dict[str, Any]) -> d
             raise RuntimeError("No supported vtracer conversion function found in current binding.")
 
         with open(output_svg_path, "r", encoding="utf-8") as f:
-            svg_text = f.read()
-        svg_text = _ensure_svg_viewbox(svg_text, original_width, original_height)
+            svg_text = f.read()         
         svg_size_kb = round(os.path.getsize(output_svg_path) / 1024.0, 3)
         preview_png_bytes = _svg_to_png_bytes(svg_text, width=original_width)
         formatted_svg_text = _pretty_svg_text(svg_text)
