@@ -442,6 +442,12 @@ Write-Host "规范化输入: $preparedFixture"
 Write-Host "条目数: $($expectedRows.Count)"
 
 if ([string]::IsNullOrWhiteSpace($VerifyOnly)) {
+  $confirm = Read-Host "是否进行批量测试(y/n)"
+  if ($confirm.Trim().ToLowerInvariant() -ne "y") {
+    Write-Host "已取消批量测试。" -ForegroundColor Yellow
+    exit 0
+  }
+
   try {
     $cliExe = Resolve-CliExecutable $CliPath
   } catch {
