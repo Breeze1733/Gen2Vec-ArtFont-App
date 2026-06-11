@@ -37,7 +37,7 @@ function Get-SuiteConfig {
   switch ($Name) {
     "acceptance" {
       return @{
-        Label = "acceptance 标准测试集"
+        Label = "acceptance"
         Fixture = $fixture
         ExpectedRows = 0
         MinRows = 100
@@ -62,7 +62,7 @@ function Resolve-CliExecutable {
   if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
     $resolved = Resolve-AbsolutePath $ExplicitPath
     if (Test-Path -LiteralPath $resolved) { return (Resolve-Path -LiteralPath $resolved).Path }
-    throw "指定的 CLI 不存在: $ExplicitPath"
+    throw "CLI not found: $ExplicitPath"
   }
 
   $candidates = @(
@@ -84,7 +84,7 @@ function Resolve-CliExecutable {
     if ($cmd) { return $cmd.Source }
   }
 
-  throw "未找到 gen2vec_cli.exe。请在安装目录运行本脚本，或使用 -CliPath 指定 CLI 可执行文件。"
+  throw "gen2vec_cli.exe was not found. Run this script from the install directory, or pass -CliPath."
 }
 
 function Test-LiteralPathExists {
@@ -95,7 +95,7 @@ function Test-LiteralPathExists {
 
 function Split-PromptLine {
   param([string]$Line)
-  $lineText = $Line.Replace([string][char]0xFEFF, "").Replace("｜", "|").Replace("`t|", "|").Replace("|`t", "|").Trim()
+  $lineText = $Line.Replace([string][char]0xFEFF, "").Replace([string][char]0xFF5C, "|").Replace("`t|", "|").Replace("|`t", "|").Trim()
   if ([string]::IsNullOrWhiteSpace($lineText) -or $lineText.StartsWith("#")) { return $null }
 
   if ($lineText.Contains("|")) {
@@ -123,7 +123,7 @@ function New-PreparedFixture {
     [hashtable]$Config
   )
 
-  if (-not (Test-LiteralPathExists $FixturePath)) { throw "测试集不存在: $FixturePath" }
+  if (-not (Test-LiteralPathExists $FixturePath)) { throw "Fixture not found: $FixturePath" }
   $rows = @()
   foreach ($line in Get-Content -LiteralPath $FixturePath -Encoding UTF8) {
     $row = Split-PromptLine $line
@@ -133,10 +133,10 @@ function New-PreparedFixture {
   }
 
   if ($Config.ExpectedRows -gt 0 -and $rows.Count -ne $Config.ExpectedRows) {
-    throw "$($Config.Label) 应为 $($Config.ExpectedRows) 条，当前为 $($rows.Count) 条。"
+    throw "$($Config.Label) expected $($Config.ExpectedRows) rows, got $($rows.Count)."
   }
   if ($rows.Count -ge $Config.MinRows) {
-    Write-Host "$($Config.Label) 符合要求：当前 $($rows.Count) 条，满足 ≥$($Config.MinRows) 条标准" -ForegroundColor Green
+    Write-Host "$($Config.Label) row count ok: $($rows.Count) rows, minimum is $($Config.MinRows)." -ForegroundColor Green
   }
 
   New-Item -ItemType Directory -Path (Split-Path -Parent $PreparedPath) -Force | Out-Null
@@ -165,13 +165,13 @@ function Wait-BackendHealth {
   do {
     & $CliExe "health" *> $null
     if ($LASTEXITCODE -eq 0) {
-      Write-Host "后端健康检查通过。" -ForegroundColor Green
+    Write-Host "Backend health check passed." -ForegroundColor Green
       return
     }
     Start-Sleep -Seconds 1
   } while ((Get-Date) -lt $deadline)
 
-  throw "后端健康检查失败。请先启动桌面端，或手动启动 txt2img-api:9001 和 vectorizer-api:8000。"
+  throw "Backend health check failed. Start the desktop app first, or start txt2img-api:9001 and vectorizer-api:8000 manually."
 }
 
 function Get-LatestSummary {
@@ -179,7 +179,7 @@ function Get-LatestSummary {
   $summary = Get-ChildItem -LiteralPath $Root -Recurse -Filter "batch_summary.csv" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
-  if (-not $summary) { throw "未找到 batch_summary.csv: $Root" }
+  if (-not $summary) { throw "batch_summary.csv not found: $Root" }
   return $summary.FullName
 }
 
@@ -192,9 +192,9 @@ function Read-PngInfo {
   param([string]$Path)
   $bytes = [System.IO.File]::ReadAllBytes($Path)
   $signature = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
-  if ($bytes.Length -lt 33) { throw "PNG 文件过小: $Path" }
+  if ($bytes.Length -lt 33) { throw "PNG file is too small: $Path" }
   for ($i = 0; $i -lt $signature.Length; $i++) {
-    if ($bytes[$i] -ne $signature[$i]) { throw "不是有效 PNG: $Path" }
+    if ($bytes[$i] -ne $signature[$i]) { throw "Invalid PNG: $Path" }
   }
 
   $hasTrns = $false
@@ -266,12 +266,12 @@ function Test-AcceptanceArtifacts {
   $resolution = Get-ResolutionObject $Resolution
 
   if ($rows.Count -ne $ExpectedRows.Count) {
-    Add-Failure $failures "汇总 CSV 行数应为 $($ExpectedRows.Count)，实际为 $($rows.Count): $SummaryPath"
+    Add-Failure $failures "Summary CSV row count should be $($ExpectedRows.Count), got $($rows.Count): $SummaryPath"
   }
 
   $failedRows = @($rows | Where-Object { $_.status -eq "failed" -or -not [string]::IsNullOrWhiteSpace($_.error) })
   if ($failedRows.Count -gt $MaxFailures) {
-    Add-Failure $failures "失败条数 $($failedRows.Count) 超过阈值 $MaxFailures"
+    Add-Failure $failures "Failed row count $($failedRows.Count) exceeds threshold $MaxFailures"
   }
 
   $allowedStatuses = @("success", "degraded")
@@ -279,10 +279,10 @@ function Test-AcceptanceArtifacts {
     $row = $rows[$i]
     $expected = if ($i -lt $ExpectedRows.Count) { $ExpectedRows[$i] } else { $null }
     if ($row.status -ne "failed" -and $allowedStatuses -notcontains $row.status) {
-      Add-Failure $failures "[$($i + 1)] 状态 $($row.status) 不在允许列表: success,degraded"
+      Add-Failure $failures "[$($i + 1)] status $($row.status) is not allowed: success,degraded"
     }
     if ($expected -and $row.text -ne $expected.Text) {
-      Add-Failure $failures "[$($i + 1)] summary text 不匹配: $($row.text) != $($expected.Text)"
+      Add-Failure $failures "[$($i + 1)] summary text mismatch: $($row.text) != $($expected.Text)"
     }
   }
 
@@ -311,9 +311,9 @@ function Test-AcceptanceArtifacts {
     foreach ($key in $required) {
       $pathValue = $paths[$key]
       if ([string]::IsNullOrWhiteSpace($pathValue) -or -not (Test-LiteralPathExists $pathValue)) {
-        Add-Failure $failures "$label 缺少产物: $key ($pathValue)"
+        Add-Failure $failures "$label missing artifact: $key ($pathValue)"
       } elseif ((Get-Item -LiteralPath $pathValue).Length -le 0) {
-        Add-Failure $failures "$label 空文件: $key ($pathValue)"
+        Add-Failure $failures "$label empty file: $key ($pathValue)"
       }
     }
 
@@ -321,24 +321,24 @@ function Test-AcceptanceArtifacts {
       try {
         $png = Read-PngInfo $paths.original
         if ($resolution -and ($png.Width -ne $resolution.Width -or $png.Height -ne $resolution.Height)) {
-          $message = "$label original.png 尺寸 $($png.Width)x$($png.Height) 不等于 $($resolution.Width)x$($resolution.Height)"
+          $message = "$label original.png size $($png.Width)x$($png.Height) does not match $($resolution.Width)x$($resolution.Height)"
           if ($AllowResolutionMismatch) { Add-Warning $warnings $message } else { Add-Failure $failures $message }
         }
       } catch {
-        Add-Failure $failures "$label original.png 校验失败: $($_.Exception.Message)"
+        Add-Failure $failures "$label original.png validation failed: $($_.Exception.Message)"
       }
     }
 
     if (-not $NoVectorize -and (Test-LiteralPathExists $paths.transparent)) {
       try {
         $png = Read-PngInfo $paths.transparent
-        if (-not $png.HasAlpha) { Add-Failure $failures "$label transparent.png 缺少 Alpha 通道" }
+        if (-not $png.HasAlpha) { Add-Failure $failures "$label transparent.png missing alpha channel" }
         if ($resolution -and ($png.Width -ne $resolution.Width -or $png.Height -ne $resolution.Height)) {
-          $message = "$label transparent.png 尺寸 $($png.Width)x$($png.Height) 不等于 $($resolution.Width)x$($resolution.Height)"
+          $message = "$label transparent.png size $($png.Width)x$($png.Height) does not match $($resolution.Width)x$($resolution.Height)"
           if ($AllowResolutionMismatch) { Add-Warning $warnings $message } else { Add-Failure $failures $message }
         }
       } catch {
-        Add-Failure $failures "$label transparent.png 校验失败: $($_.Exception.Message)"
+        Add-Failure $failures "$label transparent.png validation failed: $($_.Exception.Message)"
       }
     }
 
@@ -346,7 +346,7 @@ function Test-AcceptanceArtifacts {
       try {
         [void](Read-PngInfo $paths.preview)
       } catch {
-        Add-Failure $failures "$label preview.png 校验失败: $($_.Exception.Message)"
+        Add-Failure $failures "$label preview.png validation failed: $($_.Exception.Message)"
       }
     }
 
@@ -356,18 +356,18 @@ function Test-AcceptanceArtifacts {
         $svgDocument = [xml]$svg
         [void]$svgDocument
       } catch {
-        Add-Failure $failures "$label SVG XML 校验失败: $($_.Exception.Message)"
+        Add-Failure $failures "$label SVG XML validation failed: $($_.Exception.Message)"
       }
-      if ($svg -notmatch "<svg[\s>]") { Add-Failure $failures "$label result.svg 缺少 <svg> 根元素" }
-      if ($svg -notmatch "viewBox=") { Add-Failure $failures "$label result.svg 缺少 viewBox" }
+      if ($svg -notmatch "<svg[\s>]") { Add-Failure $failures "$label result.svg missing <svg> root element" }
+      if ($svg -notmatch "viewBox=") { Add-Failure $failures "$label result.svg missing viewBox" }
       if ($svg -match "<image[\s>]" -or $svg -match "data:image/[^;]+;base64") {
-        Add-Failure $failures "$label result.svg 含有位图 <image> 或 base64，不符合真矢量要求"
+        Add-Failure $failures "$label result.svg contains bitmap <image> or base64 data"
       }
       if ($svg -notmatch "<(path|polygon|polyline|rect|circle|ellipse)\b") {
-        Add-Failure $failures "$label result.svg 缺少可编辑矢量图形元素"
+        Add-Failure $failures "$label result.svg missing editable vector elements"
       }
       if ($svg -notmatch "<g[\s>]") {
-        $message = "$label result.svg 未发现 <g> 分组"
+        $message = "$label result.svg has no <g> group"
         if ($StrictSvgGroups) { Add-Failure $failures $message } else { Add-Warning $warnings $message }
       }
     }
@@ -376,34 +376,34 @@ function Test-AcceptanceArtifacts {
     if (Test-LiteralPathExists $paths.metadata) {
       try {
         $metadata = Get-Content -LiteralPath $paths.metadata -Raw -Encoding UTF8 | ConvertFrom-Json
-        if (-not $metadata.schema_version) { Add-Failure $failures "$label metadata.json 缺少 schema_version" }
+        if (-not $metadata.schema_version) { Add-Failure $failures "$label metadata.json missing schema_version" }
         if ($metadata.generation.text -and $row.text -and $metadata.generation.text -ne $row.text) {
-          Add-Failure $failures "$label metadata.generation.text 不匹配"
+          Add-Failure $failures "$label metadata.generation.text mismatch"
         }
       } catch {
-        Add-Failure $failures "$label metadata.json 不是合法 JSON: $($_.Exception.Message)"
+        Add-Failure $failures "$label metadata.json is not valid JSON: $($_.Exception.Message)"
       }
     }
 
     if (Test-LiteralPathExists $paths.log) {
       $runLog = Read-RunLog $paths.log
-      if (-not $runLog.ContainsKey("status")) { Add-Failure $failures "$label run.log 缺少 status" }
+      if (-not $runLog.ContainsKey("status")) { Add-Failure $failures "$label run.log missing status" }
       $stage1 = 0
       $stage2 = 0
       [void][int]::TryParse([string]$runLog["stage1_ms"], [ref]$stage1)
       [void][int]::TryParse([string]$runLog["stage2_ms"], [ref]$stage2)
       if ($MaxE2eMs -gt 0 -and ($stage1 + $stage2) -gt $MaxE2eMs) {
-        Add-Failure $failures "$label 端到端耗时 $($stage1 + $stage2)ms 超过 $MaxE2eMs ms"
+        Add-Failure $failures "$label end-to-end time $($stage1 + $stage2)ms exceeds $MaxE2eMs ms"
       }
       if (-not $NoVectorize -and $MaxVectorMs -gt 0 -and $stage2 -gt $MaxVectorMs) {
-        Add-Failure $failures "$label 矢量化耗时 $stage2 ms 超过 $MaxVectorMs ms"
+        Add-Failure $failures "$label vectorization time $stage2 ms exceeds $MaxVectorMs ms"
       }
     }
 
     if (-not $NoVectorize -and $metadata -and $metadata.stats -and $metadata.stats.elapsed_ms) {
       $elapsed = [double]$metadata.stats.elapsed_ms
       if ($MaxVectorMs -gt 0 -and $elapsed -gt $MaxVectorMs) {
-        Add-Failure $failures "$label metadata.stats.elapsed_ms $elapsed ms 超过 $MaxVectorMs ms"
+        Add-Failure $failures "$label metadata.stats.elapsed_ms $elapsed ms exceeds $MaxVectorMs ms"
       }
     }
   }
@@ -434,17 +434,17 @@ $preparedFixture = Join-Path $runDir "_prepared\$Suite.txt"
 
 Write-Host ""
 Write-Host "=== $($config.Label) ($Suite) ===" -ForegroundColor Cyan
-Write-Host "测试集: $($config.Fixture)"
-Write-Host "输出目录: $runDir"
+Write-Host "Fixture: $($config.Fixture)"
+Write-Host "Output dir: $runDir"
 
 $expectedRows = New-PreparedFixture -FixturePath $config.Fixture -PreparedPath $preparedFixture -Config $config
-Write-Host "规范化输入: $preparedFixture"
-Write-Host "条目数: $($expectedRows.Count)"
+Write-Host "Prepared input: $preparedFixture"
+Write-Host "Rows: $($expectedRows.Count)"
 
 if ([string]::IsNullOrWhiteSpace($VerifyOnly)) {
-  $confirm = Read-Host "是否进行批量测试(y/n)"
+  $confirm = Read-Host "Run batch acceptance test? (y/n)"
   if ($confirm.Trim().ToLowerInvariant() -ne "y") {
-    Write-Host "已取消批量测试。" -ForegroundColor Yellow
+    Write-Host "Batch acceptance test cancelled." -ForegroundColor Yellow
     exit 0
   }
 
@@ -453,7 +453,7 @@ if ([string]::IsNullOrWhiteSpace($VerifyOnly)) {
   } catch {
     if ($DryRun) {
       $cliExe = if ([string]::IsNullOrWhiteSpace($CliPath)) { "gen2vec_cli.exe" } else { $CliPath }
-      Write-Host "dry-run: 未找到 CLI，以下命令按占位路径打印: $cliExe" -ForegroundColor Yellow
+      Write-Host "dry-run: CLI not found, printing command with placeholder path: $cliExe" -ForegroundColor Yellow
     } else {
       throw
     }
@@ -473,9 +473,9 @@ if ([string]::IsNullOrWhiteSpace($VerifyOnly)) {
   )
   if ($NoVectorize) { $batchArgs += "--no-vectorize" }
 
-  Write-Host "命令: $(Format-CommandLine $cliExe $batchArgs)"
+  Write-Host "Command: $(Format-CommandLine $cliExe $batchArgs)"
   if ($DryRun) {
-    Write-Host "dry-run: 未运行 CLI，也未核验产物。" -ForegroundColor Yellow
+    Write-Host "dry-run: CLI was not run and artifacts were not verified." -ForegroundColor Yellow
     exit 0
   }
 
@@ -485,21 +485,21 @@ if ([string]::IsNullOrWhiteSpace($VerifyOnly)) {
 
   & $cliExe @batchArgs
   if ($LASTEXITCODE -ne 0) {
-    throw "CLI batch 退出码 $LASTEXITCODE"
+    throw "CLI batch exited with code $LASTEXITCODE"
   }
 
   $summaryPath = Get-LatestSummary $runDir
 } else {
   $summaryPath = Resolve-AbsolutePath $VerifyOnly
-  if (-not (Test-LiteralPathExists $summaryPath)) { throw "指定的 batch_summary.csv 不存在: $summaryPath" }
+  if (-not (Test-LiteralPathExists $summaryPath)) { throw "batch_summary.csv does not exist: $summaryPath" }
 }
 
 $report = Test-AcceptanceArtifacts -SummaryPath $summaryPath -ExpectedRows $expectedRows -Config $config
 
 Write-Host ""
-Write-Host "=== 验收结果 ===" -ForegroundColor Cyan
+Write-Host "=== Acceptance result ===" -ForegroundColor Cyan
 Write-Host "summary: $summaryPath"
-Write-Host "总数: $($report.Total)  失败行: $($report.FailedRows)  硬失败: $($report.Failures.Count)  警告: $($report.Warnings.Count)"
+Write-Host "Total: $($report.Total)  Failed rows: $($report.FailedRows)  Failures: $($report.Failures.Count)  Warnings: $($report.Warnings.Count)"
 
 $report.Warnings | Select-Object -First 20 | ForEach-Object {
   Write-Host "WARN $_" -ForegroundColor Yellow
@@ -509,7 +509,7 @@ $report.Failures | Select-Object -First 50 | ForEach-Object {
 }
 
 if ($report.Failures.Count -gt 0) {
-  throw "验收未通过: $($report.Failures.Count) 个硬失败，$($report.Warnings.Count) 个警告"
+  throw "Acceptance failed: $($report.Failures.Count) failures, $($report.Warnings.Count) warnings"
 }
 
 Write-Host "PASS $($config.Label)" -ForegroundColor Green
