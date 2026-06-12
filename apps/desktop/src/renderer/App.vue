@@ -1536,13 +1536,14 @@ const restoreBatchHistory = async (item, saved) => {
   const restoredItems = []
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
+    const taskDir = resolveSummaryRelativePath(row.task_dir, summaryPath)
     const paths = {
-      original: resolveSummaryRelativePath(row.original_path, summaryPath),
-      transparent: resolveSummaryRelativePath(row.transparent_path, summaryPath),
-      svg: resolveSummaryRelativePath(row.result_svg_path, summaryPath),
-      preview: resolveSummaryRelativePath(row.preview_path, summaryPath),
-      metadata: resolveSummaryRelativePath(row.metadata_path, summaryPath),
-      log: resolveSummaryRelativePath(row.run_log_path, summaryPath),
+      original: row.original_path ? resolveSummaryRelativePath(row.original_path, summaryPath) : joinPath(taskDir, 'original.png'),
+      transparent: row.transparent_path ? resolveSummaryRelativePath(row.transparent_path, summaryPath) : joinPath(taskDir, 'transparent.png'),
+      svg: row.result_svg_path ? resolveSummaryRelativePath(row.result_svg_path, summaryPath) : joinPath(taskDir, 'result.svg'),
+      preview: row.preview_path ? resolveSummaryRelativePath(row.preview_path, summaryPath) : joinPath(taskDir, 'preview.png'),
+      metadata: row.metadata_path ? resolveSummaryRelativePath(row.metadata_path, summaryPath) : joinPath(taskDir, 'metadata.json'),
+      log: row.run_log_path ? resolveSummaryRelativePath(row.run_log_path, summaryPath) : joinPath(taskDir, 'run.log'),
       summary: summaryPath,
       summaryDir: dirname(summaryPath)
     }
@@ -1574,9 +1575,9 @@ const restoreBatchHistory = async (item, saved) => {
       }),
       stage1Ms: generationMs,
       stage2Ms: vectorMs,
-      taskDir: resolveSummaryRelativePath(row.task_dir, summaryPath),
+      taskDir,
       outputRoot: saved.outputRoot || dirname(summaryPath),
-      taskName: row.task_name || basename(row.task_dir) || `task_${i + 1}`,
+      taskName: row.task_name || basename(taskDir) || `task_${i + 1}`,
       paths,
       assetsLoaded: false
     })
