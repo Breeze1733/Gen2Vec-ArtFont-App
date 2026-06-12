@@ -2,13 +2,13 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 
 # 构建 txt2img 后端 EXE
-Write-Host "=== [1/3] Building txt2img-backend.exe ==="
+Write-Host "=== [1/4] Building txt2img-backend.exe ==="
 Push-Location "$root\services\txt2img-api"
 & "$root\services\txt2img-api\scripts\build-backend-exe.ps1"
 Pop-Location
 
 # 构建 vectorizer 后端 EXE
-Write-Host "=== [2/3] Building vectorizer-backend.exe ==="
+Write-Host "=== [2/4] Building vectorizer-backend.exe ==="
 Push-Location "$root\services\vectorizer-api"
 & "$root\services\vectorizer-api\scripts\build-backend-exe.ps1"
 Pop-Location
