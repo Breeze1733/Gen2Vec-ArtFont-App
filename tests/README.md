@@ -45,7 +45,7 @@ tests\run-acceptance.bat
 
 - `batch_summary.csv` 行数、失败条数、状态字段与输入文本一致性。
 - 每个任务目录是否包含 `original.png`、`transparent.png`、`result.svg`、`preview.png`、`metadata.json`、`run.log` 和核心 `workflows/*` 文件。
-- PNG 是否可读、默认尺寸是否为 `1280 x 720`；如果 Qwen 工作流映射到官方 16:9 尺寸 `1664 x 928`，记录为警告但不判失败。
+- PNG 是否可读、默认尺寸是否为 `1664 x 928`；如果 Qwen 工作流映射到官方 16:9 尺寸 `1664 x 928`，记录为警告但不判失败。
 - SVG 是否具备基础 XML 结构和可编辑矢量元素，且不允许 `<image>` 或 base64 位图伪 SVG；缺少 `viewBox` 或 `<g>` 分组记录为警告。
 - `metadata.json` 是否为合法 JSON，`run.log` 是否包含状态与耗时字段。
 - 单条端到端耗时与矢量化耗时默认只记录，不设硬阈值；需要性能门槛时可显式传入 `-MaxE2eMs` 或 `-MaxVectorMs`。

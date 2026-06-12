@@ -47,7 +47,7 @@
             <span>分辨率</span>
             <select v-model="payload.resolution">
               <option>1024 x 1024</option>
-              <option>1280 x 720</option>
+              <option>1664 x 928</option>
               <option>1920 x 1080</option>
               <option value="custom">自定义</option>
             </select>
@@ -80,7 +80,7 @@
             <span>全局分辨率</span>
             <select v-model="payload.resolution">
               <option>1024 x 1024</option>
-              <option>1280 x 720</option>
+              <option>1664 x 928</option>
               <option>1920 x 1080</option>
               <option value="custom">自定义</option>
             </select>

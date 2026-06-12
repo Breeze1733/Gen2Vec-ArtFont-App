@@ -3,7 +3,7 @@ param(
   [string]$Suite = "acceptance",
   [string]$CliPath = "",
   [string]$OutputRoot = "",
-  [string]$Resolution = "1280 x 720",
+  [string]$Resolution = "1664 x 928",
   [ValidateSet("clean", "balanced", "detailed", "ultra")]
   [string]$VectorPreset = "balanced",
   [int]$Wait = 30,
