@@ -153,7 +153,7 @@ import GenerationForm from './components/GenerationForm.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import VectorParams from './components/VectorParams.vue'
-import { generateArtBitmap, openPath, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, scanFsHistory, vectorizeArtImage, writeTaskArtifacts, getStartupStatus, downloadModels, launchAcceptanceTest, onSplashProgress, removeSplashProgressListener } from './api'
+import { generateArtBitmap, openPath, parseBatchInput, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, scanFsHistory, vectorizeArtImage, writeTaskArtifacts, getStartupStatus, downloadModels, launchAcceptanceTest, onSplashProgress, removeSplashProgressListener } from './api'
 import { makeThumbnail } from './utils/storage'
 
 // 渲染进程中无法使用 Node.js path 模块，用纯字符串操作替代
@@ -798,10 +798,11 @@ const startGeneration = async () => {
 
     } else if (mode.value === 'batch') {
       // 批量处理：逐条执行，支持进度展示和单条错误容错
-      const lines = String(payload.batch || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+      // 通过主进程解析（与 CLI 一致的 | \t , 分隔和 CSV 引号转义逻辑）
+      const entries = await parseBatchInput(payload.batch || '')
       batchItems.value = []
       batchProgress.current = 0
-      batchProgress.total = lines.length
+      batchProgress.total = entries.length
       batchProgress.completed = 0
       batchProgress.failed = 0
       selectedBatchIndex.value = -1
@@ -813,11 +814,11 @@ const startGeneration = async () => {
       currentTaskPaths.value = { ...batchTaskInfo.paths, summary: joinPath(batchSummaryDir, 'batch_summary.csv') }
       const batchSummaryPath = joinPath(batchSummaryDir, 'batch_summary.csv')
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
-        const parts = line.split('|').map(p => p.trim())
-        const text = parts[0] || ''
-        const prompt = parts[1] || ''
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i]
+        const text = entry.text || ''
+        const prompt = entry.prompt || ''
+        const itemNegative = entry.negative || payload.negative || ''
 
         // 初始化该条目
         batchItems.value.push({
@@ -838,7 +839,7 @@ const startGeneration = async () => {
 
         try {
           // Stage 1: 生成位图（批量首条含模型加载，超时放宽到 600s）
-          const payloadA = { text, prompt, negative: payload.negative || '', resolution: payload.resolution, format: payload.format, seed: payload.seed, __timeoutMs: 600000 }
+          const payloadA = { text, prompt, negative: itemNegative, resolution: payload.resolution, format: payload.format, seed: payload.seed, __timeoutMs: 600000 }
           const t1 = Date.now()
           const respA = await generateArtBitmap(payloadA)
           const s1Ms = Date.now() - t1
@@ -863,7 +864,7 @@ const startGeneration = async () => {
           // Stage 2: 矢量化
           const payloadB = {
             source_type: 'generated', text, prompt,
-            negative: payload.negative || '',
+            negative: itemNegative,
             resolution: payload.resolution, format: payload.format, seed: payload.seed,
             vector: { ...payload.vector },
             __timeoutMs: 300000,

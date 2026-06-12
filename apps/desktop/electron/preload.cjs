@@ -21,7 +21,8 @@ const API_METHODS = [
   'downloadModels',
   'launchAcceptanceTest',
   'shutdownBackends',
-  'scanFsHistory'
+  'scanFsHistory',
+  'parseBatchInput'
 ]
 
 /**
@@ -59,6 +60,9 @@ contextBridge.exposeInMainWorld('artTextApp', {
 
   // 文件系统历史扫描（发现 CLI 产生的产物）
   scanFsHistory: (outputRoot) => ipcRenderer.invoke('art-text/scan-fs-history', outputRoot),
+
+  // 批量输入解析（与 CLI 一致的分隔符和引号处理）
+  parseBatchInput: (content) => ipcRenderer.invoke('art-text/parse-batch-input', content),
 
   // Startup & model management (生产打包模式)
   getStartupStatus: () => ipcRenderer.invoke('art-text/get-startup-status'),

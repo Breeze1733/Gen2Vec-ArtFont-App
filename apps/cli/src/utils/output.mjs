@@ -51,7 +51,14 @@ export const VECTOR_PRESETS = {
 }
 
 export function resolveOutputRoot(outputRoot = '') {
-  return path.resolve(outputRoot || process.env.ART_TEXT_OUTPUT_ROOT || 'outputs')
+  // 1. 函数参数优先级最高
+  if (outputRoot) return path.resolve(outputRoot)
+  // 2. 环境变量次之
+  if (process.env.ART_TEXT_OUTPUT_ROOT) return path.resolve(process.env.ART_TEXT_OUTPUT_ROOT)
+  // 3. 默认：相对于 CWD 的 outputs/
+  //    开发时从项目根运行 → 项目根/outputs/
+  //    打包后 exe 在安装目录 → 安装目录/outputs/
+  return path.resolve('outputs')
 }
 
 export function padTaskIndex(index) {

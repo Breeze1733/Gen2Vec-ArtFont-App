@@ -330,3 +330,20 @@ export async function scanFsHistory(outputRoot) {
   }
   return []
 }
+
+/**
+ * 解析批量输入文本（与 CLI batch.mjs 逻辑一致）。
+ * 支持 | \t , 分隔、CSV 引号转义、表头检测。
+ * @param {string} content - 批量输入文本
+ * @returns {Promise<Array<{text:string, prompt:string, negative:string, seed:string, resolution:string}>>}
+ */
+export async function parseBatchInput(content) {
+  if (window.artTextApp?.parseBatchInput) {
+    return window.artTextApp.parseBatchInput(content)
+  }
+  // 兜底：渲染进程内简单按 | 分割
+  return String(content || '').trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+    const parts = line.split('|').map(p => p.trim())
+    return { text: parts[0] || '', prompt: parts[1] || '', negative: parts[2] || '', seed: parts[3] || '', resolution: parts[4] || '' }
+  }).filter(item => item.text || item.prompt)
+}

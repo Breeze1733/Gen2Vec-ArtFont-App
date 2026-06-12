@@ -1132,15 +1132,16 @@ function getOutputRoot() {
   }
 
   const appPath = app.getAppPath()
-  // 开发环境下 appPath 通常是 apps/desktop，按项目根目录输出到 outputs/，
-  // 与需求文档和验收脚本的目录结构保持一致。
+  // 开发模式下 appPath 通常是 apps/desktop，按项目根目录输出到 outputs/
+  // 打包后 resources/app.asar 上一级是 resources/，再上一级是安装目录
+  // 统一回到项目根目录或安装目录
   if (!app.isPackaged && path.basename(appPath) === 'desktop') {
     return path.resolve(appPath, '..', '..', 'outputs')
   }
 
-  // 打包后写入用户文档目录，避免 Program Files 等安装目录无写权限，
-  // 也便于用户直接找到并提交 outputs 产物。
-  return path.resolve(app.getPath('documents'), 'Gen2Vec-ArtFont-App', 'outputs')
+  // 打包后：安装目录下的 outputs/（与 gen2vec_cli.exe 同级）
+  const installDir = path.dirname(process.execPath)
+  return path.resolve(installDir, 'outputs')
 }
 
 function padTaskIndex(index) {
@@ -1614,6 +1615,77 @@ ipcMain.handle('art-text/delete-output-dir', async (event, targetPath) => {
   await removeDeletedTaskFromIndex(root, resolved)
 
   return { ok: true, existed: true }
+})
+
+/**
+ * 与 CLI batch.mjs 一致的批量输入解析：
+ * 支持 | \t , 分隔，支持 CSV 引号转义，支持表头检测。
+ */
+function splitDelimitedLine(line, delimiter = ',') {
+  const values = []
+  let current = ''
+  let quoted = false
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    const next = line[i + 1]
+    if (char === '"' && quoted && next === '"') { current += '"'; i += 1 }
+    else if (char === '"') { quoted = !quoted }
+    else if (char === delimiter && !quoted) { values.push(current.trim()); current = '' }
+    else { current += char }
+  }
+  values.push(current.trim())
+  return values
+}
+
+function normalizeBatchItem(item, index = 0) {
+  if (typeof item === 'string') {
+    return { text: item.trim(), prompt: '', negative: '', seed: '', resolution: '' }
+  }
+  const raw = item || {}
+  return {
+    text: String(raw.text ?? raw.title ?? raw.word ?? raw.content ?? '').trim(),
+    prompt: String(raw.prompt ?? raw.style ?? raw.description ?? '').trim(),
+    negative: String(raw.negative ?? raw.negative_prompt ?? '').trim(),
+    seed: raw.seed === undefined || raw.seed === '' ? '' : String(raw.seed),
+    resolution: raw.resolution ? String(raw.resolution).trim() : '',
+  }
+}
+
+function parseBatchInputText(content) {
+  const trimmed = (content || '').trim()
+  if (!trimmed) return []
+
+  const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+  if (lines.length === 0) return []
+
+  const first = lines[0].toLowerCase()
+  const hasHeader = /\btext\b/.test(first) && /\bprompt\b/.test(first)
+  const rows = hasHeader ? lines.slice(1) : lines
+  const headerDelimiter = lines[0].includes('|') ? '|' : (lines[0].includes('\t') ? '\t' : ',')
+  const headers = hasHeader ? splitDelimitedLine(lines[0], headerDelimiter).map(n => n.trim().toLowerCase()) : []
+
+  return rows.map((line, index) => {
+    const delimiter = line.includes('|') ? '|' : (line.includes('\t') ? '\t' : ',')
+    const parts = splitDelimitedLine(line, delimiter)
+
+    if (headers.length > 0) {
+      const record = {}
+      headers.forEach((key, i) => { record[key] = parts[i] || '' })
+      return normalizeBatchItem(record, index)
+    }
+
+    return normalizeBatchItem({
+      text: parts[0] || '',
+      prompt: parts[1] || '',
+      negative: parts[2] || '',
+      seed: parts[3] || undefined,
+      resolution: parts[4] || undefined,
+    }, index)
+  }).filter(item => item.text || item.prompt)
+}
+
+ipcMain.handle('art-text/parse-batch-input', async (event, content) => {
+  return parseBatchInputText(content)
 })
 
 /**
