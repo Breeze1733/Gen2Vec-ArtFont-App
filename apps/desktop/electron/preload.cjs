@@ -20,7 +20,8 @@ const API_METHODS = [
   'getStartupStatus',
   'downloadModels',
   'launchAcceptanceTest',
-  'shutdownBackends'
+  'shutdownBackends',
+  'scanFsHistory'
 ]
 
 /**
@@ -55,6 +56,9 @@ contextBridge.exposeInMainWorld('artTextApp', {
   notify: (options) => ipcRenderer.invoke('art-text/notify', options),
   openExternal: (url) => ipcRenderer.invoke('art-text/open-external', url),
   shutdownBackends: () => ipcRenderer.invoke('art-text/shutdown-backends'),
+
+  // 文件系统历史扫描（发现 CLI 产生的产物）
+  scanFsHistory: (outputRoot) => ipcRenderer.invoke('art-text/scan-fs-history', outputRoot),
 
   // Startup & model management (生产打包模式)
   getStartupStatus: () => ipcRenderer.invoke('art-text/get-startup-status'),

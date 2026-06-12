@@ -1609,7 +1609,108 @@ ipcMain.handle('art-text/delete-output-dir', async (event, targetPath) => {
     throw new Error('目标不是目录')
   }
   await fs.rm(resolved, { recursive: true, force: true })
+
+  // 同步从 tasks-index.json 中移除已删除的目录记录
+  await removeDeletedTaskFromIndex(root, resolved)
+
   return { ok: true, existed: true }
+})
+
+/**
+ * 扫描输出根目录下的 tasks-index.json，返回所有任务索引条目。
+ * 同时用于 CLI 产物发现（Desktop 启动时合并到历史列表）。
+ */
+async function scanHistoryFromFs(outputRoot) {
+  const root = path.resolve(outputRoot || getOutputRoot())
+  const indexPath = path.join(root, 'tasks-index.json')
+
+  try {
+    const content = await fs.readFile(indexPath, 'utf8')
+    return JSON.parse(content)
+  } catch {
+    // tasks-index.json 不存在 → 回退：扫描目录中的 task_* 目录
+    return scanLegacyTaskDirs(root)
+  }
+}
+
+/**
+ * 兼容扫描：当 tasks-index.json 不存在时，扫描 outputs/ 下的 task_* 目录。
+ */
+async function scanLegacyTaskDirs(root) {
+  const entries = []
+  try {
+    const dirs = await fs.readdir(root)
+    const taskDirs = dirs.filter(name => /^task_/.test(name))
+
+    for (const name of taskDirs) {
+      const taskDir = path.join(root, name)
+      const stat = await fs.stat(taskDir)
+      if (!stat.isDirectory()) continue
+
+      const metadataPath = path.join(taskDir, 'metadata.json')
+      let metadata = null
+      try {
+        const metaText = await fs.readFile(metadataPath, 'utf8')
+        metadata = JSON.parse(metaText)
+      } catch { /* 无 metadata 也继续 */ }
+
+      const isBatch = fsSync.existsSync(path.join(taskDir, 'batch_summary.csv'))
+      // 检查是否有子目录（batch 子任务）
+      let hasSubDirs = false
+      try {
+        const children = await fs.readdir(taskDir)
+        hasSubDirs = children.some(c => /^task_/.test(c))
+      } catch { /* 忽略 */ }
+
+      const mode = isBatch || hasSubDirs ? 'batch' : (metadata?.mode || 'single')
+      const title = metadata?.task_name || metadata?.generation?.text || name
+      const status = metadata?.error ? '失败' : '完成'
+
+      entries.push({
+        id: metadata?.task_id ? Number(metadata.task_id) : Date.now(),
+        mode,
+        title: String(title),
+        time: metadata?.generation?.started_at || new Date().toISOString(),
+        status,
+        taskDir,
+        outputRoot: root,
+        paths: {
+          summary: path.join(taskDir, 'batch_summary.csv'),
+          summaryDir: taskDir,
+          original: path.join(taskDir, 'original.png'),
+          transparent: path.join(taskDir, 'transparent.png'),
+          svg: path.join(taskDir, 'result.svg'),
+          preview: path.join(taskDir, 'preview.png'),
+          metadata: metadataPath,
+          log: path.join(taskDir, 'run.log'),
+        },
+        inputParams: { mode },
+        _legacy: true,
+      })
+    }
+  } catch { /* 目录不存在或无法读取 */ }
+
+  return entries
+}
+
+/**
+ * 从 tasks-index.json 中移除已删除目录对应的条目。
+ */
+async function removeDeletedTaskFromIndex(root, deletedDir) {
+  const indexPath = path.join(root, 'tasks-index.json')
+  try {
+    const content = await fs.readFile(indexPath, 'utf8')
+    let index = JSON.parse(content)
+    const before = index.length
+    index = index.filter(e => !e.taskDir || !path.resolve(e.taskDir).startsWith(path.resolve(deletedDir)))
+    if (index.length < before) {
+      await fs.writeFile(indexPath, JSON.stringify(index, null, 2), 'utf8')
+    }
+  } catch { /* 索引不存在或不合法，静默忽略 */ }
+}
+
+ipcMain.handle('art-text/scan-fs-history', async (event, outputRoot) => {
+  return scanHistoryFromFs(outputRoot)
 })
 
 ipcMain.handle('art-text/read-output-file', async (event, options) => {

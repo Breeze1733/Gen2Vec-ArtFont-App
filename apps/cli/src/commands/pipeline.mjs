@@ -4,7 +4,7 @@
 
 import { generateArtBitmap, vectorizeImage } from '../api.mjs'
 import { saveBase64ToFile, saveSvgToFile } from '../utils/file.mjs'
-import { augmentMetadata, buildRunLog, createCliTask, prepareOutputTask, resolveStatus, writeTaskArtifacts } from '../utils/output.mjs'
+import { augmentMetadata, appendTaskIndex, buildRunLog, createCliTask, prepareOutputTask, resolveStatus, writeTaskArtifacts } from '../utils/output.mjs'
 
 /**
  * 运行完整流水线
@@ -156,6 +156,22 @@ export async function run(args) {
   if (metadata?.quality) {
     const q = metadata.quality
     console.log(`  轮廓偏差: ${q.contour_deviation?.toFixed(4) || 'N/A'}`)
+  }
+
+  // ── 写入 tasks-index.json ──
+  try {
+    await appendTaskIndex(outputDir, {
+      id: task.id,
+      mode: 'single',
+      title: text || '艺术字流水线',
+      time: startedAt,
+      status: '完成',
+      taskDir: taskInfo.taskDir,
+      paths: taskInfo.paths,
+      inputParams: { mode: 'single', text, prompt, negative, resolution, seed, vector: vectorConfig },
+    })
+  } catch (indexErr) {
+    console.warn(`  ⚠ 写入任务索引失败: ${indexErr.message}`)
   }
 
   return { pngPath: taskInfo.paths.original, svgPath: taskInfo.paths.svg, taskDir: taskInfo.taskDir, metadata }

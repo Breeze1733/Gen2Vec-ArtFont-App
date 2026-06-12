@@ -4,7 +4,7 @@
 
 import { vectorizeImage } from '../api.mjs'
 import { readFileAsBase64, saveSvgToFile, saveBase64ToFile } from '../utils/file.mjs'
-import { augmentMetadata, buildRunLog, createCliTask, prepareOutputTask, writeTaskArtifacts } from '../utils/output.mjs'
+import { augmentMetadata, appendTaskIndex, buildRunLog, createCliTask, prepareOutputTask, writeTaskArtifacts } from '../utils/output.mjs'
 import path from 'node:path'
 
 /**
@@ -90,6 +90,22 @@ export async function run(args) {
     const q = result.metadata.quality
     console.log(`  轮廓偏差: ${q.contour_deviation?.toFixed(4) || 'N/A'}`)
     console.log(`  颜色数量: ${q.color_count || 'N/A'}`)
+  }
+
+  // ── 写入 tasks-index.json ──
+  try {
+    await appendTaskIndex(outputDir, {
+      id: task.id,
+      mode: 'vectorize',
+      title: path.basename(input),
+      time: startedAt,
+      status: '完成',
+      taskDir: taskInfo.taskDir,
+      paths: taskInfo.paths,
+      inputParams: { mode: 'vectorize', preset, ...vector },
+    })
+  } catch (indexErr) {
+    console.warn(`  ⚠ 写入任务索引失败: ${indexErr.message}`)
   }
 
   return { svgPath: taskInfo.paths.svg, taskDir: taskInfo.taskDir, metadata }

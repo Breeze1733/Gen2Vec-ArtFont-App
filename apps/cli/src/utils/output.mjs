@@ -8,7 +8,7 @@
  */
 
 import fsSync from 'node:fs'
-import { appendFile, mkdir, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export const VECTOR_PRESETS = {
@@ -511,6 +511,76 @@ export function augmentMetadata(metadata, { task, taskInfo, modeName, text = '',
         }
       : null,
   }
+}
+
+/**
+ * 从 metadata.json 或 run.log 中获取缩略图路径
+ */
+function findThumbnailPath(taskDir) {
+  const preview = path.join(taskDir, 'preview.png')
+  const original = path.join(taskDir, 'original.png')
+  return fsSync.existsSync(preview) ? preview
+    : fsSync.existsSync(original) ? original
+    : ''
+}
+
+/**
+ * 向输出根目录的 tasks-index.json 追加一条任务索引记录。
+ * Desktop 端在启动时读取此文件，将 CLI 产生的任务合并到历史列表中。
+ *
+ * @param {string} outputRoot - 输出根目录（绝对路径）
+ * @param {Object} entry - 索引条目
+ * @param {number|string} entry.id - 任务 ID（Date.now()）
+ * @param {string} entry.mode - 任务模式 (single|batch|vectorize)
+ * @param {string} entry.title - 任务标题
+ * @param {string} entry.time - 任务时间
+ * @param {string} entry.status - 状态文本
+ * @param {string} entry.taskDir - 任务目录绝对路径
+ * @param {Object} entry.paths - 产物路径映射
+ * @param {number} [entry.itemsCount] - 批量任务总数
+ * @param {number} [entry.succeeded] - 批量任务成功数
+ * @param {number} [entry.failed] - 批量任务失败数
+ */
+export async function appendTaskIndex(outputRoot, entry) {
+  const root = resolveOutputRoot(outputRoot)
+  const indexPath = path.join(root, 'tasks-index.json')
+
+  let index = []
+  try {
+    const existing = await readFile(indexPath, 'utf8')
+    index = JSON.parse(existing)
+  } catch {
+    // 文件不存在或解析失败，从空列表开始
+  }
+
+  // 去重：相同 id 的记录覆盖
+  const existingIdx = index.findIndex(e => String(e.id) === String(entry.id))
+  const indexEntry = {
+    id: entry.id,
+    mode: entry.mode || 'single',
+    title: entry.title || '',
+    time: entry.time || new Date().toISOString(),
+    status: entry.status || '完成',
+    taskDir: entry.taskDir,
+    outputRoot: root,
+    paths: entry.paths || {},
+    inputParams: entry.inputParams || { mode: entry.mode || 'single' },
+    itemsCount: entry.itemsCount || 0,
+    succeeded: entry.succeeded || 0,
+    failed: entry.failed || 0,
+    thumb: entry.thumb || '',
+  }
+
+  if (existingIdx >= 0) {
+    index[existingIdx] = indexEntry
+  } else {
+    index.push(indexEntry)
+  }
+
+  // 保留最近 200 条，避免索引无限膨胀
+  const trimmed = index.slice(-200)
+  await mkdir(root, { recursive: true })
+  await writeFile(indexPath, JSON.stringify(trimmed, null, 2), 'utf8')
 }
 
 export function buildSummaryRow({

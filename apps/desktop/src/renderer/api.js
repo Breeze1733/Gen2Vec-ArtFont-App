@@ -318,3 +318,15 @@ export function removeSplashProgressListener() {
     window.artTextApp.removeSplashProgressListener()
   }
 }
+
+/**
+ * 扫描文件系统历史（tasks-index.json），发现 CLI 等外部工具产生的产物。
+ * @param {string} [outputRoot] - 可选的输出根目录，不传则用默认
+ * @returns {Promise<Array>} 任务索引条目数组
+ */
+export async function scanFsHistory(outputRoot) {
+  if (window.artTextApp?.scanFsHistory) {
+    return window.artTextApp.scanFsHistory(outputRoot || '')
+  }
+  return []
+}

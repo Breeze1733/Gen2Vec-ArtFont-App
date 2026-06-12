@@ -153,7 +153,7 @@ import GenerationForm from './components/GenerationForm.vue'
 import ResultPanel from './components/ResultPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import VectorParams from './components/VectorParams.vue'
-import { generateArtBitmap, openPath, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, vectorizeArtImage, writeTaskArtifacts, getStartupStatus, downloadModels, launchAcceptanceTest, onSplashProgress, removeSplashProgressListener } from './api'
+import { generateArtBitmap, openPath, prepareOutputTask, readOutputFile, deleteOutputDir, saveFile, saveResults, scanFsHistory, vectorizeArtImage, writeTaskArtifacts, getStartupStatus, downloadModels, launchAcceptanceTest, onSplashProgress, removeSplashProgressListener } from './api'
 import { makeThumbnail } from './utils/storage'
 
 // 渲染进程中无法使用 Node.js path 模块，用纯字符串操作替代
@@ -263,6 +263,9 @@ onMounted(async () => {
   } catch {
     // 开发模式或无此 API，静默忽略
   }
+
+  // 启动时扫描文件系统历史（合并 CLI 产生的任务）
+  await mergeFsHistory()
 })
 
 const activeTab = ref('input')
@@ -461,6 +464,73 @@ function deleteHistoryDir(id) {
   delete next[String(id)]
   historyDirs.value = next
   localStorage.setItem(HISTORY_DIR_KEY, JSON.stringify(next))
+}
+
+// ── 文件系统历史扫描与合并 ──
+
+/**
+ * 扫描文件系统中的 tasks-index.json，将 CLI 等外部工具产生的任务
+ * 合并到 localStorage 历史列表中。
+ */
+async function mergeFsHistory() {
+  try {
+    const fsEntries = await scanFsHistory()
+    if (!fsEntries || !Array.isArray(fsEntries) || fsEntries.length === 0) return
+
+    const existingIds = new Set(logs.value.map(l => String(l.id)))
+    const existingDirIds = new Set(
+      Object.values(historyDirs.value).map(d => d.taskDir).filter(Boolean)
+    )
+    let added = 0
+
+    for (const entry of fsEntries) {
+      // 跳过已存在的
+      if (existingIds.has(String(entry.id))) continue
+      if (existingDirIds.has(entry.taskDir)) continue
+
+      // 构造与 localStorage 兼容的历史条目
+      const taskId = entry.id
+      const modeLabel = entry.mode === 'batch' ? '批量'
+        : entry.mode === 'vectorize' ? '矢量化'
+        : '单条'
+
+      logs.value.unshift({
+        id: taskId,
+        title: String(entry.title || ''),
+        time: new Date(entry.time || Date.now()).toLocaleTimeString('zh-CN', { hour12: false }),
+        status: entry.status || '完成',
+        mode: modeLabel,
+        thumb: '',
+      })
+
+      // 构造 historyDirs 记录
+      const paths = entry.paths || {}
+      setHistoryDir(taskId, {
+        taskDir: entry.taskDir || '',
+        outputRoot: entry.outputRoot || '',
+        taskName: String(entry.title || ''),
+        paths,
+        inputParams: entry.inputParams || { mode: entry.mode || 'single' },
+      })
+
+      added++
+    }
+
+    if (added > 0) {
+      // 排序：按时间的倒序排列（最新的在前）
+      logs.value.sort((a, b) => {
+        const timeA = new Date(a.time || 0).getTime()
+        const timeB = new Date(b.time || 0).getTime()
+        return timeB - timeA
+      })
+      // 保留最多 50 条
+      logs.value = logs.value.slice(0, 50)
+      persistHistory()
+      console.log(`[mergeFsHistory] 从文件系统合并了 ${added} 条历史记录`)
+    }
+  } catch (err) {
+    console.warn('[mergeFsHistory] 扫描文件系统历史失败:', err.message)
+  }
 }
 
 // 仅写入 localStorage：历史记录列表 + 任务目录映射

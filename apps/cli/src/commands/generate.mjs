@@ -4,7 +4,7 @@
 
 import { generateArtBitmap } from '../api.mjs'
 import { saveBase64ToFile } from '../utils/file.mjs'
-import { augmentMetadata, buildRunLog, createCliTask, prepareOutputTask, resolveStatus, writeTaskArtifacts } from '../utils/output.mjs'
+import { augmentMetadata, appendTaskIndex, buildRunLog, createCliTask, prepareOutputTask, resolveStatus, writeTaskArtifacts } from '../utils/output.mjs'
 
 /**
  * 生成艺术字位图
@@ -76,6 +76,22 @@ export async function run(args) {
 
   if (result.metadata) {
     console.log(`  生成耗时: ${stage1Duration}ms`)
+  }
+
+  // ── 写入 tasks-index.json ──
+  try {
+    await appendTaskIndex(outputDir, {
+      id: task.id,
+      mode: 'generate',
+      title: text || '艺术字位图',
+      time: startedAt,
+      status: '完成',
+      taskDir: taskInfo.taskDir,
+      paths: taskInfo.paths,
+      inputParams: { mode: 'single', text, prompt, negative, resolution, seed },
+    })
+  } catch (indexErr) {
+    console.warn(`  ⚠ 写入任务索引失败: ${indexErr.message}`)
   }
 
   return { pngPath: taskInfo.paths.original, taskDir: taskInfo.taskDir, metadata }

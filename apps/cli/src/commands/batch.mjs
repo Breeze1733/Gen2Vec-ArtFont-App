@@ -9,6 +9,7 @@
 
 import { generateArtBitmap, vectorizeImage } from '../api.mjs'
 import {
+  appendTaskIndex,
   augmentMetadata,
   buildRunLog,
   buildSummaryRow,
@@ -448,6 +449,25 @@ export async function run(args) {
       const label = failedItem.text || `第 ${failedItem.index} 条`
       console.log(`  [${failedItem.index}] ${label}: ${failedItem.error}`)
     }
+  }
+
+  // ── 写入 tasks-index.json ──
+  try {
+    await appendTaskIndex(outputDir, {
+      id: task.id,
+      mode: 'batch',
+      title: `批量任务 (${items.length} 条)`,
+      time: startedAt,
+      status: failed > 0 ? (succeeded > 0 ? `部分完成（${succeeded}/${items.length}）` : '失败') : '完成',
+      taskDir: batchTaskInfo.taskDir,
+      paths: { summary: summaryPath, summaryDir: batchSummaryDir },
+      inputParams: { mode: 'batch', batch: items.length > 10 ? `${items.length} items` : items.map(i => i.text).join(', '), negative, resolution, seed: baseSeed, seedStep },
+      itemsCount: items.length,
+      succeeded,
+      failed,
+    })
+  } catch (indexErr) {
+    console.warn(`  ⚠ 写入任务索引失败: ${indexErr.message}`)
   }
 
   return { count: items.length, succeeded, failed, results, summaryPath, outputRoot: batchTaskInfo.outputRoot }
