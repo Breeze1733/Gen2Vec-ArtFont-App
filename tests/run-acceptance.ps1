@@ -337,11 +337,11 @@ function Test-AcceptanceArtifacts {
     $label = "[$($i + 1)] $($row.text)"
     $taskDir = Resolve-ArtifactPath $row.task_dir $SummaryPath
     $paths = @{
-      original = Resolve-ArtifactPath $row.original_path $SummaryPath
-      transparent = Resolve-ArtifactPath $row.transparent_path $SummaryPath
-      svg = Resolve-ArtifactPath $row.result_svg_path $SummaryPath
-      preview = Resolve-ArtifactPath $row.preview_path $SummaryPath
-      metadata = Resolve-ArtifactPath $row.metadata_path $SummaryPath
+      original = if ($row.original_path) { Resolve-ArtifactPath $row.original_path $SummaryPath } else { Join-Path $taskDir "original.png" }
+      transparent = if ($row.transparent_path) { Resolve-ArtifactPath $row.transparent_path $SummaryPath } else { Join-Path $taskDir "transparent.png" }
+      svg = if ($row.result_svg_path) { Resolve-ArtifactPath $row.result_svg_path $SummaryPath } else { Join-Path $taskDir "result.svg" }
+      preview = if ($row.preview_path) { Resolve-ArtifactPath $row.preview_path $SummaryPath } else { Join-Path $taskDir "preview.png" }
+      metadata = if ($row.metadata_path) { Resolve-ArtifactPath $row.metadata_path $SummaryPath } else { Join-Path $taskDir "metadata.json" }
       log = Resolve-ArtifactPath $row.run_log_path $SummaryPath
       workflowApi = Join-Path $taskDir "workflows\workflow_api.json"
       workflowNodes = Join-Path $taskDir "workflows\nodes.md"
@@ -433,8 +433,8 @@ function Test-AcceptanceArtifacts {
       if (-not $runLog.ContainsKey("status")) { Add-Failure $failures "$label run.log missing status" }
       $stage1 = 0
       $stage2 = 0
-      [void][int]::TryParse([string]$runLog["stage1_ms"], [ref]$stage1)
-      [void][int]::TryParse([string]$runLog["stage2_ms"], [ref]$stage2)
+      [void][int]::TryParse([string]$runLog["generation_ms"], [ref]$stage1)
+      [void][int]::TryParse([string]$runLog["vector_ms"], [ref]$stage2)
       if ($MaxE2eMs -gt 0 -and ($stage1 + $stage2) -gt $MaxE2eMs) {
         Add-Failure $failures "$label end-to-end time $($stage1 + $stage2)ms exceeds $MaxE2eMs ms"
       }

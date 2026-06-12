@@ -1124,8 +1124,8 @@ const buildRunLog = ({ task, taskInfo, modeName, text = '', prompt = '', seed = 
     `text=${text}`,
     `prompt=${prompt}`,
     `seed=${seed}`,
-    `stage1_ms=${stage1Duration}`,
-    `stage2_ms=${stage2Duration}`,
+    `generation_ms=${stage1Duration}`,
+    `vector_ms=${stage2Duration}`,
     `uses_txt2img=${usesTxt2Img}`,
     `engine=${engine}`,
     `task_dir=${taskInfo?.taskDir || ''}`,
@@ -1268,11 +1268,6 @@ const buildSummaryRow = ({ task, taskInfo, modeName, status = 'success', text = 
     seed,
     resolution: payload.resolution,
     task_dir: taskInfo?.taskDir || '',
-    original_path: taskInfo?.paths?.original || '',
-    transparent_path: taskInfo?.paths?.transparent || '',
-    result_svg_path: taskInfo?.paths?.svg || '',
-    preview_path: taskInfo?.paths?.preview || '',
-    metadata_path: taskInfo?.paths?.metadata || '',
     run_log_path: taskInfo?.paths?.log || '',
     ...metrics,
     error
@@ -1553,8 +1548,8 @@ const restoreBatchHistory = async (item, saved) => {
     }
 
     const runLog = parseKeyValueLog(await readTextPath(paths.log))
-    const generationMs = toNumberOrZero(row.generation_ms || runLog.generation_ms || runLog.stage1_ms)
-    const vectorMs = toNumberOrZero(row.vector_ms || runLog.vector_ms || runLog.stage2_ms)
+    const generationMs = toNumberOrZero(row.generation_ms || runLog.generation_ms)
+    const vectorMs = toNumberOrZero(row.vector_ms || runLog.vector_ms)
     const status = row.status === 'failed' || row.error ? 'failed' : 'success'
 
     restoredItems.push({

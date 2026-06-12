@@ -195,11 +195,13 @@ function csvEscape(value) {
 function extractQualityMetrics(metadata = {}) {
   const generationMs = metadata?.generation?.duration_ms
   const vectorMs = metadata?.stats?.elapsed_ms
+  const normalizedGenerationMs = generationMs === undefined || generationMs === null ? '' : generationMs
+  const normalizedVectorMs = vectorMs === undefined || vectorMs === null ? '' : vectorMs
   const pngTransparency = metadata?.preprocess?.png_transparency
   const svgFidelity = metadata?.quality?.svg_fidelity
   return {
-    generation_ms: generationMs === undefined || generationMs === null ? '' : generationMs,
-    vector_ms: vectorMs === undefined || vectorMs === null ? '' : vectorMs,
+    generation_ms: normalizedGenerationMs,
+    vector_ms: normalizedVectorMs,
     png_transparency: pngTransparency === undefined || pngTransparency === null ? '' : pngTransparency,
     svg_fidelity: svgFidelity === undefined || svgFidelity === null ? '' : svgFidelity,
   }
@@ -235,11 +237,6 @@ export async function appendBatchSummaryCsv(summaryPath, row = {}) {
     'seed',
     'resolution',
     'task_dir',
-    'original_path',
-    'transparent_path',
-    'result_svg_path',
-    'preview_path',
-    'metadata_path',
     'run_log_path',
     'generation_ms',
     'vector_ms',
@@ -407,11 +404,6 @@ export async function writeTaskArtifacts({
         ...summaryRow,
         task_name: summaryRow.task_name || taskName || path.basename(resolvedTaskDir),
         task_dir: summaryRow.task_dir || resolvedTaskDir,
-        original_path: summaryRow.original_path || targetPaths.original,
-        transparent_path: summaryRow.transparent_path || targetPaths.transparent,
-        result_svg_path: summaryRow.result_svg_path || targetPaths.svg,
-        preview_path: summaryRow.preview_path || targetPaths.preview,
-        metadata_path: summaryRow.metadata_path || targetPaths.metadata,
         run_log_path: summaryRow.run_log_path || targetPaths.log,
       })
     }
@@ -462,8 +454,8 @@ export function buildRunLog({
     `text=${text}`,
     `prompt=${prompt}`,
     `seed=${seed}`,
-    `stage1_ms=${stage1Duration}`,
-    `stage2_ms=${stage2Duration}`,
+    `generation_ms=${stage1Duration}`,
+    `vector_ms=${stage2Duration}`,
     `uses_txt2img=${usesTxt2Img}`,
     `engine=${engine}`,
     `png_transparency=${metrics.png_transparency}`,
@@ -532,8 +524,20 @@ export function buildSummaryRow({
   resolution = '',
   error = '',
   metadata = {},
+  generationMs = null,
+  vectorMs = null,
 } = {}) {
-  const metrics = extractQualityMetrics(metadata)
+  const metrics = extractQualityMetrics({
+    ...(metadata || {}),
+    generation: {
+      ...(metadata?.generation || {}),
+      ...(generationMs !== null && generationMs !== undefined ? { duration_ms: generationMs } : {}),
+    },
+    stats: {
+      ...(metadata?.stats || {}),
+      ...(vectorMs !== null && vectorMs !== undefined ? { elapsed_ms: vectorMs } : {}),
+    },
+  })
   return {
     task_id: String(task?.id || ''),
     task_name: taskInfo?.taskName || '',
@@ -544,11 +548,6 @@ export function buildSummaryRow({
     seed,
     resolution,
     task_dir: taskInfo?.taskDir || '',
-    original_path: taskInfo?.paths?.original || '',
-    transparent_path: taskInfo?.paths?.transparent || '',
-    result_svg_path: taskInfo?.paths?.svg || '',
-    preview_path: taskInfo?.paths?.preview || '',
-    metadata_path: taskInfo?.paths?.metadata || '',
     run_log_path: taskInfo?.paths?.log || '',
     generation_ms: metrics.generation_ms,
     vector_ms: metrics.vector_ms,

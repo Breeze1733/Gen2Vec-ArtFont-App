@@ -49,7 +49,7 @@ tests\run-acceptance.bat
 - SVG 是否具备基础 XML 结构和可编辑矢量元素，且不允许 `<image>` 或 base64 位图伪 SVG；缺少 `viewBox` 或 `<g>` 分组记录为警告。
 - `metadata.json` 是否为合法 JSON，`run.log` 是否包含状态与耗时字段。
 - 单条端到端耗时与矢量化耗时默认只记录，不设硬阈值；需要性能门槛时可显式传入 `-MaxE2eMs` 或 `-MaxVectorMs`。
-- 批量汇总 CSV 会包含 `generation_ms`、`vector_ms`、`png_transparency`、`svg_fidelity`，便于直接核验生成用时和质量指标。
+- 批量汇总 CSV 会包含 `generation_ms`、`vector_ms`、`png_transparency`、`svg_fidelity`，并保留 `run_log_path` 便于追溯每条任务日志。
 
 常用调试参数：
 

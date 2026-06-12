@@ -1256,11 +1256,13 @@ function csvEscape(value) {
 function extractQualityMetrics(metadata = {}) {
   const generationMs = metadata?.generation?.duration_ms
   const vectorMs = metadata?.stats?.elapsed_ms
+  const normalizedGenerationMs = generationMs === undefined || generationMs === null ? '' : generationMs
+  const normalizedVectorMs = vectorMs === undefined || vectorMs === null ? '' : vectorMs
   const pngTransparency = metadata?.preprocess?.png_transparency
   const svgFidelity = metadata?.quality?.svg_fidelity
   return {
-    generation_ms: generationMs === undefined || generationMs === null ? '' : generationMs,
-    vector_ms: vectorMs === undefined || vectorMs === null ? '' : vectorMs,
+    generation_ms: normalizedGenerationMs,
+    vector_ms: normalizedVectorMs,
     png_transparency: pngTransparency === undefined || pngTransparency === null ? '' : pngTransparency,
     svg_fidelity: svgFidelity === undefined || svgFidelity === null ? '' : svgFidelity
   }
@@ -1288,7 +1290,7 @@ function appendQualityMetricsToRunLog(runLog = '', metadata = {}) {
 async function appendBatchSummaryCsv(summaryPath, row = {}) {
   const columns = [
     'task_id', 'task_name', 'mode', 'status', 'text', 'prompt', 'seed', 'resolution', 'task_dir',
-    'original_path', 'transparent_path', 'result_svg_path', 'preview_path', 'metadata_path', 'run_log_path',
+    'run_log_path',
     'generation_ms', 'vector_ms', 'png_transparency', 'svg_fidelity', 'error'
   ]
   await fs.mkdir(path.dirname(summaryPath), { recursive: true })
@@ -1582,11 +1584,6 @@ ipcMain.handle('art-text/write-task-artifacts', async (event, options) => {
         ...summaryRow,
         task_name: summaryRow.task_name || taskName || path.basename(resolvedTaskDir),
         task_dir: summaryRow.task_dir || resolvedTaskDir,
-        original_path: summaryRow.original_path || targetPaths.original,
-        transparent_path: summaryRow.transparent_path || targetPaths.transparent,
-        result_svg_path: summaryRow.result_svg_path || targetPaths.svg,
-        preview_path: summaryRow.preview_path || targetPaths.preview,
-        metadata_path: summaryRow.metadata_path || targetPaths.metadata,
         run_log_path: summaryRow.run_log_path || targetPaths.log
       })
     }
