@@ -203,23 +203,20 @@ Gen2Vec-ArtFont-App/
 | uv | 推荐 | `txt2img-api` 的 Python 依赖管理 |
 | GPU | NVIDIA 独显推荐 | ComfyUI 推理推荐独显；无 GPU 时可使用降级能力 |
 
-矢量化服务需要本地 rembg 模型：
-
-```text
-services/vectorizer-api/models/rembg/isnet-general-use.onnx
-```
-
-模型 MD5：
-
-```text
-fc16ebd8b0c10d971d3513d564d01e29
-```
-
-可运行以下脚本下载：
+ComfyUI 引擎、AI 模型以及矢量化 rembg 模型可以通过以下脚本一键补全（每步会分别询问确认）：
 
 ```powershell
-services\vectorizer-api\models\rembg\download-isnet-general-use.bat
+scripts\setup-deps.ps1
 ```
+
+该脚本依次执行：
+
+1. **download-comfyui-engine.ps1** — 下载 ComfyUI 便携版及自定义节点
+2. **configure-comfyui.ps1** — 安装 ComfyUI Python 依赖与补丁
+3. **download-models.ps1** — 下载 AI 模型到 ComfyUI `models/` 目录
+4. **download-isnet-general-use.ps1** — 下载矢量化 rembg 模型
+
+也可根据需要单独运行各个脚本。
 
 ### 安装与启动
 
