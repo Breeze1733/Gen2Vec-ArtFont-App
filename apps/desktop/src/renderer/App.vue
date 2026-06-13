@@ -509,7 +509,9 @@ async function mergeFsHistory() {
           taskName: String(entry.title || ''),
           paths,
           inputParams: entry.inputParams || { mode: entry.mode || 'single' },
+          batchItems: entry.batchItems || [],
         })
+        added++
         continue
       }
       if (existingDirIds.has(entry.taskDir)) {
@@ -522,7 +524,9 @@ async function mergeFsHistory() {
             taskName: String(entry.title || ''),
             paths,
             inputParams: entry.inputParams || { mode: entry.mode || 'single' },
+            batchItems: entry.batchItems || [],
           })
+          added++
         }
         continue
       }
@@ -550,12 +554,35 @@ async function mergeFsHistory() {
         taskName: String(entry.title || ''),
         paths,
         inputParams: entry.inputParams || { mode: entry.mode || 'single' },
+        batchItems: entry.batchItems || [],
       })
 
       added++
     }
 
-    if (added > 0) {
+    let removed = 0
+    const normalizeDir = (value) => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    const batchRoots = fsEntries
+      .filter(entry => entry.mode === 'batch' && entry.taskDir)
+      .map(entry => normalizeDir(entry.taskDir))
+      .filter(Boolean)
+
+    if (batchRoots.length > 0) {
+      const keptLogs = []
+      for (const log of logs.value) {
+        const dir = normalizeDir(getHistoryDir(log.id)?.taskDir)
+        const isBatchChild = batchRoots.some(root => dir && dir !== root && dir.startsWith(`${root}/`))
+        if (isBatchChild) {
+          deleteHistoryDir(log.id)
+          removed++
+        } else {
+          keptLogs.push(log)
+        }
+      }
+      logs.value = keptLogs
+    }
+
+    if (added > 0 || removed > 0) {
       // 排序：按时间的倒序排列（最新的在前）
       logs.value.sort((a, b) => {
         const timeA = new Date(a.time || 0).getTime()
@@ -1628,8 +1655,10 @@ const ensureBatchItemArtifacts = async (item) => {
 const buildBatchCurrentFiles = (batchRoot, summaryPath, items) => {
   const files = [
     { key: 'batchRoot', name: basename(batchRoot) || 'batch-run', data: batchRoot, isPath: true },
-    { key: 'batchSummary', name: 'batch_summary.csv', data: summaryPath, isPath: true }
   ]
+  if (summaryPath) {
+    files.push({ key: 'batchSummary', name: 'batch_summary.csv', data: summaryPath, isPath: true })
+  }
   items.forEach((entry, idx) => {
     if (!entry.taskDir) return
     files.push({ key: `task${idx + 1}`, name: entry.taskName || `task_${idx + 1}`, data: entry.taskDir, isPath: true })
@@ -1638,31 +1667,28 @@ const buildBatchCurrentFiles = (batchRoot, summaryPath, items) => {
 }
 
 const restoreBatchHistory = async (item, saved) => {
-  const summaryPath = saved.paths?.summary || joinPath(saved.taskDir, 'batch_summary.csv')
-  const summaryText = await readTextPath(summaryPath)
-  if (!summaryText) throw new Error('batch_summary.csv is missing or unreadable')
-
-  const rows = parseCsvRows(summaryText)
-  if (!rows.length) throw new Error('batch_summary.csv has no rows')
+  const summaryPath = saved.paths?.summary || ''
+  const sourceItems = Array.isArray(saved.batchItems) ? saved.batchItems : []
+  if (!sourceItems.length) throw new Error('batch history JSON has no items')
 
   const restoredItems = []
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]
-    const taskDir = resolveSummaryRelativePath(row.task_dir, summaryPath)
+  for (let i = 0; i < sourceItems.length; i++) {
+    const row = sourceItems[i] || {}
+    const taskDir = row.taskDir || ''
     const paths = {
-      original: row.original_path ? resolveSummaryRelativePath(row.original_path, summaryPath) : joinPath(taskDir, 'original.png'),
-      transparent: row.transparent_path ? resolveSummaryRelativePath(row.transparent_path, summaryPath) : joinPath(taskDir, 'transparent.png'),
-      svg: row.result_svg_path ? resolveSummaryRelativePath(row.result_svg_path, summaryPath) : joinPath(taskDir, 'result.svg'),
-      preview: row.preview_path ? resolveSummaryRelativePath(row.preview_path, summaryPath) : joinPath(taskDir, 'preview.png'),
-      metadata: row.metadata_path ? resolveSummaryRelativePath(row.metadata_path, summaryPath) : joinPath(taskDir, 'metadata.json'),
-      log: row.run_log_path ? resolveSummaryRelativePath(row.run_log_path, summaryPath) : joinPath(taskDir, 'run.log'),
+      original: row.paths?.original || joinPath(taskDir, 'original.png'),
+      transparent: row.paths?.transparent || joinPath(taskDir, 'transparent.png'),
+      svg: row.paths?.svg || joinPath(taskDir, 'result.svg'),
+      preview: row.paths?.preview || joinPath(taskDir, 'preview.png'),
+      metadata: row.paths?.metadata || joinPath(taskDir, 'metadata.json'),
+      log: row.paths?.log || joinPath(taskDir, 'run.log'),
       summary: summaryPath,
-      summaryDir: dirname(summaryPath)
+      summaryDir: summaryPath ? dirname(summaryPath) : saved.taskDir
     }
 
     const runLog = parseKeyValueLog(await readTextPath(paths.log))
-    const generationMs = toNumberOrZero(row.generation_ms || runLog.generation_ms)
-    const vectorMs = toNumberOrZero(row.vector_ms || runLog.vector_ms)
+    const generationMs = toNumberOrZero(row.generationMs || runLog.generation_ms)
+    const vectorMs = toNumberOrZero(row.vectorMs || runLog.vector_ms)
     const status = row.status === 'failed' || row.error ? 'failed' : 'success'
 
     restoredItems.push({
@@ -1670,7 +1696,7 @@ const restoreBatchHistory = async (item, saved) => {
       text: row.text || '',
       prompt: row.prompt || '',
       status,
-      rawStatus: row.status || '',
+      rawStatus: row.rawStatus || row.status || '',
       error: row.error || '',
       original: '',
       transparent: '',
@@ -1682,14 +1708,14 @@ const restoreBatchHistory = async (item, saved) => {
         seed: toNumberOrZero(row.seed),
         generationMs,
         vectorMs,
-        pngTransparency: row.png_transparency,
-        svgFidelity: row.svg_fidelity
+        pngTransparency: row.pngTransparency,
+        svgFidelity: row.svgFidelity
       }),
       stage1Ms: generationMs,
       stage2Ms: vectorMs,
       taskDir,
       outputRoot: saved.outputRoot || dirname(summaryPath),
-      taskName: row.task_name || basename(taskDir) || `task_${i + 1}`,
+      taskName: row.taskName || basename(taskDir) || `task_${i + 1}`,
       paths,
       assetsLoaded: false
     })

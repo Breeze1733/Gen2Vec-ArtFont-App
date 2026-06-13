@@ -53,9 +53,6 @@
     - [本地开发](#本地开发)
     - [测试](#测试)
     - [构建与打包](#构建与打包)
-      - [构建后端 EXE](#构建后端-exe)
-      - [构建 CLI EXE](#构建-cli-exe)
-      - [构建 Electron 安装包](#构建-electron-安装包)
   - [技术栈](#技术栈)
   - [许可证](#许可证)
 
@@ -183,8 +180,9 @@ Gen2Vec-ArtFont-App/
 ├─ docs/                             # 项目文档
 ├─ tests/                            # 测试集
 │  ├─ fixtures/                      # 测试样例文本
-│  └─ README.md                      # 预留放测试脚本
-├─ outputs/                          # 运行产物，已 gitignore
+│  ├─ run-acceptance.bat             # 测试脚本入口
+│  ├─ run-acceptance.ps1             # 测试脚本
+│  └─ README.md                      # 测试脚本说明文档
 ├─ README.md
 ├─ CLAUDE.md
 └─ LICENSE

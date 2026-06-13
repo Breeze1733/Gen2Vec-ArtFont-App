@@ -1720,175 +1720,24 @@ ipcMain.handle('art-text/parse-batch-input', async (event, content) => {
 async function scanHistoryFromFs(outputRoot) {
   const root = path.resolve(outputRoot || getOutputRoot())
   const indexPath = path.join(root, 'tasks-index.json')
-  const entries = []
-
   try {
     const content = await fs.readFile(indexPath, 'utf8')
-    entries.push(...normalizeHistoryIndexEntries(JSON.parse(content), root))
+    return normalizeHistoryIndexEntries(JSON.parse(content), root)
   } catch {
     // tasks-index.json 不存在 → 回退：扫描目录中的 task_* 目录
   }
 
-  entries.push(...await scanLegacyTaskDirs(root))
-  entries.push(...await scanNestedHistoryIndexes(root))
-  entries.push(...await scanNestedLegacyTaskDirs(root))
-
-  return dedupeHistoryEntries(entries)
+  return []
 }
 
 function normalizeHistoryIndexEntries(index, indexRoot) {
   if (!Array.isArray(index)) return []
   return index
     .filter(entry => entry && typeof entry === 'object')
-    .map(entry => {
-      const normalized = {
-        ...entry,
-        outputRoot: entry.outputRoot || indexRoot
-      }
-      const isBatch = normalized.mode === 'batch' || normalized.inputParams?.mode === 'batch'
-      const summaryPath = normalized.paths?.summary
-      if (isBatch && summaryPath) {
-        const summaryDir = path.dirname(summaryPath)
-        normalized.mode = 'batch'
-        normalized.taskDir = summaryDir
-        normalized.paths = {
-          ...(normalized.paths || {}),
-          summary: summaryPath,
-          summaryDir
-        }
-      }
-      return normalized
-    })
-}
-
-async function scanNestedHistoryIndexes(root, maxDepth = 4) {
-  const results = []
-  const rootResolved = path.resolve(root)
-  const rootIndex = path.join(rootResolved, 'tasks-index.json')
-
-  async function visit(dir, depth) {
-    if (depth > maxDepth) return
-    let children = []
-    try {
-      children = await fs.readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-
-    for (const child of children) {
-      if (!child.isDirectory()) continue
-      const childDir = path.join(dir, child.name)
-      const indexPath = path.join(childDir, 'tasks-index.json')
-      if (path.resolve(indexPath) !== path.resolve(rootIndex) && fsSync.existsSync(indexPath)) {
-        try {
-          const content = await fs.readFile(indexPath, 'utf8')
-          results.push(...normalizeHistoryIndexEntries(JSON.parse(content), childDir))
-        } catch { /* ignore unreadable nested indexes */ }
-      }
-      await visit(childDir, depth + 1)
-    }
-  }
-
-  await visit(rootResolved, 1)
-  return results
-}
-
-function dedupeHistoryEntries(entries) {
-  const seen = new Set()
-  return entries.filter((entry) => {
-    const key = entry.taskDir ? `dir:${path.resolve(entry.taskDir).toLowerCase()}` : `id:${entry.id}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
-async function scanNestedLegacyTaskDirs(root, maxDepth = 4) {
-  const results = []
-  const rootResolved = path.resolve(root)
-
-  async function visit(dir, depth) {
-    if (depth > maxDepth) return
-    let children = []
-    try {
-      children = await fs.readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-
-    const hasTaskChild = children.some(child => child.isDirectory() && /^task_/.test(child.name))
-    if (path.resolve(dir) !== rootResolved && hasTaskChild) {
-      results.push(...await scanLegacyTaskDirs(dir))
-    }
-
-    for (const child of children) {
-      if (!child.isDirectory()) continue
-      await visit(path.join(dir, child.name), depth + 1)
-    }
-  }
-
-  await visit(rootResolved, 1)
-  return results
-}
-
-/**
- * 兼容扫描：当 tasks-index.json 不存在时，扫描 outputs/ 下的 task_* 目录。
- */
-async function scanLegacyTaskDirs(root) {
-  const entries = []
-  try {
-    const dirs = await fs.readdir(root)
-    const taskDirs = dirs.filter(name => /^task_/.test(name))
-
-    for (const name of taskDirs) {
-      const taskDir = path.join(root, name)
-      const stat = await fs.stat(taskDir)
-      if (!stat.isDirectory()) continue
-
-      const metadataPath = path.join(taskDir, 'metadata.json')
-      let metadata = null
-      try {
-        const metaText = await fs.readFile(metadataPath, 'utf8')
-        metadata = JSON.parse(metaText)
-      } catch { /* 无 metadata 也继续 */ }
-
-      const isBatch = fsSync.existsSync(path.join(taskDir, 'batch_summary.csv'))
-      // 检查是否有子目录（batch 子任务）
-      let hasSubDirs = false
-      try {
-        const children = await fs.readdir(taskDir)
-        hasSubDirs = children.some(c => /^task_/.test(c))
-      } catch { /* 忽略 */ }
-
-      const mode = isBatch || hasSubDirs ? 'batch' : (metadata?.mode || 'single')
-      const title = metadata?.task_name || metadata?.generation?.text || name
-      const status = metadata?.error ? '失败' : '完成'
-
-      entries.push({
-        id: metadata?.task_id ? Number(metadata.task_id) : Date.now(),
-        mode,
-        title: String(title),
-        time: metadata?.generation?.started_at || new Date().toISOString(),
-        status,
-        taskDir,
-        outputRoot: root,
-        paths: {
-          summary: path.join(taskDir, 'batch_summary.csv'),
-          summaryDir: taskDir,
-          original: path.join(taskDir, 'original.png'),
-          transparent: path.join(taskDir, 'transparent.png'),
-          svg: path.join(taskDir, 'result.svg'),
-          preview: path.join(taskDir, 'preview.png'),
-          metadata: metadataPath,
-          log: path.join(taskDir, 'run.log'),
-        },
-        inputParams: { mode },
-        _legacy: true,
-      })
-    }
-  } catch { /* 目录不存在或无法读取 */ }
-
-  return entries
+    .map(entry => ({
+      ...entry,
+      outputRoot: entry.outputRoot || indexRoot
+    }))
 }
 
 /**

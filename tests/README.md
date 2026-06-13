@@ -37,7 +37,7 @@ tests\run-acceptance.bat
 .\tests\run-acceptance.ps1 -CliPath "C:\Program Files\矢量艺术字生成器\gen2vec_cli.exe"
 ```
 
-默认输出写入 `outputs\acceptance-<timestamp>\`，该目录已由根 `.gitignore` 忽略。
+默认输出写入桌面端同一个 `outputs\` 根目录。CLI 会创建一个批量任务目录 `outputs\task_..._batch-run_...`，历史索引只写入根目录的 `outputs\tasks-index.json`。
 
 ## 核验内容
 
@@ -58,7 +58,7 @@ tests\run-acceptance.bat
 .\tests\run-acceptance.ps1 -DryRun
 
 # 核验已经跑完的一份 batch_summary.csv
-.\tests\run-acceptance.ps1 -VerifyOnly outputs\acceptance-...\batch_summary.csv
+.\tests\run-acceptance.ps1 -VerifyOnly outputs\task_...\batch_summary.csv
 
 # 不做矢量化，只验 original.png、metadata、日志和汇总表
 .\tests\run-acceptance.ps1 -NoVectorize

@@ -507,9 +507,9 @@ function Get-SummaryHistoryEntry {
   return [PSCustomObject]@{
     id = $id
     mode = "batch"
-    title = "acceptance ($($Rows.Count) items)"
+    title = "Acceptance batch ($($Rows.Count) items)"
     time = $time
-    status = if ($failedRows.Count -gt 0) { if ($succeeded -gt 0) { "部分完成 ($succeeded/$($Rows.Count))" } else { "失败" } } else { "完成" }
+    status = if ($failedRows.Count -gt 0) { if ($succeeded -gt 0) { "partial ($succeeded/$($Rows.Count))" } else { "failed" } } else { "completed" }
     taskDir = $taskDir
     outputRoot = $OutputRoot
     paths = [PSCustomObject]@{
@@ -528,66 +528,98 @@ function Get-SummaryHistoryEntry {
     failed = $failedRows.Count
     thumb = ""
     runDir = $RunDir
+    batchItems = @(Get-BatchHistoryItems -Rows $Rows -SummaryPath $SummaryPath -OutputRoot $OutputRoot)
   }
+}
+
+function Get-BatchHistoryItems {
+  param(
+    [array]$Rows,
+    [string]$SummaryPath,
+    [string]$OutputRoot
+  )
+
+  $items = @()
+  for ($i = 0; $i -lt $Rows.Count; $i++) {
+    $row = $Rows[$i]
+    $taskDir = Resolve-ArtifactPath $row.task_dir $SummaryPath
+    $logPath = Resolve-ArtifactPath $row.run_log_path $SummaryPath
+    $items += [PSCustomObject]@{
+      index = $i
+      text = $row.text
+      prompt = $row.prompt
+      status = if ($row.status -eq "failed" -or -not [string]::IsNullOrWhiteSpace($row.error)) { "failed" } else { "success" }
+      rawStatus = $row.status
+      error = $row.error
+      seed = $row.seed
+      generationMs = $row.generation_ms
+      vectorMs = $row.vector_ms
+      pngTransparency = $row.png_transparency
+      svgFidelity = $row.svg_fidelity
+      taskDir = $taskDir
+      outputRoot = $OutputRoot
+      taskName = if ($row.task_name) { $row.task_name } else { Split-Path -Leaf $taskDir }
+      paths = [PSCustomObject]@{
+        original = if ($row.original_path) { Resolve-ArtifactPath $row.original_path $SummaryPath } else { Join-Path $taskDir "original.png" }
+        transparent = if ($row.transparent_path) { Resolve-ArtifactPath $row.transparent_path $SummaryPath } else { Join-Path $taskDir "transparent.png" }
+        svg = if ($row.result_svg_path) { Resolve-ArtifactPath $row.result_svg_path $SummaryPath } else { Join-Path $taskDir "result.svg" }
+        preview = if ($row.preview_path) { Resolve-ArtifactPath $row.preview_path $SummaryPath } else { Join-Path $taskDir "preview.png" }
+        metadata = if ($row.metadata_path) { Resolve-ArtifactPath $row.metadata_path $SummaryPath } else { Join-Path $taskDir "metadata.json" }
+        log = $logPath
+      }
+    }
+  }
+  return $items
 }
 
 function Sync-AcceptanceHistoryIndex {
   param(
     [string]$OutputRoot,
-    [string]$RunDir,
     [string]$SummaryPath
   )
 
   $rootIndexPath = Join-Path $OutputRoot "tasks-index.json"
-  $runIndexPath = Join-Path $RunDir "tasks-index.json"
   $rows = @(Import-Csv -LiteralPath $SummaryPath -Encoding UTF8)
   $summaryDir = Split-Path -Parent $SummaryPath
-  $entries = @(Read-JsonArrayFile $runIndexPath | Where-Object { $_.mode -eq "batch" -or $_.inputParams.mode -eq "batch" } | Select-Object -First 1)
-
-  if ($entries.Count -gt 0) {
-    $entry = $entries[0]
-    $failedRows = @($rows | Where-Object { $_.status -eq "failed" -or -not [string]::IsNullOrWhiteSpace($_.error) })
-    $succeeded = [Math]::Max(0, $rows.Count - $failedRows.Count)
-    $entry | Add-Member -NotePropertyName mode -NotePropertyValue "batch" -Force
-    $entry | Add-Member -NotePropertyName taskDir -NotePropertyValue $summaryDir -Force
-    $entry | Add-Member -NotePropertyName itemsCount -NotePropertyValue $rows.Count -Force
-    $entry | Add-Member -NotePropertyName succeeded -NotePropertyValue $succeeded -Force
-    $entry | Add-Member -NotePropertyName failed -NotePropertyValue $failedRows.Count -Force
-    if (-not $entry.title) {
-      $entry | Add-Member -NotePropertyName title -NotePropertyValue "acceptance ($($rows.Count) items)" -Force
+  $rootEntries = @(Read-JsonArrayFile $rootIndexPath)
+  $existingIndex = -1
+  for ($i = 0; $i -lt $rootEntries.Count; $i++) {
+    if ([string]$rootEntries[$i].taskDir -eq [string]$summaryDir -or [string]$rootEntries[$i].paths.summary -eq [string]$SummaryPath) {
+      $existingIndex = $i
+      break
     }
-    $entries = @($entry)
-  } else {
-    $entries = @(Get-SummaryHistoryEntry -SummaryPath $SummaryPath -OutputRoot $OutputRoot -RunDir $RunDir -Rows $rows)
   }
 
-  $rootEntries = @(Read-JsonArrayFile $rootIndexPath)
-  foreach ($entry in $entries) {
-    $entry | Add-Member -NotePropertyName outputRoot -NotePropertyValue $OutputRoot -Force
-    $entry | Add-Member -NotePropertyName mode -NotePropertyValue "batch" -Force
-    $entry | Add-Member -NotePropertyName taskDir -NotePropertyValue $summaryDir -Force
-    if (-not $entry.paths) {
-      $entry | Add-Member -NotePropertyName paths -NotePropertyValue ([PSCustomObject]@{}) -Force
-    }
-    $entry.paths | Add-Member -NotePropertyName summary -NotePropertyValue $SummaryPath -Force
-    $entry.paths | Add-Member -NotePropertyName summaryDir -NotePropertyValue (Split-Path -Parent $SummaryPath) -Force
-    if (-not $entry.inputParams) {
-      $entry | Add-Member -NotePropertyName inputParams -NotePropertyValue ([PSCustomObject]@{ mode = "batch" }) -Force
-    }
+  $entry = if ($existingIndex -ge 0) {
+    $rootEntries[$existingIndex]
+  } else {
+    Get-SummaryHistoryEntry -SummaryPath $SummaryPath -OutputRoot $OutputRoot -RunDir $summaryDir -Rows $rows
+  }
 
-    $existingIndex = -1
-    for ($i = 0; $i -lt $rootEntries.Count; $i++) {
-      if ([string]$rootEntries[$i].taskDir -eq [string]$entry.taskDir) {
-        $existingIndex = $i
-        break
-      }
-    }
+  $failedRows = @($rows | Where-Object { $_.status -eq "failed" -or -not [string]::IsNullOrWhiteSpace($_.error) })
+  $succeeded = [Math]::Max(0, $rows.Count - $failedRows.Count)
+  $entry | Add-Member -NotePropertyName outputRoot -NotePropertyValue $OutputRoot -Force
+  $entry | Add-Member -NotePropertyName mode -NotePropertyValue "batch" -Force
+  $entry | Add-Member -NotePropertyName taskDir -NotePropertyValue $summaryDir -Force
+  $entry | Add-Member -NotePropertyName batchItems -NotePropertyValue @(Get-BatchHistoryItems -Rows $rows -SummaryPath $SummaryPath -OutputRoot $OutputRoot) -Force
+  $entry | Add-Member -NotePropertyName itemsCount -NotePropertyValue $rows.Count -Force
+  $entry | Add-Member -NotePropertyName succeeded -NotePropertyValue $succeeded -Force
+  $entry | Add-Member -NotePropertyName failed -NotePropertyValue $failedRows.Count -Force
+  $entry | Add-Member -NotePropertyName title -NotePropertyValue "Acceptance batch ($($rows.Count) items)" -Force
+  $entry | Add-Member -NotePropertyName status -NotePropertyValue $(if ($failedRows.Count -gt 0) { if ($succeeded -gt 0) { "partial ($succeeded/$($rows.Count))" } else { "failed" } } else { "completed" }) -Force
+  if (-not $entry.paths) {
+    $entry | Add-Member -NotePropertyName paths -NotePropertyValue ([PSCustomObject]@{}) -Force
+  }
+  $entry.paths | Add-Member -NotePropertyName summary -NotePropertyValue $SummaryPath -Force
+  $entry.paths | Add-Member -NotePropertyName summaryDir -NotePropertyValue $summaryDir -Force
+  if (-not $entry.inputParams) {
+    $entry | Add-Member -NotePropertyName inputParams -NotePropertyValue ([PSCustomObject]@{ mode = "batch" }) -Force
+  }
 
-    if ($existingIndex -ge 0) {
-      $rootEntries[$existingIndex] = $entry
-    } else {
-      $rootEntries += $entry
-    }
+  if ($existingIndex -ge 0) {
+    $rootEntries[$existingIndex] = $entry
+  } else {
+    $rootEntries += $entry
   }
 
   if ($rootEntries.Count -gt 200) {
@@ -606,17 +638,13 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 }
 
 $runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$runDir = if ([string]::IsNullOrWhiteSpace($VerifyOnly)) {
-  Join-Path $OutputRoot "$Suite-$runStamp"
-} else {
-  Split-Path -Parent (Resolve-AbsolutePath $VerifyOnly)
-}
-$preparedFixture = Join-Path $runDir "_prepared\$Suite.txt"
+$workDir = Join-Path ([System.IO.Path]::GetTempPath()) "gen2vec-acceptance\$Suite-$runStamp"
+$preparedFixture = Join-Path $workDir "$Suite.txt"
 
 Write-Host ""
 Write-Host "=== $($config.Label) ($Suite) ===" -ForegroundColor Cyan
 Write-Host "Fixture: $($config.Fixture)"
-Write-Host "Output dir: $runDir"
+Write-Host "Output dir: $OutputRoot"
 
 $expectedRows = New-PreparedFixture -FixturePath $config.Fixture -PreparedPath $preparedFixture -Config $config
 Write-Host "Prepared input: $preparedFixture"
@@ -644,7 +672,7 @@ if ([string]::IsNullOrWhiteSpace($VerifyOnly)) {
   $batchArgs = @(
     "batch",
     "--input-file", $preparedFixture,
-    "--output-dir", $runDir,
+    "--output-dir", $OutputRoot,
     "--seed", [string]$Seed,
     "--seed-step", [string]$SeedStep,
     "--resolution", $Resolution,
@@ -669,7 +697,7 @@ if ([string]::IsNullOrWhiteSpace($VerifyOnly)) {
     throw "CLI batch exited with code $LASTEXITCODE"
   }
 
-  $summaryPath = Get-LatestSummary $runDir
+  $summaryPath = Get-LatestSummary $OutputRoot
 } else {
   $summaryPath = Resolve-AbsolutePath $VerifyOnly
   if (-not (Test-LiteralPathExists $summaryPath)) { throw "batch_summary.csv does not exist: $summaryPath" }
@@ -689,7 +717,7 @@ $report.Failures | Select-Object -First 50 | ForEach-Object {
   Write-Host "FAIL $_" -ForegroundColor Red
 }
 
-Sync-AcceptanceHistoryIndex -OutputRoot $OutputRoot -RunDir $runDir -SummaryPath $summaryPath
+Sync-AcceptanceHistoryIndex -OutputRoot $OutputRoot -SummaryPath $summaryPath
 
 if ($report.Failures.Count -gt 0) {
   throw "Acceptance failed: $($report.Failures.Count) failures, $($report.Warnings.Count) warnings"
