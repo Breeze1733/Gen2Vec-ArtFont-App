@@ -555,7 +555,7 @@ export async function appendTaskIndex(outputRoot, entry) {
   let index = []
   try {
     const existing = await readFile(indexPath, 'utf8')
-    index = JSON.parse(existing)
+    index = JSON.parse(existing.replace(/^\uFEFF/, ''))
   } catch {
     // 文件不存在或解析失败，从空列表开始
   }

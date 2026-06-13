@@ -1722,8 +1722,9 @@ async function scanHistoryFromFs(outputRoot) {
   const indexPath = path.join(root, 'tasks-index.json')
   try {
     const content = await fs.readFile(indexPath, 'utf8')
-    return normalizeHistoryIndexEntries(JSON.parse(content), root)
-  } catch {
+    return normalizeHistoryIndexEntries(JSON.parse(content.replace(/^\uFEFF/, '')), root)
+  } catch (err) {
+    console.warn(`[history] failed to read ${indexPath}: ${err.message}`)
     // tasks-index.json 不存在 → 回退：扫描目录中的 task_* 目录
   }
 
@@ -1747,7 +1748,7 @@ async function removeDeletedTaskFromIndex(root, deletedDir) {
   const indexPath = path.join(root, 'tasks-index.json')
   try {
     const content = await fs.readFile(indexPath, 'utf8')
-    let index = JSON.parse(content)
+    let index = JSON.parse(content.replace(/^\uFEFF/, ''))
     const before = index.length
     index = index.filter(e => !e.taskDir || !path.resolve(e.taskDir).startsWith(path.resolve(deletedDir)))
     if (index.length < before) {

@@ -480,7 +480,8 @@ function Write-JsonArrayFile {
   New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
   $jsonItems = @($Items | ForEach-Object { $_ | ConvertTo-Json -Depth 12 })
   $json = if ($jsonItems.Count -eq 0) { "[]" } else { "[`n$($jsonItems -join ",`n")`n]" }
-  Set-Content -LiteralPath $Path -Value $json -Encoding UTF8
+  $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+  [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
 }
 
 function Get-SummaryHistoryEntry {
