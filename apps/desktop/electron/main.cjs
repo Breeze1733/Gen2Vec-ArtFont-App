@@ -1740,10 +1740,25 @@ function normalizeHistoryIndexEntries(index, indexRoot) {
   if (!Array.isArray(index)) return []
   return index
     .filter(entry => entry && typeof entry === 'object')
-    .map(entry => ({
-      ...entry,
-      outputRoot: entry.outputRoot || indexRoot
-    }))
+    .map(entry => {
+      const normalized = {
+        ...entry,
+        outputRoot: entry.outputRoot || indexRoot
+      }
+      const isBatch = normalized.mode === 'batch' || normalized.inputParams?.mode === 'batch'
+      const summaryPath = normalized.paths?.summary
+      if (isBatch && summaryPath) {
+        const summaryDir = path.dirname(summaryPath)
+        normalized.mode = 'batch'
+        normalized.taskDir = summaryDir
+        normalized.paths = {
+          ...(normalized.paths || {}),
+          summary: summaryPath,
+          summaryDir
+        }
+      }
+      return normalized
+    })
 }
 
 async function scanNestedHistoryIndexes(root, maxDepth = 4) {

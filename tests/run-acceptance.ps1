@@ -541,15 +541,31 @@ function Sync-AcceptanceHistoryIndex {
   $rootIndexPath = Join-Path $OutputRoot "tasks-index.json"
   $runIndexPath = Join-Path $RunDir "tasks-index.json"
   $rows = @(Import-Csv -LiteralPath $SummaryPath -Encoding UTF8)
-  $entries = Read-JsonArrayFile $runIndexPath
+  $summaryDir = Split-Path -Parent $SummaryPath
+  $entries = @(Read-JsonArrayFile $runIndexPath | Where-Object { $_.mode -eq "batch" -or $_.inputParams.mode -eq "batch" } | Select-Object -First 1)
 
-  if ($entries.Count -eq 0) {
+  if ($entries.Count -gt 0) {
+    $entry = $entries[0]
+    $failedRows = @($rows | Where-Object { $_.status -eq "failed" -or -not [string]::IsNullOrWhiteSpace($_.error) })
+    $succeeded = [Math]::Max(0, $rows.Count - $failedRows.Count)
+    $entry | Add-Member -NotePropertyName mode -NotePropertyValue "batch" -Force
+    $entry | Add-Member -NotePropertyName taskDir -NotePropertyValue $summaryDir -Force
+    $entry | Add-Member -NotePropertyName itemsCount -NotePropertyValue $rows.Count -Force
+    $entry | Add-Member -NotePropertyName succeeded -NotePropertyValue $succeeded -Force
+    $entry | Add-Member -NotePropertyName failed -NotePropertyValue $failedRows.Count -Force
+    if (-not $entry.title) {
+      $entry | Add-Member -NotePropertyName title -NotePropertyValue "acceptance ($($rows.Count) items)" -Force
+    }
+    $entries = @($entry)
+  } else {
     $entries = @(Get-SummaryHistoryEntry -SummaryPath $SummaryPath -OutputRoot $OutputRoot -RunDir $RunDir -Rows $rows)
   }
 
   $rootEntries = @(Read-JsonArrayFile $rootIndexPath)
   foreach ($entry in $entries) {
     $entry | Add-Member -NotePropertyName outputRoot -NotePropertyValue $OutputRoot -Force
+    $entry | Add-Member -NotePropertyName mode -NotePropertyValue "batch" -Force
+    $entry | Add-Member -NotePropertyName taskDir -NotePropertyValue $summaryDir -Force
     if (-not $entry.paths) {
       $entry | Add-Member -NotePropertyName paths -NotePropertyValue ([PSCustomObject]@{}) -Force
     }

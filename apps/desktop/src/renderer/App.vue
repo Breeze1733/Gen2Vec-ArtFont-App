@@ -492,8 +492,40 @@ async function mergeFsHistory() {
 
     for (const entry of fsEntries) {
       // 跳过已存在的
-      if (existingIds.has(String(entry.id))) continue
-      if (existingDirIds.has(entry.taskDir)) continue
+      if (existingIds.has(String(entry.id))) {
+        const paths = entry.paths || {}
+        const existingLog = logs.value.find(log => String(log.id) === String(entry.id))
+        if (existingLog) {
+          existingLog.title = String(entry.title || existingLog.title || '')
+          existingLog.status = entry.status || existingLog.status
+          existingLog.mode = entry.mode === 'batch' ? '批量'
+            : entry.mode === 'vectorize' ? '矢量化'
+            : '单条'
+          existingLog.thumb = entry.thumb || existingLog.thumb || ''
+        }
+        setHistoryDir(entry.id, {
+          taskDir: entry.taskDir || '',
+          outputRoot: entry.outputRoot || '',
+          taskName: String(entry.title || ''),
+          paths,
+          inputParams: entry.inputParams || { mode: entry.mode || 'single' },
+        })
+        continue
+      }
+      if (existingDirIds.has(entry.taskDir)) {
+        const existingLog = logs.value.find(log => getHistoryDir(log.id)?.taskDir === entry.taskDir)
+        if (existingLog) {
+          const paths = entry.paths || {}
+          setHistoryDir(existingLog.id, {
+            taskDir: entry.taskDir || '',
+            outputRoot: entry.outputRoot || '',
+            taskName: String(entry.title || ''),
+            paths,
+            inputParams: entry.inputParams || { mode: entry.mode || 'single' },
+          })
+        }
+        continue
+      }
 
       // 构造与 localStorage 兼容的历史条目
       const taskId = entry.id
