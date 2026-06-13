@@ -19,7 +19,6 @@
 洛神赋 ｜ 魏晋仙气风，浅蓝紫纱幔质感，字形修长，搭配飘带和洛水波纹。
 玉门关 ｜ 边塞大漠风，沙金色颗粒质感，字形粗犷，搭配关城、驼队和风沙。
 观澜台 ｜ 海潮观景风，深蓝水纹质感，银色描边，搭配浪花和高台剪影。
-檀香阁 ｜ 深棕檀木质感，金色细线雕刻，搭配香烟缭绕和古窗纹。
 长安夜 ｜ 唐都夜景风，金色灯火与深蓝夜色，搭配宫阙剪影和灯笼。
 兰亭序  ｜ 行书书法风，墨色渐变，带金色细描边，背景有淡淡兰花与曲水纹。
 夏日冰饮 50% | 清爽蓝白配色，冰块和水花装饰，数字醒目。
@@ -86,14 +85,11 @@
 童趣六一 ｜ 彩虹气球、积木和棒棒糖装饰，糖果色膨胀字体，活泼卡通风。
 金榜题名 ｜ 状元红榜卷轴，金色毛笔题字，祥云和桂枝装饰，庄重喜庆。
 中秋团圆 | 桂花飘香，巨型圆月为衬，玉兔剪影，暗金色鎏金边。
-教师节 | 粉笔手写板书风格，康乃馨与红烛，绿色黑板背景纹理。
 重阳登高 | 金菊盛开，远山如黛，茱萸暗红点缀，苍劲隶书字体。
-国庆盛典 | 天安门华表剪影，红绸飞舞，纯金浮雕大字，光芒万丈。
 万圣节狂欢 | 南瓜怪脸，暗紫魔法帽，蝙蝠乱飞，字体带绿色黏液融化。
 感恩有你 | 金色麦田与火鸡羽毛，温暖枫叶红，字体圆润带心形。
 圣诞快乐 | 红绿经典撞色，圣诞老人的白胡子和红帽子，挂满彩灯。
 跨年倒计时 | 黑金奢华派对，金色香槟气泡，数字璀璨发光，时钟轮廓。
-庙会闹元宵 | 大红灯笼高高挂，糖葫芦卡通，民俗剪纸风，红红火火。
 DREAM LIGHT | artistic text, neon style, glowing outline, dark transparent background removed, centered composition.
 CYBERPUNK | futuristic font, glitch effect, neon cyan and magenta colors, metallic overlay.
 GALAXY VOYAGE | cosmic style, stars and nebulae inside text, silver chrome edge, bold layout.
@@ -112,8 +108,6 @@ SPEED RACE | aerodynamic font, checkered flag motif, motion blur fire streaks, b
 SILVER SHADOW | sleek minimalism, brushed aluminum texture, subtle soft drop shadow, modern sans-serif.
 NIGHTFALL | dark gothic letterforms, bat wings silhouettes, bloody crimson gradient, vampire theme.
 COSMIC DUST | stardust particle text, exploding galaxy effect, glowing nebula background removed.
-FLAMING HERO | blazing inferno letters, realistic fire embers, burnt coal internal texture, hot orange.
-BEYOND AI | digital matrix raining code, green glowing binary texture, high-tech abstract style.
 LUCKY STAR | glittering gold sparkles, 3D star shapes floating around, circus typography style.
 DEEP PURPLE | luxurious velvet cloth texture, gold embroidery border, elegant serif typography.
 STEAMPUNK | brass gear wheels and copper pipes integrated into text, steam smoke effects.
