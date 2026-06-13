@@ -1,11 +1,3 @@
-ABSTRACT ART | geometric polygon letters, multi-color kaleidoscope pattern, surreal sharp angles.
-DREAM LIGHT | artistic text, neon style, glowing outline, dark transparent background removed, centered composition.
-CYBERPUNK | futuristic font, glitch effect, neon cyan and magenta colors, metallic overlay.
-GALAXY VOYAGE | cosmic style, stars and nebulae inside text, silver chrome edge, bold layout.
-OCEAN BREEZE | liquid text effect, water droplets, blue and white gradient, refreshing summer look.
-GOLDEN EMPIRE | luxury 3D text, polished gold texture, diamond embedded crest, royal serif font.
-RETRO WAVE | 1980s synthwave style, hot pink neon grids, chrome reflections, vaporwave aesthetic.
-WILD NATURE | organic wood texture, green leaves and moss wrapping the letters, rustic feel.
 ICE CRUSH | frozen typography, cracked ice shards, translucent blue crystals, polar frost texture.
 TECHNO CORE | sci-fi font, glowing circuit board patterns, metallic silver plating, laser green lines.
 MONSTER ATTACK | horror style, dripping green slime, jagged tooth-like edges, comic pop art shading.
@@ -14,11 +6,3 @@ URBAN GRAFFITI | street art style, spray paint drips, wildstyle lettering, concr
 VINTAGE CAFE | classic retro script, distressed copper plating, coffee bean flourishes, elegant curves.
 MAGIC SPELL | fantasy wizard style, purple mystical smoke, glowing golden ancient runes embedded.
 SPEED RACE | aerodynamic font, checkered flag motif, motion blur fire streaks, bold forward tilt.
-SILVER SHADOW | sleek minimalism, brushed aluminum texture, subtle soft drop shadow, modern sans-serif.
-NIGHTFALL | dark gothic letterforms, bat wings silhouettes, bloody crimson gradient, vampire theme.
-COSMIC DUST | stardust particle text, exploding galaxy effect, glowing nebula background removed.
-FLAMING HERO | blazing inferno letters, realistic fire embers, burnt coal internal texture, hot orange.
-BEYOND AI | digital matrix raining code, green glowing binary texture, high-tech abstract style.
-LUCKY STAR | glittering gold sparkles, 3D star shapes floating around, circus typography style.
-DEEP PURPLE | luxurious velvet cloth texture, gold embroidery border, elegant serif typography.
-STEAMPUNK | brass gear wheels and copper pipes integrated into text, steam smoke effects.
