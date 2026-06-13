@@ -341,9 +341,71 @@ export async function parseBatchInput(content) {
   if (window.artTextApp?.parseBatchInput) {
     return window.artTextApp.parseBatchInput(content)
   }
-  // 兜底：渲染进程内简单按 | 分割
-  return String(content || '').trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
-    const parts = line.split('|').map(p => p.trim())
-    return { text: parts[0] || '', prompt: parts[1] || '', negative: parts[2] || '', seed: parts[3] || '', resolution: parts[4] || '' }
+
+  const splitDelimitedLine = (line, delimiter = ',') => {
+    const values = []
+    let current = ''
+    let quoted = false
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i]
+      const next = line[i + 1]
+      if (char === '"' && quoted && next === '"') { current += '"'; i += 1 }
+      else if (char === '"') quoted = !quoted
+      else if (char === delimiter && !quoted) { values.push(current.trim()); current = '' }
+      else current += char
+    }
+    values.push(current.trim())
+    return values
+  }
+
+  const normalizeBatchItem = (item) => {
+    const raw = item || {}
+    return {
+      text: String(raw.text ?? raw.title ?? raw.word ?? raw.content ?? '').trim(),
+      prompt: String(raw.prompt ?? raw.style ?? raw.description ?? '').trim(),
+      negative: String(raw.negative ?? raw.negative_prompt ?? '').trim(),
+      seed: raw.seed === undefined || raw.seed === '' ? '' : String(raw.seed),
+      resolution: raw.resolution ? String(raw.resolution).trim() : '',
+    }
+  }
+
+  const trimmed = String(content || '').trim()
+  if (!trimmed) return []
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    const parsed = JSON.parse(trimmed)
+    const rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.items) ? parsed.items : [])
+    return rows.map(normalizeBatchItem).filter(item => item.text || item.prompt)
+  }
+
+  const normalizeLine = (line) => String(line || '')
+    .replace(/\uFEFF/g, '')
+    .replace(/\uFF5C/g, '|')
+    .replace(/\t\|/g, '|')
+    .replace(/\|\t/g, '|')
+    .trim()
+  const lines = trimmed.split(/\r?\n/).map(normalizeLine).filter(line => line && !line.startsWith('#'))
+  if (!lines.length) return []
+
+  const first = lines[0].toLowerCase()
+  const hasHeader = /\btext\b/.test(first) && /\bprompt\b/.test(first)
+  const rows = hasHeader ? lines.slice(1) : lines
+  const headerDelimiter = lines[0].includes('|') ? '|' : (lines[0].includes('\t') ? '\t' : ',')
+  const headers = hasHeader ? splitDelimitedLine(lines[0], headerDelimiter).map(name => name.trim().toLowerCase()) : []
+
+  return rows.map((line) => {
+    const delimiter = line.includes('|') ? '|' : (line.includes('\t') ? '\t' : ',')
+    const parts = splitDelimitedLine(line, delimiter)
+    if (headers.length > 0) {
+      const record = {}
+      headers.forEach((key, i) => { record[key] = parts[i] || '' })
+      return normalizeBatchItem(record)
+    }
+    return normalizeBatchItem({
+      text: parts[0] || '',
+      prompt: parts[1] || '',
+      negative: parts[2] || '',
+      seed: parts[3] || '',
+      resolution: parts[4] || '',
+    })
   }).filter(item => item.text || item.prompt)
 }

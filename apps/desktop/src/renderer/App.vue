@@ -819,6 +819,8 @@ const startGeneration = async () => {
         const text = entry.text || ''
         const prompt = entry.prompt || ''
         const itemNegative = entry.negative || payload.negative || ''
+        const itemResolution = entry.resolution || payload.resolution
+        const itemSeed = entry.seed === undefined || entry.seed === '' ? payload.seed : Number(entry.seed)
 
         // 初始化该条目
         batchItems.value.push({
@@ -839,7 +841,7 @@ const startGeneration = async () => {
 
         try {
           // Stage 1: 生成位图（批量首条含模型加载，超时放宽到 600s）
-          const payloadA = { text, prompt, negative: itemNegative, resolution: payload.resolution, format: payload.format, seed: payload.seed, __timeoutMs: 600000 }
+          const payloadA = { text, prompt, negative: itemNegative, resolution: itemResolution, format: payload.format, seed: itemSeed, __timeoutMs: 600000 }
           const t1 = Date.now()
           const respA = await generateArtBitmap(payloadA)
           const s1Ms = Date.now() - t1
@@ -847,7 +849,7 @@ const startGeneration = async () => {
             workflowApi: respA.workflow_api || null,
             modelDependencies: respA.model_dependencies || null,
           }
-          const itemTaskInfo = await prepareOutputTask({ mode: 'batch', index: i + 1, text: text || `item-${i + 1}`, seed: payload.seed, startedAt: taskStartedAt, usesTxt2Img: true, outputRoot: batchSummaryDir, summaryDir: batchSummaryDir })
+          const itemTaskInfo = await prepareOutputTask({ mode: 'batch', index: i + 1, text: text || `item-${i + 1}`, seed: itemSeed, startedAt: taskStartedAt, usesTxt2Img: true, outputRoot: batchSummaryDir, summaryDir: batchSummaryDir })
           const batchEngine = respA.metadata?.engine || ''
           await writeTaskArtifacts({
             outputRoot: itemTaskInfo.outputRoot,
@@ -856,7 +858,7 @@ const startGeneration = async () => {
             paths: itemTaskInfo.paths,
             artifacts: { original: respA.png },
             metadata: null,
-            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, status: 'vectorizing', usesTxt2Img: true, engine: batchEngine }),
+            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: itemSeed, stage1Duration: s1Ms, status: 'vectorizing', usesTxt2Img: true, engine: batchEngine }),
             usesTxt2Img: true,
             workflowArtifacts: batchWorkflowArtifacts
           })
@@ -865,7 +867,7 @@ const startGeneration = async () => {
           const payloadB = {
             source_type: 'generated', text, prompt,
             negative: itemNegative,
-            resolution: payload.resolution, format: payload.format, seed: payload.seed,
+            resolution: itemResolution, format: payload.format, seed: itemSeed,
             vector: { ...payload.vector },
             __timeoutMs: 300000,
             generated_image: { file_path: itemTaskInfo.paths.original },
@@ -896,7 +898,7 @@ const startGeneration = async () => {
             item.metadata.generation.duration_ms = s1Ms
           }
           const batchStatus = resolveStatus(respA.metadata)
-          item.metadata = augmentMetadata(item.metadata, { task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, usesTxt2Img: true })
+          item.metadata = augmentMetadata(item.metadata, { task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: itemSeed, usesTxt2Img: true })
           await writeTaskArtifacts({
             outputRoot: itemTaskInfo.outputRoot,
             taskDir: itemTaskInfo.taskDir,
@@ -904,7 +906,7 @@ const startGeneration = async () => {
             paths: itemTaskInfo.paths,
             artifacts: { original: item.original, transparent: item.transparent, preview: item.preview, svg: item.svg },
             metadata: item.metadata,
-            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: payload.seed, stage1Duration: s1Ms, stage2Duration: s2Ms, status: batchStatus, usesTxt2Img: true, engine: batchEngine }),
+            runLog: buildRunLog({ task, taskInfo: itemTaskInfo, modeName: 'batch', text, prompt, seed: itemSeed, stage1Duration: s1Ms, stage2Duration: s2Ms, status: batchStatus, usesTxt2Img: true, engine: batchEngine }),
             usesTxt2Img: true,
             summaryRow: {
               ...buildSummaryRow({
@@ -914,7 +916,7 @@ const startGeneration = async () => {
                 status: batchStatus,
                 text,
                 prompt,
-                seed: payload.seed,
+                seed: itemSeed,
                 metadata: item.metadata,
                 generationMs: s1Ms,
                 vectorMs: s2Ms
@@ -950,7 +952,7 @@ const startGeneration = async () => {
               modeName: 'batch',
               text,
               prompt,
-              seed: payload.seed,
+              seed: itemSeed,
               errorMessage: item.error,
               usesTxt2Img: true,
               stage1Duration: item.stage1Ms || 0,
@@ -968,11 +970,11 @@ const startGeneration = async () => {
       currentTaskPaths.value = { ...batchTaskInfo.paths, summary: batchSummaryPath, summaryDir: batchSummaryDir }
 
       // 设置最终任务状态
-      if (batchProgress.failed === lines.length) {
+      if (batchProgress.failed === entries.length) {
         task.status = '失败'
         error.value = '所有批量任务均失败。'
       } else if (batchProgress.failed > 0) {
-        task.status = `部分完成（${batchProgress.completed}/${lines.length}）`
+        task.status = `部分完成（${batchProgress.completed}/${entries.length}）`
       } else {
         task.status = '完成'
       }

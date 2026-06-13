@@ -1655,7 +1655,23 @@ function parseBatchInputText(content) {
   const trimmed = (content || '').trim()
   if (!trimmed) return []
 
-  const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    const parsed = JSON.parse(trimmed)
+    const rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.items) ? parsed.items : [])
+    return rows.map(normalizeBatchItem).filter(item => item.text || item.prompt)
+  }
+
+  const normalizeLine = (line) => String(line || '')
+    .replace(/\uFEFF/g, '')
+    .replace(/\uFF5C/g, '|')
+    .replace(/\t\|/g, '|')
+    .replace(/\|\t/g, '|')
+    .trim()
+
+  const lines = trimmed
+    .split(/\r?\n/)
+    .map(normalizeLine)
+    .filter(line => line && !line.startsWith('#'))
   if (lines.length === 0) return []
 
   const first = lines[0].toLowerCase()
