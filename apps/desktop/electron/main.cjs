@@ -1711,14 +1711,71 @@ ipcMain.handle('art-text/parse-batch-input', async (event, content) => {
 async function scanHistoryFromFs(outputRoot) {
   const root = path.resolve(outputRoot || getOutputRoot())
   const indexPath = path.join(root, 'tasks-index.json')
+  const entries = []
 
   try {
     const content = await fs.readFile(indexPath, 'utf8')
-    return JSON.parse(content)
+    entries.push(...normalizeHistoryIndexEntries(JSON.parse(content), root))
   } catch {
     // tasks-index.json 不存在 → 回退：扫描目录中的 task_* 目录
-    return scanLegacyTaskDirs(root)
   }
+
+  entries.push(...await scanLegacyTaskDirs(root))
+  entries.push(...await scanNestedHistoryIndexes(root))
+
+  return dedupeHistoryEntries(entries)
+}
+
+function normalizeHistoryIndexEntries(index, indexRoot) {
+  if (!Array.isArray(index)) return []
+  return index
+    .filter(entry => entry && typeof entry === 'object')
+    .map(entry => ({
+      ...entry,
+      outputRoot: entry.outputRoot || indexRoot
+    }))
+}
+
+async function scanNestedHistoryIndexes(root, maxDepth = 4) {
+  const results = []
+  const rootResolved = path.resolve(root)
+  const rootIndex = path.join(rootResolved, 'tasks-index.json')
+
+  async function visit(dir, depth) {
+    if (depth > maxDepth) return
+    let children = []
+    try {
+      children = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+
+    for (const child of children) {
+      if (!child.isDirectory()) continue
+      const childDir = path.join(dir, child.name)
+      const indexPath = path.join(childDir, 'tasks-index.json')
+      if (path.resolve(indexPath) !== path.resolve(rootIndex) && fsSync.existsSync(indexPath)) {
+        try {
+          const content = await fs.readFile(indexPath, 'utf8')
+          results.push(...normalizeHistoryIndexEntries(JSON.parse(content), childDir))
+        } catch { /* ignore unreadable nested indexes */ }
+      }
+      await visit(childDir, depth + 1)
+    }
+  }
+
+  await visit(rootResolved, 1)
+  return results
+}
+
+function dedupeHistoryEntries(entries) {
+  const seen = new Set()
+  return entries.filter((entry) => {
+    const key = entry.taskDir ? `dir:${path.resolve(entry.taskDir).toLowerCase()}` : `id:${entry.id}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 /**

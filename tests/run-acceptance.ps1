@@ -43,7 +43,7 @@ function Get-SuiteConfig {
         MinRows = 100
         Seed = 2026061201
         TimeoutMinutes = 270
-        OutputRoot = "outputs\cli-acceptance"
+        OutputRoot = "outputs"
       }
     }
   }
