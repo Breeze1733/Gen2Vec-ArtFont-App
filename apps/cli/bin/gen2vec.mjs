@@ -27,7 +27,7 @@ import { run as runPipeline } from '../src/commands/pipeline.mjs'
 import { run as runBatch } from '../src/commands/batch.mjs'
 import { run as runEnv } from '../src/commands/env.mjs'
 
-const VERSION = '1.0.0'
+const VERSION = '1.0.1'
 const CLI_NAME = process.platform === 'win32' ? '.\\gen2vec_cli.exe' : './gen2vec_cli'
 
 const HELP = `

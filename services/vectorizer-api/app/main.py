@@ -14,7 +14,7 @@ from .vectorization import vectorize_image
 
 app = FastAPI(
     title="Vectorizer API",
-    version="1.0.0",
+    version="1.0.1",
     description="Bitmap-to-SVG vectorization backend service based on OpenCV + scikit-image + vtracer + svgwrite.",
 )
 

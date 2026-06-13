@@ -71,7 +71,7 @@ _COMFYUI_PORTABLE_INNER = "ComfyUI_windows_portable"
 
 app = FastAPI(
     title="txt2img-api",
-    version="1.0.0",
+    version="1.0.1",
     description="Text-to-image generation backend for the Development-Training workspace.",
 )
 
