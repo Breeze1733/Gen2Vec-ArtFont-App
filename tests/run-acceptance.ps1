@@ -459,6 +459,128 @@ function Test-AcceptanceArtifacts {
   }
 }
 
+function Read-JsonArrayFile {
+  param([string]$Path)
+  if (-not (Test-LiteralPathExists $Path)) { return @() }
+  try {
+    $value = Get-Content -Raw -LiteralPath $Path -Encoding UTF8 | ConvertFrom-Json
+    if ($null -eq $value) { return @() }
+    if ($value -is [array]) { return @($value) }
+    return @($value)
+  } catch {
+    return @()
+  }
+}
+
+function Write-JsonArrayFile {
+  param(
+    [string]$Path,
+    [array]$Items
+  )
+  New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+  $jsonItems = @($Items | ForEach-Object { $_ | ConvertTo-Json -Depth 12 })
+  $json = if ($jsonItems.Count -eq 0) { "[]" } else { "[`n$($jsonItems -join ",`n")`n]" }
+  Set-Content -LiteralPath $Path -Value $json -Encoding UTF8
+}
+
+function Get-SummaryHistoryEntry {
+  param(
+    [string]$SummaryPath,
+    [string]$OutputRoot,
+    [string]$RunDir,
+    [array]$Rows
+  )
+
+  $taskDir = Split-Path -Parent $SummaryPath
+  $failedRows = @($Rows | Where-Object { $_.status -eq "failed" -or -not [string]::IsNullOrWhiteSpace($_.error) })
+  $succeeded = [Math]::Max(0, $Rows.Count - $failedRows.Count)
+  $time = (Get-Item -LiteralPath $SummaryPath).LastWriteTime.ToString("o")
+  $idSource = "$SummaryPath|$time"
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($idSource))
+    $id = [BitConverter]::ToString($hashBytes, 0, 6).Replace("-", "")
+  } finally {
+    $sha.Dispose()
+  }
+
+  return [PSCustomObject]@{
+    id = $id
+    mode = "batch"
+    title = "acceptance ($($Rows.Count) items)"
+    time = $time
+    status = if ($failedRows.Count -gt 0) { if ($succeeded -gt 0) { "部分完成 ($succeeded/$($Rows.Count))" } else { "失败" } } else { "完成" }
+    taskDir = $taskDir
+    outputRoot = $OutputRoot
+    paths = [PSCustomObject]@{
+      summary = $SummaryPath
+      summaryDir = $taskDir
+    }
+    inputParams = [PSCustomObject]@{
+      mode = "batch"
+      batch = "acceptance"
+      resolution = $Resolution
+      seed = $Seed
+      seedStep = $SeedStep
+    }
+    itemsCount = $Rows.Count
+    succeeded = $succeeded
+    failed = $failedRows.Count
+    thumb = ""
+    runDir = $RunDir
+  }
+}
+
+function Sync-AcceptanceHistoryIndex {
+  param(
+    [string]$OutputRoot,
+    [string]$RunDir,
+    [string]$SummaryPath
+  )
+
+  $rootIndexPath = Join-Path $OutputRoot "tasks-index.json"
+  $runIndexPath = Join-Path $RunDir "tasks-index.json"
+  $rows = @(Import-Csv -LiteralPath $SummaryPath -Encoding UTF8)
+  $entries = Read-JsonArrayFile $runIndexPath
+
+  if ($entries.Count -eq 0) {
+    $entries = @(Get-SummaryHistoryEntry -SummaryPath $SummaryPath -OutputRoot $OutputRoot -RunDir $RunDir -Rows $rows)
+  }
+
+  $rootEntries = @(Read-JsonArrayFile $rootIndexPath)
+  foreach ($entry in $entries) {
+    $entry | Add-Member -NotePropertyName outputRoot -NotePropertyValue $OutputRoot -Force
+    if (-not $entry.paths) {
+      $entry | Add-Member -NotePropertyName paths -NotePropertyValue ([PSCustomObject]@{}) -Force
+    }
+    $entry.paths | Add-Member -NotePropertyName summary -NotePropertyValue $SummaryPath -Force
+    $entry.paths | Add-Member -NotePropertyName summaryDir -NotePropertyValue (Split-Path -Parent $SummaryPath) -Force
+    if (-not $entry.inputParams) {
+      $entry | Add-Member -NotePropertyName inputParams -NotePropertyValue ([PSCustomObject]@{ mode = "batch" }) -Force
+    }
+
+    $existingIndex = -1
+    for ($i = 0; $i -lt $rootEntries.Count; $i++) {
+      if ([string]$rootEntries[$i].taskDir -eq [string]$entry.taskDir) {
+        $existingIndex = $i
+        break
+      }
+    }
+
+    if ($existingIndex -ge 0) {
+      $rootEntries[$existingIndex] = $entry
+    } else {
+      $rootEntries += $entry
+    }
+  }
+
+  if ($rootEntries.Count -gt 200) {
+    $rootEntries = @($rootEntries | Select-Object -Last 200)
+  }
+  Write-JsonArrayFile -Path $rootIndexPath -Items $rootEntries
+  Write-Host "history index: $rootIndexPath"
+}
+
 $config = Get-SuiteConfig $Suite
 if ($Seed -eq 0) { $Seed = $config.Seed }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
@@ -550,6 +672,8 @@ $report.Warnings | Select-Object -First 20 | ForEach-Object {
 $report.Failures | Select-Object -First 50 | ForEach-Object {
   Write-Host "FAIL $_" -ForegroundColor Red
 }
+
+Sync-AcceptanceHistoryIndex -OutputRoot $OutputRoot -RunDir $runDir -SummaryPath $summaryPath
 
 if ($report.Failures.Count -gt 0) {
   throw "Acceptance failed: $($report.Failures.Count) failures, $($report.Warnings.Count) warnings"

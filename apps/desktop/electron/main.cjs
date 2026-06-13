@@ -1464,11 +1464,20 @@ ipcMain.handle('art-text/launch-acceptance-test', async () => {
     throw new Error('验收测试批处理脚本仅支持 Windows。')
   }
   const scriptPath = resolveAcceptanceScriptPath()
-  const errorMessage = await shell.openPath(scriptPath)
-  if (errorMessage) {
-    throw new Error(errorMessage)
-  }
-  return { ok: true, path: scriptPath }
+  const outputRoot = getOutputRoot()
+  await fs.mkdir(outputRoot, { recursive: true })
+  const child = spawn(
+    'cmd.exe',
+    ['/d', '/c', 'start', '', scriptPath, '-OutputRoot', outputRoot],
+    {
+      cwd: path.dirname(scriptPath),
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false
+    }
+  )
+  child.unref()
+  return { ok: true, path: scriptPath, outputRoot }
 })
 
 ipcMain.handle('art-text/prepare-output-task', async (event, options) => {
@@ -1722,6 +1731,7 @@ async function scanHistoryFromFs(outputRoot) {
 
   entries.push(...await scanLegacyTaskDirs(root))
   entries.push(...await scanNestedHistoryIndexes(root))
+  entries.push(...await scanNestedLegacyTaskDirs(root))
 
   return dedupeHistoryEntries(entries)
 }
@@ -1776,6 +1786,34 @@ function dedupeHistoryEntries(entries) {
     seen.add(key)
     return true
   })
+}
+
+async function scanNestedLegacyTaskDirs(root, maxDepth = 4) {
+  const results = []
+  const rootResolved = path.resolve(root)
+
+  async function visit(dir, depth) {
+    if (depth > maxDepth) return
+    let children = []
+    try {
+      children = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+
+    const hasTaskChild = children.some(child => child.isDirectory() && /^task_/.test(child.name))
+    if (path.resolve(dir) !== rootResolved && hasTaskChild) {
+      results.push(...await scanLegacyTaskDirs(dir))
+    }
+
+    for (const child of children) {
+      if (!child.isDirectory()) continue
+      await visit(path.join(dir, child.name), depth + 1)
+    }
+  }
+
+  await visit(rootResolved, 1)
+  return results
 }
 
 /**

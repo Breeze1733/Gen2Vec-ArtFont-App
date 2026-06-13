@@ -7,21 +7,21 @@
           <button
             :class="['tab-button', { active: activeTab === 'input' }]"
             type="button"
-            @click="activeTab = 'input'"
+            @click="switchTab('input')"
           >
             输入面板
           </button>
           <button
             :class="['tab-button', { active: activeTab === 'output' }]"
             type="button"
-            @click="activeTab = 'output'"
+            @click="switchTab('output')"
           >
             输出面板
           </button>
           <button
             :class="['tab-button', { active: activeTab === 'history' }]"
             type="button"
-            @click="activeTab = 'history'"
+            @click="switchTab('history')"
           >
             历史任务
           </button>
@@ -390,6 +390,13 @@ const handleAcceptanceTest = async () => {
     await launchAcceptanceTest()
   } catch (err) {
     console.error('启动验收测试失败:', err)
+  }
+}
+
+const switchTab = async (tab) => {
+  activeTab.value = tab
+  if (tab === 'history') {
+    await mergeFsHistory()
   }
 }
 
