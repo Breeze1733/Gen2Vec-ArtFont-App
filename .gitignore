@@ -1,6 +1,7 @@
 # Local assistant/tooling
 .claude/
 .spec-workflow/
+CLAUDE.md
 
 # Dependencies
 node_modules/
