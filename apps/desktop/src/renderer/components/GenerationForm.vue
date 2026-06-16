@@ -46,7 +46,7 @@
           <div>
             <span>分辨率</span>
             <select v-model="payload.resolution">
-              <option v-for="r in QWEN_RESOLUTIONS" :key="r.value" :value="r.value">
+              <option v-for="r in FLUX_RESOLUTIONS" :key="r.value" :value="r.value">
                 {{ r.display }}
               </option>
               <option value="custom">自定义</option>
@@ -79,7 +79,7 @@
           <div>
             <span>全局分辨率</span>
             <select v-model="payload.resolution">
-              <option v-for="r in QWEN_RESOLUTIONS" :key="r.value" :value="r.value">
+              <option v-for="r in FLUX_RESOLUTIONS" :key="r.value" :value="r.value">
                 {{ r.display }}
               </option>
               <option value="custom">自定义</option>
@@ -133,14 +133,14 @@ const modes = [
 
 const emit = defineEmits(['file-change', 'update:mode', 'batch-file', 'reset'])
 
-const QWEN_RESOLUTIONS = [
-  { value: '1328 x 1328', display: '1328 × 1328 (1:1)' },
-  { value: '1664 x 928',  display: '1664 × 928 (16:9)' },
-  { value: '928 x 1664',  display: '928 × 1664 (9:16)' },
-  { value: '1472 x 1104', display: '1472 × 1104 (4:3)' },
-  { value: '1104 x 1472', display: '1104 × 1472 (3:4)' },
-  { value: '1584 x 1056', display: '1584 × 1056 (3:2)' },
-  { value: '1056 x 1584', display: '1056 × 1584 (2:3)' },
+const FLUX_RESOLUTIONS = [
+  { value: '1024 x 1024', display: '1024 × 1024 (1:1)' },
+  { value: '1344 x 768',  display: '1344 × 768 (16:9)' },
+  { value: '768 x 1344',  display: '768 × 1344 (9:16)' },
+  { value: '1152 x 896',  display: '1152 × 896 (4:3)' },
+  { value: '896 x 1152',  display: '896 × 1152 (3:4)' },
+  { value: '1216 x 832',  display: '1216 × 832 (3:2)' },
+  { value: '832 x 1216',  display: '832 × 1216 (2:3)' },
 ]
 
 import { ref, computed, watch } from 'vue'

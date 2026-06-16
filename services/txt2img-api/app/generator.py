@@ -253,11 +253,28 @@ _QWEN_RESOLUTIONS = [
     (1056, 1584),   # 2:3
 ]
 
+# Flux official resolutions — all dimensions divisible by 64 (transformer requirement)
+_FLUX_RESOLUTIONS = [
+    (1024, 1024),   # 1:1
+    (1344, 768),    # 16:9
+    (768, 1344),    # 9:16
+    (1152, 896),    # 4:3
+    (896, 1152),    # 3:4
+    (1216, 832),    # 3:2
+    (832, 1216),    # 2:3
+]
+
 
 def _map_qwen_resolution(w: int, h: int) -> tuple[int, int]:
     """Map a requested resolution to the nearest official Qwen-Image size."""
     ratio = w / h
     return min(_QWEN_RESOLUTIONS, key=lambda r: abs(r[0] / r[1] - ratio))
+
+
+def _map_flux_resolution(w: int, h: int) -> tuple[int, int]:
+    """Map a requested resolution to the nearest official Flux size (all divisible by 64)."""
+    ratio = w / h
+    return min(_FLUX_RESOLUTIONS, key=lambda r: abs(r[0] / r[1] - ratio))
 
 
 def _build_negative_prompt(user_negative: str = "") -> str:
@@ -300,6 +317,8 @@ def _patch_workflow(workflow: dict, request: GenerationRequest) -> dict:
     w, h = _parse_resolution(request.resolution)
     if model == "qwen_image":
         w, h = _map_qwen_resolution(w, h)
+    elif model == "flux":
+        w, h = _map_flux_resolution(w, h)
     for _nid, node in latent_nodes:
         node["inputs"]["width"] = w
         node["inputs"]["height"] = h
