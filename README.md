@@ -480,7 +480,7 @@ JSON 输入示例：
 | `ART_TEXT_OUTPUT_ROOT` | `outputs` 或用户文档目录 | desktop / CLI | 产物输出根目录 |
 | `AUTO_START_COMFYUI` | `1` | txt2img-api | 是否在启动时自动拉起 ComfyUI |
 | `COMFYUI_HOST` | `http://127.0.0.1:8188` | txt2img-api | ComfyUI API 地址 |
-| `COMFYUI_POLL_TIMEOUT` | `500` | txt2img-api | 轮询 ComfyUI 完成的最大秒数 |
+| `COMFYUI_POLL_TIMEOUT` | `900` | txt2img-api | 轮询 ComfyUI 完成的最大秒数 |
 | `COMFYUI_POLL_INTERVAL` | `1.0` | txt2img-api | 轮询间隔秒数 |
 | `WORKFLOW_PATH` | 空 | txt2img-api | 指定 ComfyUI API 格式 JSON 的绝对路径，会覆盖请求中的 `workflow` |
 | `COMFYUI_LAUNCHER_BAT` | 空 | txt2img-api | 使用自定义 ComfyUI 启动脚本 |
