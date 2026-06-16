@@ -46,9 +46,9 @@
           <div>
             <span>分辨率</span>
             <select v-model="payload.resolution">
-              <option>1024 x 1024</option>
-              <option>1664 x 928</option>
-              <option>1920 x 1080</option>
+              <option v-for="r in QWEN_RESOLUTIONS" :key="r.value" :value="r.value">
+                {{ r.display }}
+              </option>
               <option value="custom">自定义</option>
             </select>
           </div>
@@ -79,9 +79,9 @@
           <div>
             <span>全局分辨率</span>
             <select v-model="payload.resolution">
-              <option>1024 x 1024</option>
-              <option>1664 x 928</option>
-              <option>1920 x 1080</option>
+              <option v-for="r in QWEN_RESOLUTIONS" :key="r.value" :value="r.value">
+                {{ r.display }}
+              </option>
               <option value="custom">自定义</option>
             </select>
           </div>
@@ -133,7 +133,17 @@ const modes = [
 
 const emit = defineEmits(['file-change', 'update:mode', 'batch-file', 'reset'])
 
-import { ref, computed } from 'vue'
+const QWEN_RESOLUTIONS = [
+  { value: '1328 x 1328', display: '1328 × 1328 (1:1)' },
+  { value: '1664 x 928',  display: '1664 × 928 (16:9)' },
+  { value: '928 x 1664',  display: '928 × 1664 (9:16)' },
+  { value: '1472 x 1104', display: '1472 × 1104 (4:3)' },
+  { value: '1104 x 1472', display: '1104 × 1472 (3:4)' },
+  { value: '1584 x 1056', display: '1584 × 1056 (3:2)' },
+  { value: '1056 x 1584', display: '1056 × 1584 (2:3)' },
+]
+
+import { ref, computed, watch } from 'vue'
 
 const handleModeChange = (newMode) => {
   // 仅在完全没有 GPU 时限制为矢量化模式
@@ -144,6 +154,13 @@ const handleModeChange = (newMode) => {
 }
 
 const customRes = ref('')
+
+watch(customRes, (val) => {
+  if (val && val.trim()) {
+    props.payload.resolution = val.trim()
+  }
+})
+
 const previewThumb = ref('')
 
 // 随机种子功能已移除

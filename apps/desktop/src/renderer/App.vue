@@ -337,7 +337,7 @@ const payload = reactive({
   prompt: '',
   negative: '',
   batch: '',
-  resolution: '1024 x 1024',
+  resolution: '1328 x 1328',
   format: 'PNG',
   seed: 0,
   imageFile: null,
@@ -1536,7 +1536,7 @@ const resetForm = () => {
   payload.prompt = ''
   payload.negative = ''
   payload.batch = ''
-  payload.resolution = '1024 x 1024'
+  payload.resolution = '1328 x 1328'
   payload.format = 'PNG + SVG'
   payload.seed = 0
   payload.imageFile = null
@@ -1947,14 +1947,14 @@ const applyInputParamsToForm = (inputParams, mode) => {
   if (mode === 'batch') {
     payload.batch = inputParams.batch || ''
     payload.negative = inputParams.negative || ''
-    payload.resolution = inputParams.resolution || '1024 x 1024'
+    payload.resolution = inputParams.resolution || '1328 x 1328'
     payload.format = inputParams.format || 'PNG'
     payload.seed = inputParams.seed || 0
   } else {
     payload.text = inputParams.text || ''
     payload.prompt = inputParams.prompt || ''
     payload.negative = inputParams.negative || ''
-    payload.resolution = inputParams.resolution || '1024 x 1024'
+    payload.resolution = inputParams.resolution || '1328 x 1328'
     payload.format = inputParams.format || 'PNG'
     payload.seed = inputParams.seed || 0
   }
