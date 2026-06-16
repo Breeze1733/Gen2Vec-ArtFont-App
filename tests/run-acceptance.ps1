@@ -250,7 +250,6 @@ function Test-SizeEquals {
 function Add-ResolutionFinding {
   param(
     [System.Collections.Generic.List[string]]$Failures,
-    [System.Collections.Generic.List[string]]$Warnings,
     [string]$Label,
     [string]$FileName,
     [object]$Png,
@@ -260,14 +259,11 @@ function Add-ResolutionFinding {
   if (-not $Resolution -or (Test-SizeEquals $Png $Resolution)) { return }
 
   $mapped = Get-QwenMappedResolution $Resolution
+  if ($mapped -and (Test-SizeEquals $Png $mapped)) { return }
+  if ($AllowResolutionMismatch) { return }
+
   $message = "$Label $FileName size $($Png.Width)x$($Png.Height) does not match requested $($Resolution.Width)x$($Resolution.Height)"
-  if ($mapped -and (Test-SizeEquals $Png $mapped)) {
-    Add-Warning $Warnings "$message; accepted as Qwen official mapped size $($mapped.Width)x$($mapped.Height)."
-  } elseif ($AllowResolutionMismatch) {
-    Add-Warning $Warnings $message
-  } else {
-    Add-Failure $Failures $message
-  }
+  Add-Failure $Failures $message
 }
 
 function Resolve-ArtifactPath {
@@ -294,10 +290,6 @@ function Add-Failure {
   $Failures.Add($Message) | Out-Null
 }
 
-function Add-Warning {
-  param([System.Collections.Generic.List[string]]$Warnings, [string]$Message)
-  $Warnings.Add($Message) | Out-Null
-}
 
 function Test-AcceptanceArtifacts {
   param(
@@ -307,7 +299,7 @@ function Test-AcceptanceArtifacts {
   )
 
   $failures = [System.Collections.Generic.List[string]]::new()
-  $warnings = [System.Collections.Generic.List[string]]::new()
+
   $rows = @(Import-Csv -LiteralPath $SummaryPath -Encoding UTF8)
   $resolution = Get-ResolutionObject $Resolution
 
@@ -362,14 +354,12 @@ function Test-AcceptanceArtifacts {
         Add-Failure $failures "$label empty file: $key ($pathValue)"
       }
     }
-    if (-not (Test-LiteralPathExists $paths.workflowNodes)) {
-      Add-Warning $warnings "$label missing optional workflowNodes ($($paths.workflowNodes))"
-    }
+
 
     if (Test-LiteralPathExists $paths.original) {
       try {
         $png = Read-PngInfo $paths.original
-        Add-ResolutionFinding $failures $warnings $label "original.png" $png $resolution
+        Add-ResolutionFinding $failures $label "original.png" $png $resolution
       } catch {
         Add-Failure $failures "$label original.png validation failed: $($_.Exception.Message)"
       }
@@ -379,7 +369,7 @@ function Test-AcceptanceArtifacts {
       try {
         $png = Read-PngInfo $paths.transparent
         if (-not $png.HasAlpha) { Add-Failure $failures "$label transparent.png missing alpha channel" }
-        Add-ResolutionFinding $failures $warnings $label "transparent.png" $png $resolution
+        Add-ResolutionFinding $failures $label "transparent.png" $png $resolution
       } catch {
         Add-Failure $failures "$label transparent.png validation failed: $($_.Exception.Message)"
       }
@@ -402,7 +392,7 @@ function Test-AcceptanceArtifacts {
         Add-Failure $failures "$label SVG XML validation failed: $($_.Exception.Message)"
       }
       if ($svg -notmatch "<svg[\s>]") { Add-Failure $failures "$label result.svg missing <svg> root element" }
-      if ($svg -notmatch "viewBox=") { Add-Warning $warnings "$label result.svg missing viewBox" }
+
       if ($svg -match "<image[\s>]" -or $svg -match "data:image/[^;]+;base64") {
         Add-Failure $failures "$label result.svg contains bitmap <image> or base64 data"
       }
@@ -410,8 +400,7 @@ function Test-AcceptanceArtifacts {
         Add-Failure $failures "$label result.svg missing editable vector elements"
       }
       if ($svg -notmatch "<g[\s>]") {
-        $message = "$label result.svg has no <g> group"
-        if ($StrictSvgGroups) { Add-Failure $failures $message } else { Add-Warning $warnings $message }
+        if ($StrictSvgGroups) { Add-Failure $failures "$label result.svg has no <g> group" }
       }
     }
 
@@ -455,7 +444,6 @@ function Test-AcceptanceArtifacts {
     Total = $rows.Count
     FailedRows = $failedRows.Count
     Failures = $failures
-    Warnings = $warnings
   }
 }
 
@@ -709,11 +697,8 @@ $report = Test-AcceptanceArtifacts -SummaryPath $summaryPath -ExpectedRows $expe
 Write-Host ""
 Write-Host "=== Acceptance result ===" -ForegroundColor Cyan
 Write-Host "summary: $summaryPath"
-Write-Host "Total: $($report.Total)  Failed rows: $($report.FailedRows)  Failures: $($report.Failures.Count)  Warnings: $($report.Warnings.Count)"
+Write-Host "Total: $($report.Total)  Failed rows: $($report.FailedRows)  Failures: $($report.Failures.Count)"
 
-$report.Warnings | Select-Object -First 20 | ForEach-Object {
-  Write-Host "WARN $_" -ForegroundColor Yellow
-}
 $report.Failures | Select-Object -First 50 | ForEach-Object {
   Write-Host "FAIL $_" -ForegroundColor Red
 }
@@ -721,7 +706,7 @@ $report.Failures | Select-Object -First 50 | ForEach-Object {
 Sync-AcceptanceHistoryIndex -OutputRoot $OutputRoot -SummaryPath $summaryPath
 
 if ($report.Failures.Count -gt 0) {
-  throw "Acceptance failed: $($report.Failures.Count) failures, $($report.Warnings.Count) warnings"
+  throw "Acceptance failed: $($report.Failures.Count) failures"
 }
 
 Write-Host "PASS $($config.Label)" -ForegroundColor Green
