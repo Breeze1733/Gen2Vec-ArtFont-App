@@ -66,7 +66,7 @@
       <div v-else-if="mode === 'batch'" class="gen-batch">
         <label class="field">
           <span>批量提示词（或上传文件 CSV/TXT/JSON）</span>
-          <textarea v-model="payload.batch" rows="5" placeholder="每行一条：文本 | 风格"></textarea>
+          <textarea v-model="payload.batch" rows="5" placeholder="每行一条：文本 | 风格 | 负面提示词(可选) | 种子(可选)&#10;例如：霓虹之风 | cyberpunk neon glow | 模糊,低质量"></textarea>
           <div class="batch-upload">
             <input type="file" accept=".txt,.csv,.json" @change="onBatchFileChange" />
           </div>
