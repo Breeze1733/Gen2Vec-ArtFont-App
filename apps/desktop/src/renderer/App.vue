@@ -182,6 +182,32 @@ const gpuDetectFailed = ref(false)
 const hasUsableGpu = ref(false)
 const gpuTier = ref('unknown') // 'discrete' | 'integrated' | 'unknown' | 'none'
 
+// 从 WebGL renderer 字符串中提取可读的 GPU 名称
+// ANGLE: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Laptop GPU (0x000028E0) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+//   → 提取 "NVIDIA GeForce RTX 4060"
+// 非 ANGLE: "NVIDIA GeForce RTX 4060 Laptop GPU/PCIe/SSE2" → 取前几个词
+const _extractGpuLabel = (renderer) => {
+  if (!renderer) return ''
+  if (renderer.startsWith('ANGLE (')) {
+    const inner = renderer.slice('ANGLE ('.length, renderer.lastIndexOf(')'))
+    if (inner) {
+      const parts = inner.split(',')
+      if (parts.length >= 2) {
+        let gpuName = parts[1].trim()
+        // 截断到第一个 (0x… 或 Direct3D 之前
+        const cutoff = gpuName.search(/\s*\(0x[0-9A-Fa-f]+\)|\s*Direct3D/)
+        if (cutoff > 0) gpuName = gpuName.substring(0, cutoff)
+        return gpuName
+      }
+      return parts[0]?.trim() || ''
+    }
+    return renderer
+  }
+  // 非 ANGLE：截取 GPU 名称部分（去掉引擎后缀如 /PCIe/SSE2、OpenGL Engine 等）
+  const name = renderer.split('/')[0].split(' OpenGL')[0].trim()
+  return name.split(' ').slice(0, 5).join(' ')
+}
+
 const detectGPU = () => {
   try {
     // 维度 1：WebGL UNMASKED_RENDERER_WEBGL
@@ -223,16 +249,17 @@ const detectGPU = () => {
 
     // 维度 3：综合判定
     const renderer = webglRenderer
+    const gpuLabel = _extractGpuLabel(renderer)
     if (renderer.includes('NVIDIA') || renderer.includes('AMD') || renderer.includes('Radeon')) {
-      gpuInfo.value = `独立显卡（${renderer.split(' ').slice(0, 2).join(' ')}）`
+      gpuInfo.value = gpuLabel ? `独立显卡（${gpuLabel}）` : `独立显卡（${renderer.substring(0, 30)}）`
       gpuTier.value = 'discrete'
       hasUsableGpu.value = true
     } else if (renderer.includes('Intel')) {
-      gpuInfo.value = '集成显卡（Intel）'
+      gpuInfo.value = gpuLabel ? `集成显卡（${gpuLabel}）` : '集成显卡（Intel）'
       gpuTier.value = 'integrated'
       hasUsableGpu.value = true
     } else if (renderer) {
-      gpuInfo.value = `GPU（${renderer.substring(0, 30)}）`
+      gpuInfo.value = `GPU（${gpuLabel || renderer.substring(0, 30)}）`
       gpuTier.value = 'unknown'
       hasUsableGpu.value = true
     } else {
