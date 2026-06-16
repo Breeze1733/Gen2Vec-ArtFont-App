@@ -1100,7 +1100,23 @@ const startGeneration = async () => {
               format: payload.format,
               seed: payload.seed,
               vector: JSON.parse(JSON.stringify(payload.vector))
-            }
+            },
+            batchItems: batchItems.value.map(item => ({
+              taskDir: item.taskDir,
+              taskName: item.taskName,
+              outputRoot: item.outputRoot,
+              paths: item.paths,
+              text: item.text,
+              prompt: item.prompt,
+              seed: item.metadata?.generation?.seed,
+              generationMs: item.stage1Ms,
+              vectorMs: item.stage2Ms,
+              status: item.status,
+              error: item.error,
+              rawStatus: item.rawStatus || item.status,
+              pngTransparency: item.metadata?.preprocess?.png_transparency,
+              svgFidelity: item.metadata?.quality?.svg_fidelity
+            }))
           }
         }
       } else {
@@ -1918,7 +1934,10 @@ const restoreHistoryItem = async (id) => {
     return
   }
 
-  const restoredMode = saved.inputParams?.mode || (item.mode === '矢量化' ? 'vectorize' : 'single')
+  const restoredMode = saved.inputParams?.mode
+    || (item.mode === '矢量化' ? 'vectorize'
+      : item.mode === '批量' ? 'batch'
+      : 'single')
 
   // 新数据：{ taskDir, paths, inputParams } —— 任务目录是真正的产物源
   if (saved.taskDir && saved.paths) {
