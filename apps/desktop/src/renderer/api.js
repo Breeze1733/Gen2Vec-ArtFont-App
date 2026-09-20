@@ -6,7 +6,7 @@
  */
 const TXT2IMG_URL = 'http://127.0.0.1:9001/api/v1/txt2img'
 const VECTORIZER_URL = 'http://127.0.0.1:8000/api/v1/vectorize'
-const TXT2IMG_WORKFLOW = ''  // 空字符串 = 使用后端降级链 (Flux → Z-Image → Stub)
+const TXT2IMG_WORKFLOW = ''  // 空字符串 = 由后端按文本内容自动路由（纯中文→Qwen，纯英文→Flux，中英混排→Z-Image）
 
 function ensureElectronApi(method) {
   if (!window.artTextApp?.[method]) {
