@@ -531,14 +531,30 @@ def _parse_resolution(resolution: str) -> tuple[int, int]:
 # 工作流降级链：按内容类型选择优先级
 _CHINESE_FALLBACK = ["qwen_image_2512_gguf", "test_z_image_turbo"]
 _ENGLISH_FALLBACK = ["flux_schnell", "test_z_image_turbo"]
+_MIXED_FALLBACK = ["test_z_image_turbo"]
+
+_ROUTE_CHAINS: dict[str, list[str]] = {
+    "chinese": _CHINESE_FALLBACK,
+    "english": _ENGLISH_FALLBACK,
+    "mixed": _MIXED_FALLBACK,
+}
 
 
-def _is_primarily_chinese(text: str) -> bool:
-    """Return True if the text has more Chinese characters than non-Chinese."""
-    if not text.strip():
-        return False
-    cn = len(re.findall(r"[一-鿿]", text))
-    return cn > 0 and cn >= len(text.strip()) * 0.5
+def _classify_text(text: str) -> str:
+    """按字母构成把文本分为 'chinese' / 'english' / 'mixed'。
+
+    只统计汉字与拉丁字母；数字、标点、符号、空白一律不参与判定，
+    因此 ``冰川 100%`` 归为纯中文。无字母的输入（纯数字/符号/空）
+    并入 'english'。
+    """
+    has_cjk = bool(re.search(r"[一-鿿]", text))
+    has_latin = bool(re.search(r"[A-Za-z]", text))
+
+    if has_cjk and has_latin:
+        return "mixed"
+    if has_cjk:
+        return "chinese"
+    return "english"
 
 
 def _extract_model_dependencies(workflow: dict, workflow_name: str = "") -> dict:
@@ -598,16 +614,15 @@ def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
     """依次尝试工作流降级链，全部失败则用本地 Pillow stub。
 
     - 用户显式指定了 workflow → 只尝试那一个
-    - 中文为主 → Qwen-Image → Z-Image
-    - 英文/其他 → Flux → Z-Image
+    - 纯中文 → Qwen-Image → Z-Image
+    - 纯英文（含无字母的纯数字/符号）→ Flux → Z-Image
+    - 中英混排 → Z-Image（单层，无兜底）
     """
     workflows_to_try: list[str]
     if request.workflow:
         workflows_to_try = [request.workflow]
-    elif _is_primarily_chinese(request.text):
-        workflows_to_try = list(_CHINESE_FALLBACK)
     else:
-        workflows_to_try = list(_ENGLISH_FALLBACK)
+        workflows_to_try = list(_ROUTE_CHAINS[_classify_text(request.text)])
 
     for idx, name in enumerate(workflows_to_try):
         try:

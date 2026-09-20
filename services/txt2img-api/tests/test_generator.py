@@ -14,6 +14,7 @@ from app.generator import (
     _build_negative_prompt,
     _build_zimage_prompt,
     _call_comfyui_api,
+    _classify_text,
     _find_nodes_by_class,
     _load_workflow,
     _local_stub_generate,
@@ -219,6 +220,44 @@ class TestLocalStubGenerate:
         assert "hello-world" in artifact.image_name
 
 
+# ── _classify_text ──
+
+
+class TestClassifyText:
+    """文本分类只统计字母，数字/符号/空白不参与判定。"""
+
+    @pytest.mark.parametrize("text", ["满庭芳", "念奴娇", "醉太平", "墨心堂"])
+    def test_pure_chinese(self, text: str) -> None:
+        assert _classify_text(text) == "chinese"
+
+    @pytest.mark.parametrize("text", ["ICE CRUSH", "TECHNO CORE", "VINTAGE CAFE"])
+    def test_pure_english(self, text: str) -> None:
+        assert _classify_text(text) == "english"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "咖啡 Latte 2.0",
+            "溯源 Source Code",
+            "汇智 AI Lab",
+            "灵动 UI Design",
+            "冰川 Ice 100%",
+        ],
+    )
+    def test_mixed_chinese_and_latin(self, text: str) -> None:
+        assert _classify_text(text) == "mixed"
+
+    @pytest.mark.parametrize("text", ["冰川 100%", "满庭芳 2026"])
+    def test_digits_are_invisible_to_detection(self, text: str) -> None:
+        """中文+数字（无拉丁字母）仍算纯中文。"""
+        assert _classify_text(text) == "chinese"
+
+    @pytest.mark.parametrize("text", ["2026", "100%", "3.14", "!!!", "", "   ", "---"])
+    def test_no_letters_falls_back_to_english(self, text: str) -> None:
+        """无字母（纯数字/符号/空）并入英文链，与既有行为一致。"""
+        assert _classify_text(text) == "english"
+
+
 # ── generate_artwork (fallback) ──
 
 
@@ -238,6 +277,60 @@ class TestGenerateArtwork:
         assert artifact.metadata["prompt"] == "晨曦之城"
         assert artifact.metadata["seed"] == 42
         assert artifact.metadata["resolution"] == "1024x1024"
+
+
+# ── 路由分派 ──
+
+
+class TestRouting:
+    """混排只走 z-image 单层链；纯中文/纯英文维持原链。"""
+
+    @staticmethod
+    def _attempted_workflows(monkeypatch: pytest.MonkeyPatch, text: str) -> list[str]:
+        # 打桩 ComfyUI 边界（而非断言 mock 行为），否则在装有 ComfyUI 的
+        # 机器上会真的跑一次最长 900s 的生成。断言的是真实路由产物。
+        monkeypatch.setattr("app.generator._call_comfyui_api", lambda request, workflow: None)
+        artifact = generate_artwork(GenerationRequest(text=text, prompt="test style"))
+        return artifact.metadata["attempted_workflows"]
+
+    def test_mixed_text_targets_z_image_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._attempted_workflows(monkeypatch, "咖啡 Latte 2.0") == ["test_z_image_turbo"]
+
+    def test_pure_chinese_targets_qwen_chain(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._attempted_workflows(monkeypatch, "满庭芳") == [
+            "qwen_image_2512_gguf",
+            "test_z_image_turbo",
+        ]
+
+    def test_pure_english_targets_flux_chain(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._attempted_workflows(monkeypatch, "ICE CRUSH") == [
+            "flux_schnell",
+            "test_z_image_turbo",
+        ]
+
+
+class TestMixedTextPromptTemplate:
+    """提示词模板跟的是「工作流」而非「路由分类」。
+
+    这是症状 1 修复的实际机制：把混排内容路由到 z-image 之后，必须
+    拿到中文模板，否则中文笔画问题原样存在。
+    """
+
+    def test_mixed_text_gets_zimage_chinese_template(self) -> None:
+        workflow = _load_workflow(_resolve_workflow_path("test_z_image_turbo"))
+        req = GenerationRequest(text="咖啡 Latte 2.0", prompt="咖啡质感")
+        patched = _patch_workflow(workflow, req)
+        text = _find_nodes_by_class(patched, "CLIPTextEncode")[0][1]["inputs"]["text"]
+        assert _ZIMAGE_BG_SUPPRESS in text
+        assert _FLUX_BG_SUPPRESS not in text
+
+    def test_mixed_text_prompt_keeps_both_scripts(self) -> None:
+        workflow = _load_workflow(_resolve_workflow_path("test_z_image_turbo"))
+        req = GenerationRequest(text="咖啡 Latte 2.0", prompt="咖啡质感")
+        patched = _patch_workflow(workflow, req)
+        text = _find_nodes_by_class(patched, "CLIPTextEncode")[0][1]["inputs"]["text"]
+        assert "咖 啡" in text       # 中文逐字拆开，强调字数为 2
+        assert "Latte 2.0" in text   # 英文原文保留
 
 
 # ── Prompt template: background suppression ──
