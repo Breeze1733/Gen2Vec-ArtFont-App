@@ -119,11 +119,14 @@ if (-not $Electron) {
 # -- 模型清单 --
 $HFBase = if ($NoMirror) { "https://huggingface.co" } else { "https://hf-mirror.com" }
 
+# 注意：Subdir 必须是 ComfyUI 实际解析到的目录。ComfyUI 把 diffusion_models 的搜索
+# 路径定义为 [models/unet, models/diffusion_models]（unet 在前），同名文件会被 unet/
+# 遮蔽 —— 遗留目录里留下截断的副本会顶掉完整文件（2026-06 曾因此使 Flux 完全不可用）。
 $Models = @(
     @{ Subdir = "diffusion_models"; Filename = "z_image_turbo_bf16.safetensors"
        Url = "$HFBase/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors"
        Size = "12.3 GB" },
-    @{ Subdir = "unet";              Filename = "flux1-schnell-fp8-e4m3fn.safetensors"
+    @{ Subdir = "diffusion_models";  Filename = "flux1-schnell-fp8-e4m3fn.safetensors"
        Url = "$HFBase/Kijai/flux-fp8/resolve/main/flux1-schnell-fp8-e4m3fn.safetensors"
        Size = "11.9 GB" },
     @{ Subdir = "text_encoders";     Filename = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
@@ -135,7 +138,7 @@ $Models = @(
     @{ Subdir = "text_encoders";     Filename = "qwen_3_4b.safetensors"
        Url = "$HFBase/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors"
        Size = "8.0 GB" },
-    @{ Subdir = "clip";              Filename = "t5xxl_fp8_e4m3fn.safetensors"
+    @{ Subdir = "text_encoders";     Filename = "t5xxl_fp8_e4m3fn.safetensors"
        Url = "$HFBase/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors"
        Size = "4.9 GB" },
     @{ Subdir = "loras";             Filename = "Qwen-Image-Lightning-4steps-V1.0.safetensors"
@@ -147,7 +150,7 @@ $Models = @(
     @{ Subdir = "vae";               Filename = "qwen_image_vae.safetensors"
        Url = "$HFBase/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors"
        Size = "254 MB" },
-    @{ Subdir = "clip";              Filename = "clip_l.safetensors"
+    @{ Subdir = "text_encoders";     Filename = "clip_l.safetensors"
        Url = "$HFBase/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors"
        Size = "246 MB" },
     @{ Subdir = "inspyrenet\.transparent-background"; Filename = "ckpt_base.pth"

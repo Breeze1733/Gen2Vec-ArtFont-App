@@ -411,17 +411,21 @@ function getComfyUIModelsDir(backendDir) {
   return path.join(getComfyUIPortableDir(backendDir), 'ComfyUI', 'models')
 }
 
+// 模型清单：subdir 必须是 ComfyUI 实际解析到的目录。
+// diffusion_models 组的搜索顺序是 [models/unet, models/diffusion_models]（unet 在前），
+// 同名文件会被 unet/ 遮蔽，所以 flux 放 diffusion_models，不能放 unet。
+// 遗留目录里若留下截断的副本，会静默顶掉这里检查的完整文件（2026-06 曾因此使 Flux 完全不可用）。
 const REQUIRED_MODEL_FILES = [
   ['diffusion_models', 'z_image_turbo_bf16.safetensors', 10 * 1024 ** 3, '12.3 GB'],
-  ['unet', 'flux1-schnell-fp8-e4m3fn.safetensors', 10 * 1024 ** 3, '11.9 GB'],
+  ['diffusion_models', 'flux1-schnell-fp8-e4m3fn.safetensors', 10 * 1024 ** 3, '11.9 GB'],
   ['text_encoders', 'qwen_2.5_vl_7b_fp8_scaled.safetensors', 8 * 1024 ** 3, '9.4 GB'],
   ['diffusion_models', 'qwen-image-2512-Q3_K_M.gguf', 7 * 1024 ** 3, '9 GB'],
   ['text_encoders', 'qwen_3_4b.safetensors', 6 * 1024 ** 3, '8.0 GB'],
-  ['clip', 't5xxl_fp8_e4m3fn.safetensors', 4 * 1024 ** 3, '4.9 GB'],
+  ['text_encoders', 't5xxl_fp8_e4m3fn.safetensors', 4 * 1024 ** 3, '4.9 GB'],
   ['loras', 'Qwen-Image-Lightning-4steps-V1.0.safetensors', 1 * 1024 ** 3, '1.7 GB'],
   ['vae', 'ae.safetensors', 200 * 1024 ** 2, '335 MB'],
   ['vae', 'qwen_image_vae.safetensors', 150 * 1024 ** 2, '254 MB'],
-  ['clip', 'clip_l.safetensors', 100 * 1024 ** 2, '246 MB'],
+  ['text_encoders', 'clip_l.safetensors', 100 * 1024 ** 2, '246 MB'],
   ['inspyrenet/.transparent-background', 'ckpt_base.pth', 150 * 1024 ** 2, '170 MB'],
 ]
 
