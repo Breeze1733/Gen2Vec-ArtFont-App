@@ -24,6 +24,7 @@ from app.generator import (
     _call_comfyui_api,
     _classify_text,
     _detect_layout_intent,
+    _detect_workflow_model,
     _find_nodes_by_class,
     _invert_negative,
     _load_workflow,
@@ -34,6 +35,7 @@ from app.generator import (
     _probe_negative_capability,
     _resolve_conditioning_nodes,
     _resolve_workflow_path,
+    GenerationArtifact,
     generate_artwork,
 )
 from app.models import GenerationRequest
@@ -70,9 +72,11 @@ class TestResolveWorkflowPath:
         assert path.exists(), f"Workflow file should exist at {path}"
         assert path.suffix == ".json"
 
-    def test_default_without_name_uses_txt2img_api(self) -> None:
+    def test_default_without_name_uses_flux_schnell(self) -> None:
+        """此前的默认值 txt2img_api.json 在 workflows/ 下并不存在，是死分支。"""
         path = _resolve_workflow_path()
-        assert path.name == "txt2img_api.json"
+        assert path.name == "flux_schnell.json"
+        assert path.exists()
 
     def test_appends_json_extension(self) -> None:
         path = _resolve_workflow_path("my_workflow")
@@ -779,6 +783,105 @@ class TestPatchWorkflowCleanup:
         req = GenerationRequest(text="满庭芳", prompt="水墨", negative_prompt="blurry")
         patched = _patch_workflow(workflow, req)
         assert patched["57:33"] == before["57:33"]
+
+
+# ── prompt_synthesis metadata ──
+
+
+class TestPromptSynthesisMetadata:
+    """metadata 里的 prompt_synthesis 是「实际用了哪个模型、注入了什么」的权威记录。"""
+
+    @staticmethod
+    def _run(monkeypatch: pytest.MonkeyPatch, request: GenerationRequest) -> tuple[dict, dict]:
+        """跑一次成功路径，返回 (metadata, 提交给 ComfyUI 的工作流)。"""
+        captured: dict = {}
+
+        def fake_call(req: GenerationRequest, workflow: dict) -> GenerationArtifact:
+            captured["workflow"] = copy.deepcopy(workflow)
+            # 镜像 _call_comfyui_api 真实返回的 legacy 键，才能验证合并不覆盖
+            return GenerationArtifact(
+                image_base64="data:image/png;base64,AAAA",
+                image_name="x.png",
+                metadata={
+                    "engine": "comfyui",
+                    "prompt": req.prompt,
+                    "negative_prompt": req.negative_prompt,
+                    "style": req.style,
+                },
+            )
+
+        monkeypatch.setattr(generator, "_call_comfyui_api", fake_call)
+        artifact = generate_artwork(request)
+        return artifact.metadata, captured["workflow"]
+
+    def test_positive_prompt_matches_injected_node(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """最强一致性断言：metadata 的正向串必须与产物里注入的内容逐字相等。"""
+        request = GenerationRequest(text="咖啡 Latte 2.0", prompt="咖啡质感")
+        metadata, workflow = self._run(monkeypatch, request)
+
+        resolved = _resolve_conditioning_nodes(workflow)
+        inputs = workflow[resolved.positive_node_id]["inputs"]
+        injected = inputs.get("t5xxl") or inputs.get("text")
+
+        assert metadata["prompt_synthesis"]["positive_prompt"] == injected
+
+    def test_legacy_keys_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        request = GenerationRequest(
+            text="满庭芳", prompt="水墨", negative_prompt="blurry", style="default"
+        )
+        metadata, _ = self._run(monkeypatch, request)
+
+        assert metadata["prompt"] == "水墨"          # 用户原始风格串，不是合成串
+        assert metadata["negative_prompt"] == "blurry"
+        assert metadata["style"] == "default"
+        assert metadata["fallback_tier"] == 0
+        assert metadata["workflow_used"] == "qwen_image_2512_gguf"
+
+    def test_text_profile_matches_routing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for text, expected in [("满庭芳", "chinese"), ("ICE CRUSH", "english"), ("咖啡 Latte 2.0", "mixed")]:
+            metadata, _ = self._run(monkeypatch, GenerationRequest(text=text, prompt="风格"))
+            assert metadata["prompt_synthesis"]["text_profile"] == expected
+            assert metadata["prompt_synthesis"]["text_profile"] == _classify_text(text)
+
+    def test_negative_strategy_matches_capability(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 纯中文 -> qwen（cfg=2.5，负面真正生效）
+        m_cn, _ = self._run(monkeypatch, GenerationRequest(text="满庭芳", prompt="水墨"))
+        assert m_cn["prompt_synthesis"]["negative_strategy"] == "negative-conditioning"
+        assert m_cn["prompt_synthesis"]["negative_capability"]["effective"] is True
+
+        # 混排 -> z-image（无负面节点且 cfg=1）
+        m_mixed, _ = self._run(monkeypatch, GenerationRequest(text="咖啡 Latte 2.0", prompt="咖啡"))
+        assert m_mixed["prompt_synthesis"]["negative_strategy"] == "positive-inversion"
+        assert m_mixed["prompt_synthesis"]["negative_capability"]["effective"] is False
+        assert m_mixed["prompt_synthesis"]["negative_written_to"] is None
+
+    def test_no_raw_text_quoted_in_positive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        text = "咪哄之风 98% hey you"
+        metadata, _ = self._run(monkeypatch, GenerationRequest(text=text, prompt="酷炫"))
+        assert f'"{text}"' not in metadata["prompt_synthesis"]["positive_prompt"]
+
+    def test_clip_l_risk_only_reported_for_flux(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """clip_l 只有 flux 家族在用；其余家族报「截断风险」会误导。"""
+        # 纯英文 -> flux，clip_l 真正被写入
+        m_flux, _ = self._run(monkeypatch, GenerationRequest(text="ICE CRUSH", prompt="frozen"))
+        assert m_flux["prompt_synthesis"]["clip_l_used"] is True
+        assert isinstance(m_flux["prompt_synthesis"]["clip_l_truncation_risk"], bool)
+
+        # 混排 -> z-image，单 text 输入，无 clip_l
+        m_z, _ = self._run(monkeypatch, GenerationRequest(text="咖啡 Latte 2.0", prompt="咖啡"))
+        assert m_z["prompt_synthesis"]["clip_l_used"] is False
+        assert m_z["prompt_synthesis"]["clip_l_truncation_risk"] is None
+
+    def test_stub_metadata_has_prompt_synthesis(self, sample_request: GenerationRequest) -> None:
+        artifact = _local_stub_generate(sample_request)
+        block = artifact.metadata["prompt_synthesis"]
+        assert block["version"] == 1
+        assert block["applied"] is False
+        assert block["text_profile"] == "english"      # sample_request 的 text 为空
+
+    def test_stub_block_carries_text_profile(self) -> None:
+        artifact = _local_stub_generate(GenerationRequest(text="满庭芳", prompt="水墨"))
+        assert artifact.metadata["prompt_synthesis"]["text_profile"] == "chinese"
 
 
 # ── Prompt template: background suppression ──

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import io
 import json
 import logging
@@ -22,18 +23,6 @@ from PIL import Image, ImageDraw, ImageFont
 from .models import GenerationRequest
 
 logger = logging.getLogger(__name__)
-
-
-# ── Default node ID mappings (fallback when class_type scanning fails) ──
-DEFAULT_NODE_IDS: dict[str, str] = {
-    "checkpoint": "4",
-    "empty_latent": "5",
-    "positive": "6",
-    "negative": "7",
-    "sampler": "3",
-    "vae_decode": "8",
-    "save_image": "9",
-}
 
 
 # ── Environment variable defaults ──
@@ -82,7 +71,7 @@ def _resolve_workflow_path(workflow_name: str = "") -> Path:
         name = workflow_name if workflow_name.endswith(".json") else f"{workflow_name}.json"
         return workflows_dir / name
 
-    return workflows_dir / "txt2img_api.json"
+    return workflows_dir / "flux_schnell.json"
 
 
 def _load_workflow(path: Path) -> dict:
@@ -501,11 +490,6 @@ def _build_flux_prompt(text: str, style_prompt: str) -> str:
 def _build_zimage_prompt(text: str, style_prompt: str) -> str:
     """Build Z-Image prompt — text accuracy guard only, style from user."""
     return _render_for(text, style_prompt, _ZIMAGE_PROFILE)
-
-
-def _build_text_art_prompt(text: str, style_prompt: str, model: str = "unknown") -> str:
-    """Dispatch to the right prompt profile based on detected model family."""
-    return _render_for(text, style_prompt, _MODEL_PROFILE.get(model, _FLUX_PROFILE))
 
 
 # Qwen-Image 官方支持的 7 种分辨率
@@ -985,6 +969,88 @@ def _plan_prompt(
     )
 
 
+_SYNTHESIS_VERSION = 1
+
+
+def _build_synthesis_block(plan: PromptPlan) -> dict[str, Any]:
+    """记录「实际注入了什么」。
+
+    ``positive_prompt`` 是权威值——必须与产物 ``workflow_api.json`` 里
+    对应节点的内容逐字相等。
+    """
+    cap = plan.capability
+    return {
+        "version": _SYNTHESIS_VERSION,
+        "applied": True,
+        "profile": plan.profile_key,
+        "section_order": list(_SECTION_ORDER),
+        "text_profile": plan.analysis.script,
+        "normalized_text": plan.analysis.stripped,
+        "hanzi_count": plan.analysis.hanzi_count,
+        "residue": plan.analysis.residue,
+        "symbols": list(plan.analysis.symbols),
+        "layout_intent_detected": plan.layout_intent_detected,
+        "positive_prompt": plan.positive_prompt,
+        "positive_sha256": hashlib.sha256(plan.positive_prompt.encode("utf-8")).hexdigest()[:16],
+        # clip_l 只有 flux 家族在用（CLIPTextEncodeFlux 的双文本输入）。
+        # 其余家族写的是单 text 输入，报告「截断风险」会误导。
+        "clip_l_used": plan.profile_key == "flux",
+        "clip_l": plan.clip_l_positive,
+        "clip_l_token_estimate": plan.clip_l_token_estimate,
+        "clip_l_truncation_risk": (
+            plan.clip_l_token_estimate > 70 if plan.profile_key == "flux" else None
+        ),
+        "negative_strategy": plan.negative_strategy,
+        "negative_written_to": cap.negative_node_id if cap else None,
+        "negative_capability": (
+            {
+                "effective": cap.effective,
+                "reason": cap.reason,
+                "blockers": list(cap.blockers),
+                "cfg": cap.cfg,
+                "negative_node_id": cap.negative_node_id,
+                "negative_chain_class": cap.negative_chain_class,
+                "derived_from_positive": cap.derived_from_positive,
+            }
+            if cap
+            else None
+        ),
+        "inversion": {
+            "matched": list(plan.inversion.matched),
+            "covered": list(plan.inversion.covered),
+            "injected_clauses": list(plan.inversion.clauses),
+            "unmapped_terms": list(plan.inversion.unmapped_terms),
+        },
+    }
+
+
+def _build_stub_synthesis_block(request: GenerationRequest) -> dict[str, Any]:
+    """stub 不构造提示词，但仍发同名的键，保证消费方可无条件读取。"""
+    return {
+        "version": _SYNTHESIS_VERSION,
+        "applied": False,
+        "text_profile": _analyze_text(request.text).script,
+        "note": "local stub 不构造提示词，未提交 ComfyUI",
+    }
+
+
+def _log_prompt_plan(plan: PromptPlan, workflow_name: str) -> None:
+    logger.info(
+        "prompt plan: workflow=%s profile=%s text=%s strategy=%s negative_effective=%s",
+        workflow_name,
+        plan.profile_key,
+        plan.analysis.script,
+        plan.negative_strategy,
+        plan.capability.effective if plan.capability else None,
+    )
+    if plan.inversion.unmapped_terms:
+        logger.warning(
+            "负面词不在反演词表内，已丢弃且不注入：%s", list(plan.inversion.unmapped_terms)
+        )
+    if plan.inversion.covered:
+        logger.info("负面词已由既有正向段覆盖，不重复注入：%s", list(plan.inversion.covered))
+
+
 def _write_text_node(node: dict, text: str, clip_l: str) -> None:
     """CLIPTextEncodeFlux 有 clip_l 与 t5xxl 两个文本输入；普通节点只有一个。"""
     if node.get("class_type") == "CLIPTextEncodeFlux":
@@ -1228,6 +1294,7 @@ def _local_stub_generate(
         "fallback_tier": -1,
         "workflow_used": "",
         "attempted_workflows": attempted_workflows or [],
+        "prompt_synthesis": _build_stub_synthesis_block(request),
     }
 
     return GenerationArtifact(image_base64=image_base64, image_name=image_name, metadata=metadata)
@@ -1347,13 +1414,18 @@ def generate_artwork(request: GenerationRequest) -> GenerationArtifact:
         try:
             workflow_path = _resolve_workflow_path(name)
             workflow = _load_workflow(workflow_path)
-            patched = _patch_workflow(workflow, request)
+            model = _detect_workflow_model(workflow)
+            capability = _probe_negative_capability(workflow)
+            plan = _plan_prompt(request, model, capability)
+            patched = _patch_workflow(workflow, request, plan=plan)
             result = _call_comfyui_api(request, patched)
             if result is not None:
                 logger.info("Workflow '%s' succeeded (tier=%d)", name, idx)
+                _log_prompt_plan(plan, name)
                 result.metadata["fallback_tier"] = idx
                 result.metadata["workflow_used"] = name
                 result.metadata["attempted_workflows"] = workflows_to_try
+                result.metadata["prompt_synthesis"] = _build_synthesis_block(plan)
                 model_deps = _extract_model_dependencies(patched, workflow_name=name)
                 return GenerationArtifact(
                     image_base64=result.image_base64,
