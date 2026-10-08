@@ -407,7 +407,13 @@ JSON 输入示例：
     "resolution": "1024x1024",
     "seed": 42,
     "fallback_tier": 0,
-    "workflow_used": "qwen_image_2512_gguf"
+    "workflow_used": "qwen_image_2512_gguf",
+    "prompt_synthesis": {
+      "profile": "zimage",
+      "positive_prompt": "纯色背景，…，文字内容为\"七 里 香\"，不多不少正好3个字，…",
+      "negative_strategy": "negative-conditioning",
+      "inversion": { "unmapped_terms": [] }
+    }
   },
   "workflow_api": {},
   "model_dependencies": {}
@@ -510,8 +516,9 @@ JSON 输入示例：
 
 | 文本类型 | 优先级 1 | 优先级 2 | 兜底 |
 | --- | --- | --- | --- |
-| 中文为主 | `qwen_image_2512_gguf` | `test_z_image_turbo` | Pillow stub |
-| 英文或其他 | `flux_schnell` | `test_z_image_turbo` | Pillow stub |
+| 纯中文 | `qwen_image_2512_gguf` | `test_z_image_turbo` | Pillow stub |
+| 纯英文 | `flux_schnell` | `test_z_image_turbo` | Pillow stub |
+| 中英混排 | `test_z_image_turbo` | — | Pillow stub |
 
 `WORKFLOW_PATH` 环境变量优先级最高，会直接指定工作流 JSON 路径。
 
