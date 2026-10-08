@@ -12,8 +12,9 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 from PIL import Image, ImageDraw, ImageFont
@@ -109,6 +110,119 @@ def _find_nodes_by_class(workflow: dict, class_type: str) -> list[tuple[str, dic
     return [(nid, node) for nid, node in workflow.items() if node.get("class_type") == class_type]
 
 
+# ── 文本分析：路由与提示词模板共用的唯一真相源 ──
+
+_CJK_RE = re.compile(r"[一-鿿]")
+_LATIN_RUN_RE = re.compile(r"[A-Za-z]+")
+_DIGIT_RUN_RE = re.compile(r"\d+(?:[.,]\d+)*")
+_WS_RE = re.compile(r"\s+")
+
+# residue 两端需要剥离的包围分隔符（避免 ", 100% ," 这类残留）
+_RESIDUE_TRIM = " \t,，、;；:：.。"
+
+# 会被提示词单独点名的符号集。空白与字母数字不属于符号。
+_NOTABLE_SYMBOLS = frozenset(
+    "%.,:;!?&@#+-=/*~^|$¥€￥°·…—'\"()[]{}「」『』《》【】"
+)
+
+
+@dataclass(frozen=True)
+class TextAnalysis:
+    """一次拆分出汉字 / 拉丁 / 数字 / 符号，供路由与提示词模板共用。
+
+    ``residue``（原文去掉全部汉字后的剩余串）是修复「文字被渲染两遍」的关键：
+    它**永远不含汉字**，因此可以安全地被「同时包含」子句引用。
+    """
+
+    raw: str
+    stripped: str
+    hanzi: tuple[str, ...]
+    latin_runs: tuple[str, ...]
+    digit_runs: tuple[str, ...]
+    symbols: tuple[str, ...]
+    script: str
+
+    @property
+    def has_hanzi(self) -> bool:
+        return bool(self.hanzi)
+
+    @property
+    def has_latin(self) -> bool:
+        return bool(self.latin_runs)
+
+    @property
+    def has_digits(self) -> bool:
+        return bool(self.digit_runs)
+
+    @property
+    def has_symbols(self) -> bool:
+        return bool(self.symbols)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.stripped
+
+    @property
+    def hanzi_count(self) -> int:
+        return len(self.hanzi)
+
+    @property
+    def max_latin_run(self) -> int:
+        """最长拉丁片段长度。旧模板用 ``[a-zA-Z]{2,}`` 判定，会漏掉长度为 1 的片段。"""
+        return max((len(run) for run in self.latin_runs), default=0)
+
+    @property
+    def hanzi_spaced(self) -> str:
+        """汉字逐字空格拆分——强制模型一个字一个字画，降低连笔与漏字。"""
+        return " ".join(self.hanzi)
+
+    @property
+    def symbols_spaced(self) -> str:
+        return " ".join(self.symbols)
+
+    @property
+    def residue(self) -> str:
+        """原文去掉全部汉字后的剩余串（已归一化空白与两端分隔符）。
+
+        ``"咪哄之风 98% hey you"`` -> ``"98% hey you"``
+        ``"咖啡 Latte 2.0"``       -> ``"Latte 2.0"``
+        ``"单依纯 X"``             -> ``"X"``
+        ``"满庭芳"``               -> ``""``
+        """
+        s = _CJK_RE.sub("", self.stripped)
+        s = _WS_RE.sub(" ", s).strip()
+        return s.strip(_RESIDUE_TRIM)
+
+
+@lru_cache(maxsize=256)
+def _analyze_text(text: str) -> TextAnalysis:
+    """纯函数，字段全为 str/tuple → 可哈希可缓存。"""
+    stripped = _WS_RE.sub(" ", text.strip())
+
+    hanzi = tuple(_CJK_RE.findall(stripped))
+    latin_runs = tuple(_LATIN_RUN_RE.findall(stripped))
+    digit_runs = tuple(_DIGIT_RUN_RE.findall(stripped))
+    symbols = tuple(dict.fromkeys(ch for ch in stripped if ch in _NOTABLE_SYMBOLS))
+
+    if hanzi and latin_runs:
+        script = "mixed"
+    elif hanzi:
+        script = "chinese"
+    else:
+        # 纯拉丁，以及无字母（纯数字/符号/空）—— 与既有路由契约一致
+        script = "english"
+
+    return TextAnalysis(
+        raw=text,
+        stripped=stripped,
+        hanzi=hanzi,
+        latin_runs=latin_runs,
+        digit_runs=digit_runs,
+        symbols=symbols,
+        script=script,
+    )
+
+
 # ── Prompt template engine ──
 
 # 背景抑制前缀 — 要求模型生成干净、易抠图的纯色背景
@@ -161,85 +275,237 @@ def _detect_workflow_model(workflow: dict) -> str:
     return "unknown"
 
 
+# ── Profile 化的提示词渲染 ──
+#
+# 单一渲染器 + 数据化 profile：渲染流程零分支，两个模型家族的差异全部落在数据上。
+
+# 段落顺序。布局由用户在 ``prompt`` 里自由书写（不拆字段），
+# 因此「把风格段提前到内容约束之前」就是让用户意图排在固定约束前面的落地方式。
+_SECTION_ORDER = ("background", "style", "layout", "content", "accuracy", "inversion")
+
+# 版式意图关键词：命中则发中性版式段，不覆盖用户自己写的排布要求。
+_LAYOUT_INTENT_RE = re.compile(
+    r"布局|版式|排列|排版|居中|中间|错落|上下|左右|左上|右上|左下|右下|"
+    r"角落|底层|顶层|位置|大小|倾斜|横排|竖排|"
+    r"layout|arrang|centered|centred|vertical|stacked|baseline|align",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class PromptRule:
+    """一条提示词子句规则。
+
+    ``section`` 决定它落在哪一段；``fires`` 决定它是否触发；
+    ``suppresses`` 列出它触发时需要屏蔽的同表其他 key——例如 residue
+    已经把数字点名，就不必再单独强调数字。
+    """
+
+    section: str
+    key: str
+    fires: Callable[[TextAnalysis], bool]
+    template: str
+    suppresses: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RenderProfile:
+    key: str
+    lang: str          # 'en' | 'zh' —— 同时决定反演词表取哪一语言的子句
+    joiner: str
+    bg_suppress: str
+    layout: str
+    layout_neutral: str
+    rules: tuple[PromptRule, ...]
+
+
+@dataclass(frozen=True)
+class RenderContext:
+    analysis: TextAnalysis
+    style_prompt: str
+    profile: RenderProfile
+    layout_intent_detected: bool = False
+    inverted_clauses: tuple[str, ...] = ()
+
+
+_FLUX_PROFILE = RenderProfile(
+    key="flux",
+    lang="en",
+    joiner=", ",
+    bg_suppress=_FLUX_BG_SUPPRESS,
+    layout=(
+        "layout: centered composition, single horizontal line of lettering "
+        "on one baseline, even character spacing, front-facing flat view, "
+        "generous margins"
+    ),
+    layout_neutral="layout: follow the arrangement described in the style description above",
+    rules=(
+        PromptRule(
+            "content", "hanzi", lambda a: a.has_hanzi,
+            'Chinese text "{hanzi_spaced}", exactly {hanzi_count} characters',
+        ),
+        PromptRule(
+            "content", "residue", lambda a: a.has_hanzi and bool(a.residue),
+            'alongside additional characters "{residue}"',
+            suppresses=("digits", "symbols"),
+        ),
+        PromptRule(
+            "content", "literal", lambda a: not a.has_hanzi and bool(a.stripped),
+            'text "{stripped}"',
+        ),
+        PromptRule(
+            "content", "digits", lambda a: a.has_digits,
+            "accurate digits, no repeated digits",
+        ),
+        PromptRule(
+            "content", "symbols", lambda a: a.has_symbols,
+            'includes the symbol "{symbols_spaced}" drawn accurately',
+        ),
+        PromptRule(
+            "accuracy", "hanzi_accuracy", lambda a: a.has_hanzi,
+            "accurate strokes, complete radicals, no missing character, "
+            "no extra character, no repeated character",
+        ),
+        PromptRule(
+            "accuracy", "latin_accuracy", lambda a: a.has_latin,
+            "crisp letterforms, perfect typography, no duplicate letters",
+        ),
+    ),
+)
+
+_ZIMAGE_PROFILE = RenderProfile(
+    key="zimage",
+    lang="zh",
+    joiner="，",
+    bg_suppress=_ZIMAGE_BG_SUPPRESS,
+    layout="版式：文字居中排布，单行水平排列，字距均匀，正面平视视角，四周留白充足",
+    layout_neutral="版式：遵循上述风格描述中给出的排布方式",
+    rules=(
+        PromptRule(
+            "content", "hanzi", lambda a: a.has_hanzi,
+            '文字内容为"{hanzi_spaced}"，不多不少正好{hanzi_count}个字',
+        ),
+        PromptRule(
+            "content", "residue", lambda a: a.has_hanzi and bool(a.residue),
+            '同时包含"{residue}"',
+            suppresses=("digits", "symbols"),
+        ),
+        PromptRule(
+            "content", "literal", lambda a: not a.has_hanzi and bool(a.stripped),
+            '文字内容为"{stripped}"',
+        ),
+        PromptRule(
+            "content", "digits", lambda a: a.has_digits,
+            "数字大小比例正确，清晰可辨，不重不漏",
+        ),
+        PromptRule(
+            "content", "symbols", lambda a: a.has_symbols,
+            '包含符号"{symbols_spaced}"，形状准确、清晰可辨',
+        ),
+        PromptRule(
+            "accuracy", "hanzi_accuracy", lambda a: a.has_hanzi,
+            "不丢字不缺字，不重字不多字，每个字笔画完整结构正确",
+        ),
+        PromptRule(
+            "accuracy", "latin_accuracy", lambda a: a.has_latin,
+            "字母与数字大小比例正确、清晰可辨，不重复不遗漏",
+        ),
+    ),
+)
+
+# 家族 → profile。查表取代 if/elif，顺带消除「未知 model 落到函数末尾返回 None」的隐患。
+_MODEL_PROFILE: dict[str, RenderProfile] = {
+    "flux": _FLUX_PROFILE,
+    "zimage": _ZIMAGE_PROFILE,
+    "qwen_image": _ZIMAGE_PROFILE,
+    "unknown": _FLUX_PROFILE,
+}
+
+
+def _detect_layout_intent(style_prompt: str) -> bool:
+    """用户是否已在风格描述里表达了版式意图。
+
+    命中则发中性版式段，避免默认版式覆盖用户自己的排布要求。
+    """
+    return bool(_LAYOUT_INTENT_RE.search(style_prompt))
+
+
+def _render_rules(section: str, ctx: RenderContext) -> list[str]:
+    analysis = ctx.analysis
+    suppressed: set[str] = set()
+    parts: list[str] = []
+    for rule in ctx.profile.rules:
+        if rule.section != section or rule.key in suppressed:
+            continue
+        if not rule.fires(analysis):
+            continue
+        parts.append(
+            rule.template.format(
+                hanzi_spaced=analysis.hanzi_spaced,
+                hanzi_count=analysis.hanzi_count,
+                residue=analysis.residue,
+                stripped=analysis.stripped,
+                symbols_spaced=analysis.symbols_spaced,
+            )
+        )
+        suppressed.update(rule.suppresses)
+    return parts
+
+
+def _render_section(key: str, ctx: RenderContext) -> list[str]:
+    profile = ctx.profile
+    if key == "background":
+        return [profile.bg_suppress]
+    if key == "style":
+        style = ctx.style_prompt.strip()
+        return [style] if style else []
+    if key == "layout":
+        if ctx.analysis.is_empty:
+            return []       # 没有文字就无需版式引导
+        return [profile.layout_neutral if ctx.layout_intent_detected else profile.layout]
+    if key in ("content", "accuracy"):
+        return _render_rules(key, ctx)
+    if key == "inversion":
+        return list(ctx.inverted_clauses)
+    return []
+
+
+def _render_prompt(ctx: RenderContext) -> str:
+    parts: list[str] = []
+    for key in _SECTION_ORDER:
+        parts.extend(_render_section(key, ctx))
+    return ctx.profile.joiner.join(p for p in parts if p)
+
+
+def _render_for(
+    text: str,
+    style_prompt: str,
+    profile: RenderProfile,
+    inverted_clauses: tuple[str, ...] = (),
+) -> str:
+    ctx = RenderContext(
+        analysis=_analyze_text(text),
+        style_prompt=style_prompt,
+        profile=profile,
+        layout_intent_detected=_detect_layout_intent(style_prompt),
+        inverted_clauses=inverted_clauses,
+    )
+    return _render_prompt(ctx)
+
+
 def _build_flux_prompt(text: str, style_prompt: str) -> str:
     """Build Flux.1 prompt — text accuracy guard only, style from user."""
-    if not text.strip():
-        return style_prompt
-
-    has_chinese = bool(re.search(r"[一-鿿]", text))
-    has_english = bool(re.search(r"[a-zA-Z]{2,}", text))
-    has_number = bool(re.search(r"\d", text))
-
-    parts = [_FLUX_BG_SUPPRESS]
-
-    if has_chinese:
-        cn_chars = re.findall(r"[一-鿿]", text)
-        cn_count = len(cn_chars)
-        char_list = " ".join(cn_chars)
-        parts.append(
-            f'Chinese text "{char_list}", exactly {cn_count} characters, '
-            "accurate strokes, complete radicals, "
-            "no missing character, no extra character, no repeated character"
-        )
-        if has_english:
-            parts.append("crisp letterforms, perfect typography")
-    elif has_english:
-        parts.append(
-            f'text "{text}", crisp typography, perfect letterforms, no duplicate letters'
-        )
-    else:
-        parts.append(f'text "{text}"')
-
-    if has_number:
-        parts.append("accurate digits, no repeated digits")
-
-    if style_prompt.strip():
-        parts.append(style_prompt.strip())
-
-    return ", ".join(parts) if parts else style_prompt
+    return _render_for(text, style_prompt, _FLUX_PROFILE)
 
 
 def _build_zimage_prompt(text: str, style_prompt: str) -> str:
     """Build Z-Image prompt — text accuracy guard only, style from user."""
-    if not text.strip():
-        return style_prompt
-
-    has_chinese = bool(re.search(r"[一-鿿]", text))
-    has_english = bool(re.search(r"[a-zA-Z]{2,}", text))
-    has_number = bool(re.search(r"\d", text))
-
-    parts = [_ZIMAGE_BG_SUPPRESS]
-
-    if has_chinese:
-        cn_chars = re.findall(r"[一-鿿]", text)
-        cn_count = len(cn_chars)
-        char_list = " ".join(cn_chars)
-        parts.append(
-            f'文字内容为"{char_list}"，不多不少正好{cn_count}个字，'
-            "不丢字不缺字，不重字不多字，每个字笔画完整结构正确"
-        )
-        if has_english:
-            parts.append(f'同时包含英文"{text}"，字母清晰比例正确')
-    elif has_english:
-        parts.append(f'文字内容为"{text}"，字母清晰，间距合理，不重复不遗漏')
-    else:
-        parts.append(f'文字内容为"{text}"')
-
-    if has_number:
-        parts.append("数字大小比例正确，清晰可辨，不重不漏")
-
-    if style_prompt.strip():
-        parts.append(style_prompt.strip())
-
-    return "，".join(parts) if parts else style_prompt
+    return _render_for(text, style_prompt, _ZIMAGE_PROFILE)
 
 
 def _build_text_art_prompt(text: str, style_prompt: str, model: str = "unknown") -> str:
-    """Dispatch to the right prompt builder based on detected model family."""
-    if model in ("flux", "unknown"):
-        return _build_flux_prompt(text, style_prompt)
-    elif model in ("zimage", "qwen_image"):
-        return _build_zimage_prompt(text, style_prompt)
+    """Dispatch to the right prompt profile based on detected model family."""
+    return _render_for(text, style_prompt, _MODEL_PROFILE.get(model, _FLUX_PROFILE))
 
 
 # Qwen-Image 官方支持的 7 种分辨率
@@ -284,32 +550,485 @@ def _build_negative_prompt(user_negative: str = "") -> str:
     return _DEFAULT_NEGATIVE
 
 
-def _patch_workflow(workflow: dict, request: GenerationRequest) -> dict:
-    """Deep-copy workflow and inject user parameters by scanning class_type.
+# ── 负面 conditioning 能力探测 ──
+#
+# 负面提示词并非在所有工作流上都真正生效：
+#   * cfg = 1 时采样器忽略负面 conditioning（flux_schnell 与 test_z_image_turbo 都是）
+#   * test_z_image_turbo 结构上就没有负面文本节点（负向由 ConditioningZeroOut 从正向派生）
+# 所以必须同时看 cfg 与节点结构，任一不满足都判定为「不生效」。
+
+_SAMPLER_CLASSES = ("KSampler", "KSamplerAdvanced")
+_TEXT_ENCODE_CLASSES = ("CLIPTextEncode", "CLIPTextEncodeFlux")
+
+# conditioning 直通节点：class_type -> 用于上溯的输入字段名
+_CONDITIONING_PASSTHROUGH = {"ConditioningZeroOut": "conditioning"}
+
+# cfg <= 该值视为负面 conditioning 失效
+_CFG_NEGATIVE_MIN = 1.05
+
+_BLOCKER_ORDER = ("no_sampler", "derived_from_positive", "no_negative_text_node", "cfg_too_low")
+
+
+@dataclass(frozen=True)
+class _ConditioningResolution:
+    positive_node_id: Optional[str]
+    negative_node_id: Optional[str]      # 能承载负面文本的节点；None 表示无处可写
+    negative_chain_class: Optional[str]  # negative 槽位直接指向的 class_type
+    derived_from_positive: bool
+
+
+@dataclass(frozen=True)
+class NegativeCapability:
+    has_sampler: bool
+    cfg: Optional[float]
+    positive_node_id: Optional[str]
+    negative_node_id: Optional[str]
+    negative_chain_class: Optional[str]
+    derived_from_positive: bool
+    effective: bool
+    reason: str
+    blockers: tuple[str, ...]
+
+
+def _node_sort_key(node_id: str) -> tuple[int, ...]:
+    """数字感知的节点排序键：``"57:27" -> (57, 27)``、``"9" -> (9,)``。
+
+    纯字符串排序会得出 ``"57:27" < "9"``，与人类直觉相反。
+    """
+    return tuple(int(n) for n in re.findall(r"\d+", node_id)) or (0,)
+
+
+def _ref_node_id(ref: Any) -> Optional[str]:
+    """解析 ``[node_id, slot]`` 形式的连线引用。"""
+    if isinstance(ref, (list, tuple)) and ref:
+        return str(ref[0])
+    if isinstance(ref, str):
+        return ref
+    return None
+
+
+def _resolve_conditioning_nodes(workflow: dict) -> _ConditioningResolution:
+    """解析正向 / 负向文本节点。
+
+    主路径顺 ``KSampler.positive`` / ``.negative`` 连线解析——**不依赖 JSON 字典插入序**，
+    否则一次重新导出就可能把正负向互换。无采样器时回退到数字感知的 id 序。
+    """
+    for node in workflow.values():
+        if node.get("class_type") not in _SAMPLER_CLASSES:
+            continue
+        inputs = node.get("inputs", {})
+        pos_id = _ref_node_id(inputs.get("positive"))
+        neg_id = _ref_node_id(inputs.get("negative"))
+        if pos_id is None or neg_id is None:
+            continue
+
+        neg_chain_class = workflow.get(neg_id, {}).get("class_type")
+
+        # 沿负向链路穿过 conditioning 直通节点，直到文本编码节点或断层
+        cursor: Optional[str] = neg_id
+        seen: set[str] = set()
+        derived = False
+        while cursor and cursor not in seen:
+            if cursor == pos_id:
+                derived = True
+                break
+            seen.add(cursor)
+            node_c = workflow.get(cursor, {})
+            ctype = node_c.get("class_type", "")
+            if ctype in _TEXT_ENCODE_CLASSES:
+                break
+            step = _CONDITIONING_PASSTHROUGH.get(ctype)
+            if not step:
+                cursor = None
+                break
+            cursor = _ref_node_id(node_c.get("inputs", {}).get(step))
+
+        negative_text_node: Optional[str] = None
+        if not derived and cursor and workflow.get(cursor, {}).get("class_type") in _TEXT_ENCODE_CLASSES:
+            negative_text_node = cursor
+
+        positive_text_node = (
+            pos_id if workflow.get(pos_id, {}).get("class_type") in _TEXT_ENCODE_CLASSES else None
+        )
+
+        return _ConditioningResolution(
+            positive_node_id=positive_text_node,
+            negative_node_id=negative_text_node,
+            negative_chain_class=neg_chain_class,
+            derived_from_positive=derived,
+        )
+
+    # 回退：无采样器连线可用时，按数字感知 id 序取前两个文本编码节点
+    text_nodes = sorted(
+        (nid for nid, n in workflow.items() if n.get("class_type") in _TEXT_ENCODE_CLASSES),
+        key=_node_sort_key,
+    )
+    return _ConditioningResolution(
+        positive_node_id=text_nodes[0] if text_nodes else None,
+        negative_node_id=text_nodes[1] if len(text_nodes) > 1 else None,
+        negative_chain_class=None,
+        derived_from_positive=False,
+    )
+
+
+def _probe_negative_capability(workflow: dict) -> NegativeCapability:
+    """判定该工作流能否真正兑现负面提示词。"""
+    res = _resolve_conditioning_nodes(workflow)
+    sampler = next(
+        (n for n in workflow.values() if n.get("class_type") in _SAMPLER_CLASSES), None
+    )
+    cfg_raw = (sampler or {}).get("inputs", {}).get("cfg")
+    cfg = float(cfg_raw) if isinstance(cfg_raw, (int, float)) else None
+
+    blockers: list[str] = []
+    if sampler is None:
+        blockers.append("no_sampler")
+    if res.derived_from_positive:
+        blockers.append("derived_from_positive")
+    elif res.negative_node_id is None:
+        blockers.append("no_negative_text_node")
+    if cfg is None or cfg <= _CFG_NEGATIVE_MIN:
+        blockers.append("cfg_too_low")
+
+    return NegativeCapability(
+        has_sampler=sampler is not None,
+        cfg=cfg,
+        positive_node_id=res.positive_node_id,
+        negative_node_id=res.negative_node_id,
+        negative_chain_class=res.negative_chain_class,
+        derived_from_positive=res.derived_from_positive,
+        effective=not blockers,
+        reason=next((b for b in _BLOCKER_ORDER if b in blockers), "ok"),
+        blockers=tuple(blockers),
+    )
+
+
+# ── 负面词语义反演 ──
+#
+# cfg=1 的工作流无法用负面 conditioning，改用「否定 -> 肯定」把负面词转成正向引导。
+# 硬规则：进入正向串的字符串**只能**来自下方词表的字面量，用户负面词本身永不注入
+# （把 "broken strokes" 放进正向串等于邀请模型画断裂笔画）。
+
+@dataclass(frozen=True)
+class InversionRule:
+    """一条「否定 -> 肯定」反演规则。
+
+    ``match`` 里的英文项须为小写（按小写干草堆匹配），中文项原样。
+    ``covered_by`` 非空表示该语义已由正向的某一段承担，只记账、不注入。
+    ``clause_en`` / ``clause_zh`` 内**禁止出现否定词**——否则等于把缺陷写进正向串。
+    """
+
+    key: str
+    match: tuple[str, ...]
+    clause_en: str
+    clause_zh: str
+    covered_by: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class InversionResult:
+    clauses: tuple[str, ...]         # 实际注入的正向子句
+    matched: tuple[str, ...]         # 命中的规则 key
+    covered: tuple[str, ...]         # 命中但被既有正向段覆盖
+    unmapped_terms: tuple[str, ...]  # 词表未覆盖的用户词，只上报、绝不注入
+
+
+_INVERSION_RULES: tuple[InversionRule, ...] = (
+    # —— 已被背景抑制段覆盖，只记账不注入 ——
+    InversionRule(
+        key="complex_background",
+        match=("complex background", "busy background", "detailed background",
+               "messy background", "cluttered layout", "杂乱背景", "复杂背景"),
+        clause_en="clean empty background",
+        clause_zh="干净空旷的背景",
+        covered_by="background",
+    ),
+    InversionRule(
+        key="scenery_background",
+        match=("scenery background", "landscape background", "environmental background",
+               "photographic background", "realistic setting", "风景背景", "环境背景"),
+        clause_en="abstract flat backdrop",
+        clause_zh="抽象平面底",
+        covered_by="background",
+    ),
+    InversionRule(
+        key="indoor_outdoor_scene",
+        match=("indoor scene", "outdoor scene", "室内场景", "室外场景"),
+        clause_en="pure graphic backdrop",
+        clause_zh="纯图形底",
+        covered_by="background",
+    ),
+    InversionRule(
+        key="gradient_pattern_bg",
+        match=("gradient background", "patterned texture", "渐变背景", "图案背景"),
+        clause_en="uniform single-color fill",
+        clause_zh="均匀纯色填充",
+        covered_by="background",
+    ),
+    # —— 已被 accuracy 段覆盖，只记账不注入 ——
+    InversionRule(
+        key="broken_missing_strokes",
+        match=("broken strokes", "missing strokes", "断笔", "缺笔", "笔画断裂"),
+        clause_en="each glyph fully formed with complete closed strokes",
+        clause_zh="每个字笔画完整、结构闭合",
+        covered_by="accuracy",
+    ),
+    InversionRule(
+        key="wrong_garbled_text",
+        match=("wrong characters", "garbled text", "错字", "乱码"),
+        clause_en="every glyph is a correct, legible character",
+        clause_zh="每个字都是正确可读的汉字",
+        covered_by="accuracy",
+    ),
+    InversionRule(
+        key="duplicate_characters",
+        match=("duplicate characters", "repeated characters", "extra character",
+               "wrong character count", "重字", "多字", "重复字"),
+        clause_en="exactly the specified character count, each glyph appears once",
+        clause_zh="字数与指定完全一致，每个字只出现一次",
+        covered_by="accuracy",
+    ),
+    # —— 需要真正注入的正向引导 ——
+    InversionRule(
+        key="blurry_low_quality",
+        match=("blurry text", "low quality", "jpeg artifacts", "deformed text",
+               "模糊", "低清晰度", "畸变"),
+        clause_en="sharp high-resolution edges, crisp vector-clean outlines",
+        clause_zh="边缘锐利、高清、矢量感清晰的字形",
+    ),
+    InversionRule(
+        key="watermark",
+        match=("watermark", "text signature", "水印", "署名", "落款"),
+        clause_en="clean unmarked typography, only the lettering itself",
+        clause_zh="画面只有字形本身，干净利落",
+    ),
+    InversionRule(
+        key="figurative_elements",
+        match=("person", "people", "human", "face", "hand", "animal",
+               "人物", "人脸", "动物"),
+        clause_en="only typography in frame, pure lettering composition",
+        clause_zh="画面主体只有文字，纯字形构图",
+    ),
+)
+
+_NEGATIVE_TERM_SPLIT_RE = re.compile(r"[,，、;；\n]+")
+_COMPARE_NORM_RE = re.compile(r"[\s,，、;；:：.。]+")
+
+
+def _split_negative_terms(source: str) -> tuple[str, ...]:
+    return tuple(t.strip() for t in _NEGATIVE_TERM_SPLIT_RE.split(source) if t.strip())
+
+
+def _normalize_for_compare(text: str) -> str:
+    return _COMPARE_NORM_RE.sub("", text.lower())
+
+
+def _rule_matches(rule: InversionRule, haystack: str) -> bool:
+    return any(term in haystack for term in rule.match)
+
+
+def _invert_negative(
+    negative_source: str,
+    profile: RenderProfile,
+    already_present: str = "",
+) -> InversionResult:
+    """把负面词表内的词反演成正向子句。
+
+    未命中的词只上报、不注入。已由正向段覆盖的词只记账、不重复注入。
+    """
+    terms = _split_negative_terms(negative_source)
+    if not terms:
+        return InversionResult((), (), (), ())
+
+    haystack = negative_source.lower()
+    norm_present = _normalize_for_compare(already_present)
+    use_en = profile.lang == "en"
+
+    clauses: list[str] = []
+    matched: list[str] = []
+    covered: list[str] = []
+    seen_clauses: set[str] = set()
+
+    for rule in _INVERSION_RULES:
+        if not _rule_matches(rule, haystack):
+            continue
+        matched.append(rule.key)
+        if rule.covered_by is not None:
+            covered.append(rule.key)
+            continue
+
+        clause = rule.clause_en if use_en else rule.clause_zh
+        norm = _normalize_for_compare(clause)
+        if norm in seen_clauses or (norm_present and norm in norm_present):
+            continue
+        seen_clauses.add(norm)
+        clauses.append(clause)
+
+    unmapped = tuple(
+        term for term in terms
+        if not any(_rule_matches(rule, term.lower()) for rule in _INVERSION_RULES)
+    )
+
+    return InversionResult(tuple(clauses), tuple(matched), tuple(covered), unmapped)
+
+
+# ── 提示词方案 ──
+
+# clip_l 是 CLIP-L 编码器（77 token），只收关键段的短摘要；全长给 t5xxl。
+_CLIP_L_SECTIONS = ("background", "content", "style")
+_CLIP_L_MAX_CHARS = 220
+
+
+@dataclass(frozen=True)
+class PromptPlan:
+    """一次渲染的完整产物：正向 / 负向串与各自的 clip_l 摘要在此定下来。"""
+
+    analysis: TextAnalysis
+    profile_key: str
+    positive_prompt: str
+    negative_prompt: str
+    clip_l_positive: str
+    clip_l_negative: str
+    inversion: InversionResult
+    negative_strategy: str          # 'negative-conditioning' | 'positive-inversion'
+    capability: Optional[NegativeCapability]
+    layout_intent_detected: bool
+    clip_l_token_estimate: int
+
+
+def _estimate_clip_tokens(text: str) -> int:
+    """CLIP BPE 的保守近似：英文按词、数字按串、其余非空白各计 1。"""
+    return len(re.findall(r"[A-Za-z]+|\d+|[^\sA-Za-z\d]", text))
+
+
+def _truncate_at_boundary(text: str, limit: int, joiner: str) -> str:
+    """按子句边界截断，绝不切断半个词。"""
+    if len(text) <= limit:
+        return text
+    parts = text.split(joiner)
+    out = ""
+    for part in parts:
+        candidate = part if not out else f"{out}{joiner}{part}"
+        if len(candidate) > limit:
+            break
+        out = candidate
+    return out or parts[0][:limit]
+
+
+def _render_clip_l(ctx: RenderContext) -> str:
+    """给 CLIP-L 的短摘要。t5xxl 收全长，两者不再相等。"""
+    parts: list[str] = []
+    for key in _CLIP_L_SECTIONS:
+        parts.extend(_render_section(key, ctx))
+    joined = ctx.profile.joiner.join(p for p in parts if p)
+    return _truncate_at_boundary(joined, _CLIP_L_MAX_CHARS, ctx.profile.joiner)
+
+
+def _plan_prompt(
+    request: GenerationRequest,
+    model: str,
+    capability: Optional[NegativeCapability] = None,
+) -> PromptPlan:
+    """渲染正向 / 负向提示词，并决定负面策略。
+
+    ``capability`` 为 None 表示未知——按「不生效」处理，把用户意图反演成正向引导，
+    避免静默丢失。
+    """
+    profile = _MODEL_PROFILE.get(model, _FLUX_PROFILE)
+    analysis = _analyze_text(request.text)
+    negative_prompt = _build_negative_prompt(request.negative_prompt)
+
+    use_inversion = capability is None or not capability.effective
+    layout_intent = _detect_layout_intent(request.prompt)
+
+    base_ctx = RenderContext(
+        analysis=analysis,
+        style_prompt=request.prompt,
+        profile=profile,
+        layout_intent_detected=layout_intent,
+    )
+    base_positive = _render_prompt(base_ctx)
+
+    inversion = (
+        _invert_negative(negative_prompt, profile, already_present=base_positive)
+        if use_inversion
+        else InversionResult((), (), (), ())
+    )
+
+    if inversion.clauses:
+        ctx = RenderContext(
+            analysis=analysis,
+            style_prompt=request.prompt,
+            profile=profile,
+            layout_intent_detected=layout_intent,
+            inverted_clauses=inversion.clauses,
+        )
+        positive_prompt = _render_prompt(ctx)
+    else:
+        ctx = base_ctx
+        positive_prompt = base_positive
+
+    clip_l_positive = _render_clip_l(ctx)
+    return PromptPlan(
+        analysis=analysis,
+        profile_key=profile.key,
+        positive_prompt=positive_prompt,
+        negative_prompt=negative_prompt,
+        clip_l_positive=clip_l_positive,
+        # 负面串由 _build_negative_prompt 用 ", " 连接，故按 ", " 切子句
+        clip_l_negative=_truncate_at_boundary(negative_prompt, _CLIP_L_MAX_CHARS, ", "),
+        inversion=inversion,
+        negative_strategy="positive-inversion" if use_inversion else "negative-conditioning",
+        capability=capability,
+        layout_intent_detected=layout_intent,
+        clip_l_token_estimate=_estimate_clip_tokens(clip_l_positive),
+    )
+
+
+def _write_text_node(node: dict, text: str, clip_l: str) -> None:
+    """CLIPTextEncodeFlux 有 clip_l 与 t5xxl 两个文本输入；普通节点只有一个。"""
+    if node.get("class_type") == "CLIPTextEncodeFlux":
+        node["inputs"]["t5xxl"] = text
+        node["inputs"]["clip_l"] = clip_l
+    else:
+        node["inputs"]["text"] = text
+
+
+def _patch_workflow(
+    workflow: dict,
+    request: GenerationRequest,
+    *,
+    plan: Optional[PromptPlan] = None,
+) -> dict:
+    """Deep-copy workflow and inject user parameters.
 
     Patching rules:
-      - First CLIPTextEncode / CLIPTextEncodeFlux  → positive prompt
-      - Second CLIPTextEncode                        → negative prompt
-      - EmptyLatentImage / SD3                       → width, height
-      - KSampler / KSamplerAdvanced                  → seed
+      - 文本节点：顺 KSampler 的 ``positive`` / ``negative`` 连线解析
+        （无采样器时按数字感知 id 序回退），不再依赖 JSON 字典插入序
+      - CLIPTextEncodeFlux：``t5xxl`` 收全长、``clip_l`` 收短摘要
+      - EmptyLatentImage / EmptySD3LatentImage → width, height
+      - KSampler / KSamplerAdvanced → seed
+
+    ``plan`` 可由调用方预先算好以避免重复渲染；为 None 时内部计算。
     """
     patched = copy.deepcopy(workflow)
 
-    # ── Detect model family for prompt templating ──
     model = _detect_workflow_model(patched)
+    if plan is None:
+        plan = _plan_prompt(request, model, _probe_negative_capability(patched))
 
-    # ── CLIPTextEncode / CLIPTextEncodeFlux (positive / negative) ──
-    positive_prompt = _build_text_art_prompt(request.text, request.prompt, model)
-    negative_prompt = _build_negative_prompt(request.negative_prompt)
-    clip_nodes = _find_nodes_by_class(patched, "CLIPTextEncode")
-    clip_nodes += _find_nodes_by_class(patched, "CLIPTextEncodeFlux")
-    for i, (nid, node) in enumerate(clip_nodes):
-        prompt_text = positive_prompt if i == 0 else negative_prompt
-        if node.get("class_type") == "CLIPTextEncodeFlux":
-            node["inputs"]["clip_l"] = prompt_text
-            node["inputs"]["t5xxl"] = prompt_text
-        else:
-            node["inputs"]["text"] = prompt_text
+    # ── 文本节点（只写解析出的两个，不再「第 2 个起全灌负面」）──
+    resolved = _resolve_conditioning_nodes(patched)
+    if resolved.positive_node_id and resolved.positive_node_id in patched:
+        _write_text_node(
+            patched[resolved.positive_node_id], plan.positive_prompt, plan.clip_l_positive
+        )
+    if resolved.negative_node_id and resolved.negative_node_id in patched:
+        # 即便 capability 判定不生效也照写：保持 workflow_api 快照的历史可比性，
+        # 且将来若调高 cfg，负面立即恢复生效。不生效的事实由 metadata 记录。
+        _write_text_node(
+            patched[resolved.negative_node_id], plan.negative_prompt, plan.clip_l_negative
+        )
 
     # ── EmptyLatentImage / EmptySD3LatentImage (resolution) ──
     latent_nodes = _find_nodes_by_class(patched, "EmptyLatentImage")
@@ -350,8 +1069,12 @@ def warmup_comfyui_connection() -> None:
 # ── ComfyUI API interaction ──
 
 
-def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[GenerationArtifact]:
-    """Submit patched workflow to ComfyUI, poll for result, return artifact.
+def _call_comfyui_api(
+    request: GenerationRequest, submitted_workflow: dict
+) -> Optional[GenerationArtifact]:
+    """Submit an **already patched** workflow to ComfyUI, poll, return artifact.
+
+    调用方负责 patch（见 :func:`_patch_workflow`）——本函数不再内部重复 patch。
 
     Returns None on any failure (connection, timeout, execution error)
     so the caller can fall back to the local stub.
@@ -362,9 +1085,9 @@ def _call_comfyui_api(request: GenerationRequest, workflow: dict) -> Optional[Ge
 
     try:
         with httpx.Client(timeout=30.0) as client:
-            # 1. Patch and submit
+            # 1. Submit
             client_id = str(uuid.uuid4())
-            patched = _patch_workflow(workflow, request)
+            patched = submitted_workflow
             submit_payload = {"prompt": patched, "client_id": client_id}
 
             submit_resp = client.post(f"{host}/prompt", json=submit_payload)
@@ -546,15 +1269,11 @@ def _classify_text(text: str) -> str:
     只统计汉字与拉丁字母；数字、标点、符号、空白一律不参与判定，
     因此 ``冰川 100%`` 归为纯中文。无字母的输入（纯数字/符号/空）
     并入 'english'。
-    """
-    has_cjk = bool(re.search(r"[一-鿿]", text))
-    has_latin = bool(re.search(r"[A-Za-z]", text))
 
-    if has_cjk and has_latin:
-        return "mixed"
-    if has_cjk:
-        return "chinese"
-    return "english"
+    判定规则由 :class:`TextAnalysis` 承载——路由与提示词模板共用同一份分析，
+    不再各持一个正则。
+    """
+    return _analyze_text(text).script
 
 
 def _extract_model_dependencies(workflow: dict, workflow_name: str = "") -> dict:
