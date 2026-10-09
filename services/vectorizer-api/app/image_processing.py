@@ -374,13 +374,16 @@ def preprocess_image(image_bytes: bytes, vector: dict[str, Any]) -> dict[str, An
     img = image_bytes_to_pil(image_bytes)
 
     # 检测是否已有 alpha 通道（RGBA、LA、PA 模式，或调色板模式带透明度信息）
-    has_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
+    has_alpha = (
+        (img.mode in ("RGBA", "LA", "PA") and img.getchannel("A").getextrema()[0] < 128)
+        or (img.mode == "P" and "transparency" in img.info)
+    )
 
     remove_bg = bool(vector.get("remove_edge_white_background", True))
     color_precision = max(2, min(64, _safe_int(vector.get("color_precision"), 8)))
 
     if has_alpha:
-        # 已有 alpha 通道，直接使用原图，跳过背景移除和所有预处理
+        # 已有 alpha 通道，直接使用原图，跳过背景移除和繁重预处理
         img = img.convert("RGBA")
     else:
         if remove_bg:
@@ -391,7 +394,9 @@ def preprocess_image(image_bytes: bytes, vector: dict[str, Any]) -> dict[str, An
         img = denoise_preserve_edges(img)
         img = preserve_antialias_edges(img)
         img = crop_to_subject(img)
-        img = quantize_colors(img, color_precision)
+
+    # 无论是否已有透明通道，均对主体前景执行颜色聚类
+    img = quantize_colors(img, color_precision)
 
     png_transparency = calculate_png_transparency(img)
 

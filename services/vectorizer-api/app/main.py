@@ -151,7 +151,14 @@ def vectorize(payload: VectorizeRequest) -> VectorizeResponse:
                 "prompt": payload.prompt or "",
                 "negative": payload.negative or "",
                 "resolution": payload.resolution or "",
-                "seed": payload.seed if payload.seed else 0,
+                "seed": payload.seed if payload.seed is not None else 0,
+            }
+            if payload.source_type != "upload"
+            else {
+                "text": payload.text or "",
+                "prompt": payload.prompt or "",
+                "negative": payload.negative or "",
+                "resolution": payload.resolution or "",
             },
             "preprocess": {
                 "transparent_size": processed["size"],

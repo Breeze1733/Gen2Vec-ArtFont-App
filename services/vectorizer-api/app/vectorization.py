@@ -88,15 +88,10 @@ try:
 except Exception:  # pragma: no cover
     cv2 = None
 
-if sys.platform == "win32":
-    _venv_scripts = os.path.join(sys.prefix, "Scripts")
-    if os.path.isdir(_venv_scripts):
-        os.add_dll_directory(_venv_scripts)
-
 try:
-    import cairosvg
+    import resvg_py
 except Exception:  # pragma: no cover
-    cairosvg = None
+    resvg_py = None
 
 try:
     import vtracer
@@ -197,10 +192,10 @@ def _png_bytes_to_data_url(png_bytes: bytes) -> str:
     return f"data:image/png;base64,{b64}"
 
 
-def _svg_to_png_bytes(svg_text: str, width: int | None = None) -> bytes:
-    if cairosvg is None:
-        raise RuntimeError("cairosvg is not installed. Cannot generate preview PNG.")
-    return cairosvg.svg2png(bytestring=svg_text.encode("utf-8"), output_width=width)
+def _svg_to_png_bytes(svg_text: str, width: int | None = None, height: int | None = None) -> bytes:
+    if resvg_py is None:
+        raise RuntimeError("resvg-py is not installed. Cannot generate preview PNG.")
+    return resvg_py.svg_to_bytes(svg_string=svg_text, width=width, height=height)
 
 
 def _parse_path_bbox(d: str, transform: str = "") -> tuple[float, float, float, float]:
@@ -301,15 +296,20 @@ def _populate_metadata_element(meta_elem: ET.Element, metadata: dict[str, Any]) 
     quality = metadata.get("quality", {})
     stats = metadata.get("stats", {})
 
+    source_type = metadata.get("source_type") or ("upload" if not gen.get("prompt") and not gen.get("text") else "generated")
+    is_pure_vectorize = source_type == "upload"
+
     text = gen.get("text", "")
     prompt = gen.get("prompt", "")
-    seed = gen.get("seed", 0)
+    seed = gen.get("seed")
     preset = params.get("preset", "balanced")
     fidelity = quality.get("svg_fidelity")
     created_at = metadata.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
+    title = str(text or prompt or "ArtFont Vector")
+
     title_el = ET.SubElement(desc, "{http://purl.org/dc/elements/1.1/}title")
-    title_el.text = str(text or prompt or "ArtFont Vector")
+    title_el.text = title
 
     creator_el = ET.SubElement(desc, "{http://purl.org/dc/elements/1.1/}creator")
     creator_el.text = "Gen2Vec ArtFont System"
@@ -326,7 +326,8 @@ def _populate_metadata_element(meta_elem: ET.Element, metadata: dict[str, Any]) 
     if prompt:
         p_el = ET.SubElement(desc, "{https://gen2vec.artfont/schema#}prompt")
         p_el.text = str(prompt)
-    if seed:
+    # 纯矢量化不需要 seed；文生图模式下哪怕 seed 为 0 也记录
+    if not is_pure_vectorize and seed is not None:
         s_el = ET.SubElement(desc, "{https://gen2vec.artfont/schema#}seed")
         s_el.text = str(seed)
 
@@ -342,10 +343,17 @@ def _populate_metadata_element(meta_elem: ET.Element, metadata: dict[str, Any]) 
 
     # JSON-LD 结构化标签
     script = ET.SubElement(meta_elem, "script", {"type": "application/ld+json"})
+    parameters = {
+        "preset": preset,
+        "elapsedMs": stats.get("elapsed_ms"),
+    }
+    if not is_pure_vectorize and seed is not None:
+        parameters["seed"] = seed
+
     json_summary = {
         "@context": "https://schema.org",
         "@type": "VisualArtwork",
-        "name": text or "ArtFont Vector",
+        "name": title,
         "description": prompt,
         "artform": "Vector Art",
         "artMedium": "SVG",
@@ -355,11 +363,7 @@ def _populate_metadata_element(meta_elem: ET.Element, metadata: dict[str, Any]) 
             "version": "1.0.1",
         },
         "fidelityScore": fidelity,
-        "parameters": {
-            "preset": preset,
-            "seed": seed,
-            "elapsedMs": stats.get("elapsed_ms"),
-        },
+        "parameters": parameters,
     }
     script.text = json.dumps(json_summary, ensure_ascii=False)
 
@@ -368,6 +372,8 @@ def restructure_and_group_svg(
     raw_svg_text: str,
     canvas_width: int,
     canvas_height: int,
+    viewbox_width: int | None = None,
+    viewbox_height: int | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> str:
     """重构 vtracer 输出的平铺 SVG，构建 W3C 规范视口、语义解耦图层与内嵌元数据。"""
@@ -385,11 +391,18 @@ def restructure_and_group_svg(
     # 保留可能存在的 defs
     defs = list(raw_root.findall(".//{http://www.w3.org/2000/svg}defs")) or list(raw_root.findall(".//defs"))
 
+    # 解析实际路径坐标系范围（如果进行了上采样 scale，坐标系为 trace 尺寸）
+    raw_w_str = raw_root.get("width")
+    raw_h_str = raw_root.get("height")
+    vw = viewbox_width or (int(float(raw_w_str)) if raw_w_str else canvas_width)
+    vh = viewbox_height or (int(float(raw_h_str)) if raw_h_str else canvas_height)
+    actual_viewbox = raw_root.get("viewBox") or f"0 0 {vw} {vh}"
+
     new_root = ET.Element(
         "{http://www.w3.org/2000/svg}svg",
         {
             "version": "1.1",
-            "viewBox": f"0 0 {canvas_width} {canvas_height}",
+            "viewBox": actual_viewbox,
             "width": str(canvas_width),
             "height": str(canvas_height),
         },
@@ -414,7 +427,7 @@ def restructure_and_group_svg(
 
     total = len(paths)
     for idx, p in enumerate(paths):
-        category = _classify_svg_path(p, canvas_width, canvas_height, idx, total)
+        category = _classify_svg_path(p, vw, vh, idx, total)
         grouped_paths[category].append(p)
 
     # 保证主体文字层不为空（至少包含最核心组件）
@@ -744,14 +757,13 @@ def vectorize_image(
         else:
             raise RuntimeError("No supported vtracer conversion function found in current binding.")
 
+        trace_w, trace_h = work_img.size
+
         with open(output_svg_path, "r", encoding="utf-8") as f:
             raw_svg_text = f.read()
 
-        preview_png_bytes = _svg_to_png_bytes(raw_svg_text, width=original_width)
-        svg_fidelity = _calculate_svg_fidelity(transparent_image, preview_png_bytes)
-
-    preview_data_url = _png_bytes_to_data_url(preview_png_bytes)
     elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+    actual_viewbox = f"0 0 {trace_w} {trace_h}"
 
     metadata: dict[str, Any] = {
         "engine": "vectorizer-api-split-pipeline",
@@ -787,18 +799,18 @@ def vectorize_image(
         "canvas": {
             "width": int(original_width),
             "height": int(original_height),
-            "viewBox": f"0 0 {int(original_width)} {int(original_height)}",
+            "viewBox": actual_viewbox,
         },
         "stats": {
             "elapsed_ms": elapsed_ms,
             "svg_size_kb": 0.0,
-            "preview_png_size_kb": round(len(preview_png_bytes) / 1024.0, 3),
+            "preview_png_size_kb": 0.0,
         },
         "preprocess": {
             "png_transparency": None,
         },
         "quality": {
-            "svg_fidelity": svg_fidelity,
+            "svg_fidelity": 0.0,
         },
         "created_at": "",
     }
@@ -806,15 +818,25 @@ def vectorize_image(
     if metadata_context:
         _deep_merge_metadata(metadata, metadata_context)
 
-    # 重构为包含 <metadata> 与解耦 <g> 图层的规范 SVG
+    # 重构为包含 <metadata> 与分层 <g> 图层的规范完整 SVG (viewBox 完整覆盖实际路径坐标空间)
     formatted_svg_text = restructure_and_group_svg(
         raw_svg_text,
         canvas_width=original_width,
         canvas_height=original_height,
+        viewbox_width=trace_w,
+        viewbox_height=trace_h,
         metadata=metadata,
     )
     svg_size_kb = round(len(formatted_svg_text.encode("utf-8")) / 1024.0, 3)
     metadata["stats"]["svg_size_kb"] = svg_size_kb
+
+    # 基于最终完整的 SVG 使用 resvg_py 进行回渲染预览与保真度核验
+    preview_png_bytes = _svg_to_png_bytes(formatted_svg_text, width=original_width, height=original_height)
+    svg_fidelity = _calculate_svg_fidelity(transparent_image, preview_png_bytes)
+    preview_data_url = _png_bytes_to_data_url(preview_png_bytes)
+
+    metadata["quality"]["svg_fidelity"] = svg_fidelity
+    metadata["stats"]["preview_png_size_kb"] = round(len(preview_png_bytes) / 1024.0, 3)
 
     return {
         "svg": formatted_svg_text,

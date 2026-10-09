@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 class VectorConfig(BaseModel):
     # Frontend vectorization controls (6 params + 4 presets).
     preset: Literal["clean", "balanced", "detailed", "ultra"] = "balanced"
-    color_precision: int | None = Field(default=None, ge=1, le=8)
+    color_precision: int | None = Field(default=None, ge=1, le=16)
     filter_speckle: int | None = Field(default=None, ge=0, le=64)
     corner_threshold: int | None = Field(default=None, ge=1, le=180)
     length_threshold: int | None = Field(default=None, ge=1, le=64)
@@ -35,12 +35,22 @@ class VectorizeRequest(BaseModel):
     negative: str = ""
     resolution: str = "1024 x 1024"
     format: str = "PNG + SVG"
-    seed: int = 0
+    seed: Optional[int] = None
     vector: VectorConfig = Field(default_factory=VectorConfig)
     image_base64: Optional[str] = None
     image_path: Optional[str] = None
     image_name: Optional[str] = None
     generated_image: Optional[GeneratedImageRef] = None
+
+    @field_validator("seed", mode="before")
+    @classmethod
+    def validate_seed(cls, value: Any) -> Optional[int]:
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return None
 
     @field_validator("resolution")
     @classmethod
