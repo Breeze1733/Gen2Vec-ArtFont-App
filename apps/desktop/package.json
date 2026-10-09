@@ -33,7 +33,11 @@
       { "from": "../../apps/cli/dist/gen2vec_cli.exe", "to": "../gen2vec_cli.exe" },
       { "from": "../../tests/run-acceptance.ps1", "to": "../tests/run-acceptance.ps1" },
       { "from": "../../tests/run-acceptance.bat", "to": "../tests/run-acceptance.bat" },
-      { "from": "../../tests/fixtures/acceptance.txt", "to": "../tests/acceptance.txt" }
+      { "from": "../../tests/fixtures/acceptance.txt", "to": "../tests/acceptance.txt" },
+      { "from": "../../tests/run-scenarios.py", "to": "../tests/run-scenarios.py" },
+      { "from": "../../tests/acceptance_common.py", "to": "../tests/acceptance_common.py" },
+      { "from": "../../tests/run-scenarios.bat", "to": "../tests/run-scenarios.bat" },
+      { "from": "../../tests/fixtures/routes.txt", "to": "../tests/routes.txt" }
     ],
     "win": {
       "target": "nsis",

@@ -292,7 +292,7 @@ try {
         Finish-Skip "pip_install" "already installed"
         $skipCount++
     } else {
-        $pipPkgs = "transparent-background gguf protobuf"
+        $pipPkgs = "transparent-background gguf protobuf resvg-py"
         Emit "START" "pip_install|$pipPkgs"
         Write-Color "pip install $pipPkgs" Yellow
 
@@ -300,7 +300,7 @@ try {
         if (-not $Electron) {
             # Manual mode: show live pip output.
             $pipProc = Start-Process -FilePath $PythonExe -ArgumentList @(
-                "-m", "pip", "install", "transparent-background", "gguf", "protobuf"
+                "-m", "pip", "install", "transparent-background", "gguf", "protobuf", "resvg-py"
             ) -NoNewWindow -Wait -PassThru
             if ($pipProc.ExitCode -ne 0) {
                 throw "pip install failed with exit code $($pipProc.ExitCode)"
@@ -309,7 +309,7 @@ try {
             # Electron mode: capture output to log, show tail on error.
             $pipLog = Join-Path $ComfyPortable "pip-install.log"
             $pipProc = Start-Process -FilePath $PythonExe -ArgumentList @(
-                "-m", "pip", "install", "transparent-background", "gguf", "protobuf"
+                "-m", "pip", "install", "transparent-background", "gguf", "protobuf", "resvg-py"
             ) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $pipLog -RedirectStandardError $pipLog
             if ($pipProc.ExitCode -ne 0) {
                 $tail = if (Test-Path $pipLog) { Get-Content $pipLog -Tail 20 | Out-String } else { "" }
