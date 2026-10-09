@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .models import VectorizeRequest, VectorizeResponse
 from .image_processing import decode_base64_image, preprocess_image
-from .vectorization import vectorize_image
+from .vectorization import inject_svg_metadata, vectorize_image
 
 app = FastAPI(
     title="Vectorizer API",
@@ -160,6 +160,10 @@ def vectorize(payload: VectorizeRequest) -> VectorizeResponse:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     )
+    # 确保最终完整的业务元数据同步注入至 SVG 的 <metadata> 节点中
+    output["svg"] = inject_svg_metadata(output["svg"], output["metadata"])
+    output["metadata"]["stats"]["svg_size_kb"] = round(len(output["svg"].encode("utf-8")) / 1024.0, 3)
+
     response_payload = {
         "transparent_png": processed["transparent_png"],
         "preview_png": output["preview_png"],
