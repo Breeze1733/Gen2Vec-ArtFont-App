@@ -100,36 +100,36 @@ except Exception:  # pragma: no cover
 
 
 PRESET_CONFIG: dict[str, dict[str, int]] = {
-    "clean": {"cp": 2, "fs": 48, "ct": 120, "lt": 30, "ld": 38, "scale": 2},
-    "balanced": {"cp": 6, "fs": 18, "ct": 70, "lt": 12, "ld": 20, "scale": 2},
-    "detailed": {"cp": 6, "fs": 2, "ct": 30, "lt": 3, "ld": 4, "scale": 3},
-    "ultra": {"cp": 8, "fs": 1, "ct": 20, "lt": 2, "ld": 2, "scale": 3},
+    "clean": {"cp": 4, "fs": 24, "ct": 90, "lt": 16, "ld": 28, "scale": 1},
+    "balanced": {"cp": 6, "fs": 10, "ct": 60, "lt": 8, "ld": 16, "scale": 2},
+    "detailed": {"cp": 7, "fs": 4, "ct": 45, "lt": 5, "ld": 12, "scale": 2},
+    "ultra": {"cp": 8, "fs": 2, "ct": 30, "lt": 3, "ld": 8, "scale": 2},
 }
 
 TRACE_CLEANUP_CONFIG: dict[str, dict[str, int | bool]] = {
     "clean": {
         "alpha_floor": 48,
         "min_area_divisor": 1500,
-        "morph": 2,
+        "morph": 0,
         "median": True,
         "solid_alpha": True,
         "smooth_mask": True,
-        "snap_near_white": True,
+        "snap_near_white": False,
     },
     "balanced": {
-        "alpha_floor": 28,
+        "alpha_floor": 24,
         "min_area_divisor": 3600,
-        "morph": 1,
-        "median": True,
-        "solid_alpha": True,
-        "smooth_mask": True,
-        "snap_near_white": True,
+        "morph": 0,
+        "median": False,
+        "solid_alpha": False,
+        "smooth_mask": False,
+        "snap_near_white": False,
     },
     "detailed": {
         "alpha_floor": 10,
         "min_area_divisor": 12000,
         "morph": 0,
-        "median": True,
+        "median": False,
         "solid_alpha": False,
         "smooth_mask": False,
         "snap_near_white": False,
@@ -706,8 +706,10 @@ def vectorize_image(
     original_width, original_height = transparent_image.size
 
     scale = int(params["scale"])
-    if original_width > 3000:
-        scale = max(1, scale // 2)
+    if original_width > 2400 or original_height > 2400:
+        scale = 1
+    elif original_width > 1500 or original_height > 1500:
+        scale = min(scale, 2)
 
     with tempfile.TemporaryDirectory(prefix="vectorize-api-") as tmp:
         input_png_path = os.path.join(tmp, "input.png")
@@ -727,7 +729,7 @@ def vectorize_image(
                 input_png_path,
                 output_svg_path,
                 colormode="color",
-                hierarchical="stacked",
+                hierarchical="cutout",
                 mode="spline",
                 filter_speckle=int(params["fs"]),
                 color_precision=int(params["cp"]),
@@ -743,7 +745,7 @@ def vectorize_image(
                 input_path=input_png_path,
                 output_path=output_svg_path,
                 colormode="color",
-                hierarchical="stacked",
+                hierarchical="cutout",
                 mode="spline",
                 filter_speckle=int(params["fs"]),
                 color_precision=int(params["cp"]),

@@ -380,7 +380,10 @@ def preprocess_image(image_bytes: bytes, vector: dict[str, Any]) -> dict[str, An
     )
 
     remove_bg = bool(vector.get("remove_edge_white_background", True))
-    color_precision = max(2, min(64, _safe_int(vector.get("color_precision"), 8)))
+    preset = str(vector.get("preset", "balanced")).lower()
+    preset_color_clusters = {"clean": 6, "balanced": 10, "detailed": 14, "ultra": 16}
+    default_clusters = preset_color_clusters.get(preset, 10)
+    color_precision = max(2, min(64, _safe_int(vector.get("color_precision"), default_clusters)))
 
     if has_alpha:
         # 已有 alpha 通道，直接使用原图，跳过背景移除和繁重预处理
