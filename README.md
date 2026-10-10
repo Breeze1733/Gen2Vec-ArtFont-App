@@ -64,14 +64,6 @@
 
 ## 快速开始
 
-### 补充依赖
-
-ComfyUI 引擎、AI 模型和 rembg 模型可通过脚本一键补全：
-
-```powershell
-scripts\setup-deps.ps1
-```
-
 ### 环境要求
 
 | 组件 | 要求 | 说明 |
@@ -81,6 +73,14 @@ scripts\setup-deps.ps1
 | Python | 3.13+ | 两个后端服务 |
 | uv | 推荐 | Python 依赖管理（无 uv 时可用 pip） |
 | GPU | NVIDIA 独显推荐 | ComfyUI 推理推荐独显；无 GPU 时可降级运行 |
+
+### 补充依赖
+
+ComfyUI 引擎、AI 模型和 rembg 模型可通过脚本一键补全：
+
+```powershell
+scripts\setup-deps.ps1
+```
 
 ### 三步启动
 
