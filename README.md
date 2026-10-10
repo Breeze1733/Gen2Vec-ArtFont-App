@@ -1,10 +1,16 @@
+<div align="center">
+
+<img src="apps/desktop/assets/icon.ico" alt="Gen2Vec-ArtFont" width="96" height="96" />
+
+# Gen2Vec ArtFont
+
+>矢量艺术字生成器。本地优先的 AI 艺术字工具：输入文字与风格描述，生成艺术字位图，并通过计算机视觉流水线转换为可编辑、可缩放的 SVG 矢量图。
+
+</div>
+
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#环境要求)
 [![Desktop](https://img.shields.io/badge/desktop-Electron%20%2B%20Vue-42b883.svg)](#技术栈)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688.svg)](#技术栈)
-
-# 🎨 Gen2Vec ArtFont
-
-> 矢量艺术字生成器。本地优先的 AI 艺术字工具：输入文字与风格描述，生成艺术字位图，并通过计算机视觉流水线转换为可编辑、可缩放的 SVG 矢量图。
 
 [特性](#特性) |
 [架构](#架构) |

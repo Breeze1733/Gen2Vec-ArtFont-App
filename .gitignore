@@ -44,8 +44,7 @@ logs/
 services/txt2img-api/input/
 services/txt2img-api/output/
 services/txt2img-api/temp/
-services/txt2img-api/build/
-services/vectorizer-api/build/
+build/
 
 # ComfyUI engine and runtime bundles
 services/txt2img-api/ComfyUI_windows_portable_nvidia/
