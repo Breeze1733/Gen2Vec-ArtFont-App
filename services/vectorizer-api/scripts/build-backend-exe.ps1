@@ -6,8 +6,9 @@
   Mirrors `services/txt2img-api/scripts/build-backend-exe.ps1` with shared
   structure.  Supports two toolchains:
 
-    uv (default) — resolves dependencies via the project's own .venv;
-                   recommended when a uv-managed venv exists in the repo.
+    uv (default) — runs `uv sync` to create/refresh this service's own
+                   .venv from pyproject.toml + uv.lock, then builds with
+                   `uv run python -m PyInstaller`.  Requires pyproject.toml.
     python       — uses the system/global Python; use this if you manage
                    your own venv manually or uv is not installed.
 
@@ -43,15 +44,18 @@ if ($Toolchain -eq "uv") {
   if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     throw "uv is not on PATH. Install it (https://docs.astral.sh/uv/) or re-run with -Toolchain python."
   }
-  $pipArgs = @("pip", "install", "--upgrade", "pyinstaller")
+  if (-not (Test-Path "pyproject.toml")) {
+    throw "pyproject.toml not found in $root. The uv toolchain needs a uv-managed project; re-run with -Toolchain python."
+  }
+  $installArgs = @("sync")
   $pyRunArgs = @("run", "python", "-m", "PyInstaller")
 } else {
-  $pipArgs = @("-m", "pip", "install", "--upgrade", "pip", "pyinstaller")
+  $installArgs = @("-m", "pip", "install", "--upgrade", "pip", "pyinstaller")
   $pyRunArgs = @("-m", "PyInstaller")
 }
 
-Write-Host "[1/5] Installing build dependencies via $Toolchain..."
-& $Toolchain @pipArgs
+Write-Host "[1/5] Preparing build environment via $Toolchain..."
+& $Toolchain @installArgs
 
 Write-Host "[2/5] Cleaning previous build outputs..."
 # Only remove PyInstaller artifacts; preserve other dist/ files.
@@ -89,11 +93,28 @@ Write-Host "[3/5] Building vectorizer-backend.exe with PyInstaller..."
   "backend_entry.py"
 )
 
-Write-Host "[4/5] Copying distribution files to dist/..."
-if (Test-Path "models") {
-  Copy-Item -LiteralPath "models" -Destination "dist\models" -Recurse -Force
-  Write-Host "  OK  models/"
+Write-Host "[4/5] Preparing rembg model and copying distribution files to dist/..."
+
+$modelDir = Join-Path $root "models\rembg"
+$modelFile = Join-Path $modelDir "isnet-general-use.onnx"
+if (-not (Test-Path $modelFile)) {
+  $downloadScript = Join-Path $modelDir "download-isnet-general-use.ps1"
+  if (-not (Test-Path $downloadScript)) {
+    throw "rembg model missing and download script not found: $downloadScript"
+  }
+  Write-Host "  rembg model not found, downloading..."
+  & $downloadScript
+  if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+    throw "Failed to download rembg model (exit code $LASTEXITCODE)."
+  }
+  if (-not (Test-Path $modelFile)) {
+    throw "rembg model still missing after download: $modelFile"
+  }
 }
+
+New-Item -ItemType Directory -Path "dist\models" -Force | Out-Null
+Copy-Item -Path "models\*" -Destination "dist\models" -Recurse -Force
+Write-Host "  OK  models/"
 
 Write-Host "[5/5] Done."
 Write-Host ""

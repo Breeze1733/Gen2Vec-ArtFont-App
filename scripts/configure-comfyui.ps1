@@ -20,7 +20,7 @@ Electron integration mode: prints COMFYCFG: structured progress lines.
 
 .EXAMPLE
 .\configure-comfyui.ps1
-.\configure-comfyui.ps1 -DestDir D:\ArtFont
+.\configure-comfyui.ps1 -DestDir ..\backend
 .\configure-comfyui.ps1 -Electron -DestDir .\backend\
 #>
 

@@ -78,7 +78,7 @@ $addDataArgs = @()
 foreach ($f in $workflowFiles) {
   $addDataArgs += "--add-data"
   # Windows uses ';' as the separator between source and dest in --add-data.
-  $addDataArgs += "$($f.FullName);workflows"
+  $addDataArgs += "workflows\$($f.Name);workflows"
 }
 
 Write-Host "[3/5] Building txt2img-backend.exe with PyInstaller..."
