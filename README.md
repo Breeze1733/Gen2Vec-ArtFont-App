@@ -685,16 +685,13 @@ npm run electron:build
 | 内容 | 来源 |
 | --- | --- |
 | `txt2img-backend.exe` | `services/txt2img-api/dist/` |
-| `download-models.ps1` | `services/txt2img-api/dist/` |
-| `README.md` | `services/txt2img-api/dist/` |
 | `vectorizer-backend.exe` | `services/vectorizer-api/dist/` |
 | `models/` | `services/vectorizer-api/dist/models` |
+| `download-comfyui-engine.ps1`、`configure-comfyui.ps1`、`download-models.ps1` | 仓库 `scripts/` |
 | `gen2vec_cli.exe` | `apps/cli/dist/` |
 | `tests/` 标准验收脚本与 `acceptance.txt` | 仓库 `tests/run-acceptance.*`、`tests/fixtures/acceptance.txt` |
 
 注意：`electron/main.cjs` 已包含检测和解压 `ComfyUI-Engine.exe` 的逻辑。如果交付包需要内置 ComfyUI 自解压包，需要确认 `apps/desktop/package.json` 的 `extraResources` 同步包含该文件。
-
-详见 [docs/electron-packaging.md](docs/electron-packaging.md)。
 
 ## 技术栈
 

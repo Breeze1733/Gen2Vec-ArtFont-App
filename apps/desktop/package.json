@@ -9,13 +9,13 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "node -e \"require('fs').rmSync('../../release',{recursive:true,force:true})\" && vite build && electron-builder"
   },
   "build": {
     "appId": "com.arttext.generator",
     "productName": "矢量艺术字生成器",
     "directories": {
-      "output": "release"
+      "output": "../../release"
     },
     "files": [
       "dist/**/*",
@@ -23,11 +23,9 @@
     ],
     "extraResources": [
       { "from": "../../services/txt2img-api/dist/txt2img-backend.exe", "to": "backend/txt2img-backend.exe" },
-      { "from": "../../services/txt2img-api/dist/ComfyUI-GGUF.zip", "to": "backend/ComfyUI-GGUF.zip" },
       { "from": "../../scripts/download-comfyui-engine.ps1", "to": "backend/download-comfyui-engine.ps1" },
       { "from": "../../scripts/download-models.ps1", "to": "backend/download-models.ps1" },
       { "from": "../../scripts/configure-comfyui.ps1", "to": "backend/configure-comfyui.ps1" },
-      { "from": "../../services/txt2img-api/dist/README.md", "to": "backend/README.md" },
       { "from": "../../services/vectorizer-api/dist/vectorizer-backend.exe", "to": "backend/vectorizer-backend.exe" },
       { "from": "../../services/vectorizer-api/dist/models", "to": "backend/models" },
       { "from": "../../apps/cli/dist/gen2vec_cli.exe", "to": "../gen2vec_cli.exe" },

@@ -29,6 +29,19 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+# 原生命令的 stderr 不能被当成致命错误（重定向输出时会触发 NativeCommandError）
+function Invoke-Tool {
+  param([string]$Command, [string[]]$Arguments)
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & $Command @Arguments | Out-Host
+    return $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+}
+
 # 自动检测：uv 优先，找不到则回退 python
 if (-not $Toolchain) {
   if (Get-Command uv -ErrorAction SilentlyContinue) {
@@ -55,7 +68,10 @@ if ($Toolchain -eq "uv") {
 }
 
 Write-Host "[1/5] Preparing build environment via $Toolchain..."
-& $Toolchain @installArgs
+$exitCode = Invoke-Tool $Toolchain $installArgs
+if ($exitCode -ne 0) {
+  throw "$Toolchain $($installArgs -join ' ') failed with exit code $exitCode"
+}
 
 Write-Host "[2/5] Cleaning previous build outputs..."
 # Only remove PyInstaller artifacts; preserve other dist/ files.
@@ -67,7 +83,7 @@ $oldExe = Join-Path "dist" "vectorizer-backend.exe"
 if (Test-Path $oldExe) { Remove-Item -LiteralPath $oldExe -Force }
 
 Write-Host "[3/5] Building vectorizer-backend.exe with PyInstaller..."
-& $Toolchain @pyRunArgs @(
+$exitCode = Invoke-Tool $Toolchain ($pyRunArgs + @(
   "--noconfirm"
   "--clean"
   "--name", "vectorizer-backend"
@@ -91,7 +107,10 @@ Write-Host "[3/5] Building vectorizer-backend.exe with PyInstaller..."
   "--hidden-import", "uvicorn.protocols.websockets.auto"
   "--hidden-import", "uvicorn.lifespan.on"
   "backend_entry.py"
-)
+))
+if ($exitCode -ne 0) {
+  throw "PyInstaller failed with exit code $exitCode"
+}
 
 Write-Host "[4/5] Preparing rembg model and copying distribution files to dist/..."
 
@@ -103,9 +122,9 @@ if (-not (Test-Path $modelFile)) {
     throw "rembg model missing and download script not found: $downloadScript"
   }
   Write-Host "  rembg model not found, downloading..."
-  & $downloadScript
-  if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-    throw "Failed to download rembg model (exit code $LASTEXITCODE)."
+  $exitCode = Invoke-Tool $downloadScript @()
+  if ($exitCode -ne 0) {
+    throw "Failed to download rembg model (exit code $exitCode)."
   }
   if (-not (Test-Path $modelFile)) {
     throw "rembg model still missing after download: $modelFile"

@@ -32,6 +32,19 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+# 原生命令的 stderr 不能被当成致命错误（重定向输出时会触发 NativeCommandError）
+function Invoke-Tool {
+  param([string]$Command, [string[]]$Arguments)
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & $Command @Arguments | Out-Host
+    return $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+}
+
 # 自动检测：uv 优先，找不到则回退 python
 if (-not $Toolchain) {
   if (Get-Command uv -ErrorAction SilentlyContinue) {
@@ -54,10 +67,13 @@ if ($Toolchain -eq "uv") {
   $pyRunArgs = @("-m", "PyInstaller")
 }
 
-Write-Host "[1/5] Installing build dependencies via $Toolchain..."
-& $Toolchain @pipArgs
+Write-Host "[1/4] Installing build dependencies via $Toolchain..."
+$exitCode = Invoke-Tool $Toolchain $pipArgs
+if ($exitCode -ne 0) {
+  throw "$Toolchain $($pipArgs -join ' ') failed with exit code $exitCode"
+}
 
-Write-Host "[2/5] Cleaning previous build outputs..."
+Write-Host "[2/4] Cleaning previous build outputs..."
 # Only remove PyInstaller artifacts; preserve other dist/ files (e.g. ComfyUI-Engine.exe).
 if (Test-Path "build") { Remove-Item -LiteralPath "build" -Recurse -Force }
 if (Test-Path "txt2img-backend.spec") {
@@ -81,7 +97,7 @@ foreach ($f in $workflowFiles) {
   $addDataArgs += "workflows\$($f.Name);workflows"
 }
 
-Write-Host "[3/5] Building txt2img-backend.exe with PyInstaller..."
+Write-Host "[3/4] Building txt2img-backend.exe with PyInstaller..."
 $pyinstallerArgs = @(
   "--noconfirm"
   "--clean"
@@ -103,31 +119,15 @@ $pyinstallerArgs = @(
   "txt2img_entry.py"
 )
 
-& $Toolchain @pyRunArgs @pyinstallerArgs
-
-Write-Host "[4/5] Copying distribution files to dist/..."
-
-$distDir = Join-Path $root "dist"
-$scriptsDir = Join-Path $root "scripts"
-
-$distFiles = @(
-    "download-models.ps1"
-)
-
-foreach ($file in $distFiles) {
-    $src = Join-Path $scriptsDir $file
-    $dst = Join-Path $distDir $file
-    if (Test-Path $src) {
-        Copy-Item -Path $src -Destination $dst -Force
-        Write-Host "  OK  $file"
-    }
-    else {
-        Write-Host "  --  $file not found, skipping"
-    }
+$exitCode = Invoke-Tool $Toolchain ($pyRunArgs + $pyinstallerArgs)
+if ($exitCode -ne 0) {
+  throw "PyInstaller failed with exit code $exitCode"
 }
 
-Write-Host "[5/5] Done."
+Write-Host "[4/4] Done."
 Write-Host ""
+
+$distDir = Join-Path $root "dist"
 Write-Host "EXE output: $distDir\txt2img-backend.exe"
 Write-Host ""
 Write-Host "Distribution layout (place ComfyUI-Engine.exe in dist/ to complete):"
