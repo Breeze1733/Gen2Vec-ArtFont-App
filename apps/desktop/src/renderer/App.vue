@@ -667,6 +667,25 @@ function resetStageProgress() {
   stageProgress.stage2.active = false; stageProgress.stage2.percent = 0
 }
 
+function clearOutputState() {
+  result.image = ''
+  result.svg = ''
+  result.metadata = null
+  result.original = ''
+  result.preview = ''
+  result.transparent = ''
+  currentTaskDir.value = ''
+  currentOutputRoot.value = ''
+  currentTaskPaths.value = null
+  resetStageProgress()
+  batchItems.value = []
+  batchProgress.current = 0
+  batchProgress.total = 0
+  batchProgress.completed = 0
+  batchProgress.failed = 0
+  selectedBatchIndex.value = -1
+}
+
 function startStageProgress(stage) {
   const sp = stageProgress[stage]
   sp.active = true
@@ -697,22 +716,7 @@ const startGeneration = async () => {
   activeTab.value = 'output'
   error.value = ''
   running.value = true
-  result.image = ''
-  result.svg = ''
-  result.metadata = null
-  result.original = ''
-  result.preview = ''
-  result.transparent = ''
-  currentTaskDir.value = ''
-  currentOutputRoot.value = ''
-  currentTaskPaths.value = null
-  resetStageProgress()
-  batchItems.value = []
-  batchProgress.current = 0
-  batchProgress.total = 0
-  batchProgress.completed = 0
-  batchProgress.failed = 0
-  selectedBatchIndex.value = -1
+  clearOutputState()
 
   const taskTitle = mode.value === 'single' ? payload.text.trim() : mode.value === 'batch' ? '批量任务' : '图片矢量化'
   const taskStartedAt = new Date().toISOString()
@@ -728,13 +732,14 @@ const startGeneration = async () => {
   logs.value.unshift(task)
   saveHistory()
 
+  let imageBase64 = null
+  let imageName = null
+  let stage1Duration = 0
+  let stage2Duration = 0
+  let taskInfo = null
+
   try {
     error.value = ''
-    let imageBase64 = null
-    let imageName = null
-    let stage1Duration = 0
-    let stage2Duration = 0
-    let taskInfo = null
 
     // 准备上传图片（仅在 vectorize 模式）
     if (mode.value === 'vectorize' && payload.imageFile) {
@@ -1151,7 +1156,8 @@ const startGeneration = async () => {
 
     persistHistory()
   } catch (err) {
-    error.value = err?.message || '生成失败，请稍后重试。'
+    const failLabel = mode.value === 'single' ? '生成失败' : mode.value === 'vectorize' ? '矢量化失败' : '批量处理失败'
+    error.value = err?.message ? `${failLabel}：${err.message}` : `${failLabel}，请稍后重试。`
     task.status = '失败'
     try {
       await writeFailedTask({
@@ -1170,10 +1176,12 @@ const startGeneration = async () => {
       console.error('失败日志写入失败:', logErr)
     }
     saveHistory()
+
+    clearOutputState()
+    activeTab.value = 'input'
   } finally {
     running.value = false
-    // 如果异常退出，确保进度条关闭
-    if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
+    resetStageProgress()
   }
 }
 
