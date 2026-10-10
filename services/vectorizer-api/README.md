@@ -271,6 +271,19 @@ fc16ebd8b0c10d971d3513d564d01e29
 
 ## 本地运行
 
+本服务是一个 uv 项目（`pyproject.toml` + `uv.lock`），推荐用 uv：
+
+```powershell
+cd services/vectorizer-api
+uv sync
+uv run vectorizer-api
+```
+
+- `uv sync` 会在本目录创建独立的 `.venv`，并按 `uv.lock` 安装全部依赖（含 dev 组的 pyinstaller）。
+- `uv run vectorizer-api` 等价于 `uvicorn app.main:app`，默认监听 `127.0.0.1:8000`。
+
+没有 uv 时，可用 pip（依赖清单已生成好）：
+
 ```powershell
 cd services/vectorizer-api
 python -m venv .venv
@@ -278,6 +291,14 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+> `requirements.txt` 由 `uv export` 从 `uv.lock` 自动生成，**请勿手改**。
+> 调整依赖请编辑 `pyproject.toml`，然后执行：
+>
+> ```powershell
+> uv lock
+> uv export --format requirements-txt --no-hashes --no-dev --no-emit-project > requirements.txt
+> ```
 
 健康检查：
 
@@ -293,6 +314,13 @@ curl http://127.0.0.1:8000/healthz
 powershell -ExecutionPolicy Bypass -File .\scripts\build-backend-exe.ps1
 ```
 
+脚本会自动检测工具链：**优先 uv**（`uv sync` 建 `.venv` 后构建），找不到 uv 时回退到系统 Python。也可显式指定：
+
+```powershell
+.\scripts\build-backend-exe.ps1 -Toolchain uv
+.\scripts\build-backend-exe.ps1 -Toolchain python
+```
+
 打包产物：
 
 ```text
@@ -303,12 +331,6 @@ services/vectorizer-api/dist/vectorizer-backend.exe
 
 ```powershell
 .\vectorizer-backend.exe --host 127.0.0.1 --port 8000
-```
-
-也可以双击：
-
-```text
-services/vectorizer-api/scripts/start-backend.bat
 ```
 
 ## 相关源码

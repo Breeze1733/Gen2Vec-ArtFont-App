@@ -163,18 +163,22 @@ Gen2Vec-ArtFont-App/
 │     ├─ src/utils/                  # 文件与输出目录工具
 │     └─ scripts/                    # CLI 单文件 EXE 构建脚本
 ├─ services/
-│  ├─ txt2img-api/                   # 文本 -> 位图 FastAPI 服务
+│  ├─ txt2img-api/                   # 文本 -> 位图 FastAPI 服务（uv 项目）
 │  │  ├─ app/main.py                 # 路由、关闭接口、ComfyUI 生命周期
 │  │  ├─ app/generator.py            # 工作流加载、参数注入、ComfyUI 调用
 │  │  ├─ app/models.py               # Pydantic 请求/响应模型
 │  │  ├─ workflows/                  # ComfyUI API 格式工作流 JSON
+│  │  ├─ pyproject.toml / uv.lock    # uv 依赖定义与锁文件
+│  │  ├─ requirements.txt            # 由 uv export 生成的 pip 依赖清单
 │  │  ├─ tests/                      # pytest 测试
 │  │  └─ scripts/                    # 后端 EXE 构建与模型下载脚本
-│  └─ vectorizer-api/                # 位图 -> SVG FastAPI 服务
-│     ├─ app/main.py                 # 路由与图片来源解析
+│  └─ vectorizer-api/                # 位图 -> SVG FastAPI 服务（uv 项目）
+│     ├─ app/main.py                 # 路由、图片来源解析、控制台入口
 │     ├─ app/image_processing.py     # rembg、降噪、裁剪、颜色量化
 │     ├─ app/vectorization.py        # vtracer、SVG 预览、质量评估
 │     ├─ app/models.py               # Pydantic 模型与参数校验
+│     ├─ pyproject.toml / uv.lock    # uv 依赖定义与锁文件
+│     ├─ requirements.txt            # 由 uv export 生成的 pip 依赖清单
 │     ├─ models/rembg/               # 离线 rembg ONNX 模型
 │     └─ scripts/                    # 后端 EXE 构建脚本
 ├─ docs/                             # 项目文档
@@ -184,7 +188,6 @@ Gen2Vec-ArtFont-App/
 │  ├─ run-acceptance.ps1             # 测试脚本
 │  └─ README.md                      # 测试脚本说明文档
 ├─ README.md
-├─ CLAUDE.md
 └─ LICENSE
 ```
 
@@ -197,9 +200,29 @@ Gen2Vec-ArtFont-App/
 | 操作系统 | Windows 10 / 11 | 当前桌面交付和打包流程按 Windows 设计 |
 | Node.js | 18+ | 桌面端开发与 CLI 运行；构建 CLI EXE 需要 Node.js 20+ |
 | npm | 9+ | Node.js 包管理 |
-| Python | 3.13+ | `txt2img-api` 要求 |
-| uv | 推荐 | `txt2img-api` 的 Python 依赖管理 |
+| Python | 3.13+ | 两个后端均要求 |
+| uv | 推荐 | 两个后端的 Python 依赖管理（无 uv 时可用 pip） |
 | GPU | NVIDIA 独显推荐 | ComfyUI 推理推荐独显；无 GPU 时可使用降级能力 |
+
+### 安装 Python 依赖
+
+两个后端各自是独立的 uv 项目（目录内各有 `pyproject.toml` + `uv.lock` + `requirements.txt`），**分别安装**：
+
+```powershell
+# 推荐：用 uv，各自建独立 .venv（实际版本以 uv.lock 为准）
+cd services\vectorizer-api
+uv sync
+
+cd ..\txt2img-api
+uv sync
+
+# 没有 uv 时：用 pip 分别安装
+cd services\vectorizer-api
+pip install -r requirements.txt
+
+cd ..\txt2img-api
+pip install -r requirements.txt
+```
 
 ComfyUI 引擎、AI 模型以及矢量化 rembg 模型可以通过以下脚本一键补全（每步会分别询问确认）：
 
@@ -224,9 +247,11 @@ scripts\setup-deps.ps1
 
 ```powershell
 cd services/vectorizer-api
-pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+uv sync
+uv run vectorizer-api
 ```
+
+没有 uv 时可用 pip：`pip install -r requirements.txt` 后 `uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload`。
 
 - [vectorizer API 说明文档](services/vectorizer-api/README.md)
 
@@ -591,7 +616,7 @@ uv sync
 
 # 2. 安装 vectorizer-api 依赖
 cd ..\vectorizer-api
-pip install -r requirements.txt
+uv sync
 
 # 3. 安装桌面端依赖
 cd ..\..\apps\desktop
@@ -678,6 +703,7 @@ npm run electron:build
 | 桌面端 | Electron 42, Vue 3, Vite 8 |
 | CLI | Node.js ES Modules, Node.js SEA |
 | 后端框架 | FastAPI, Uvicorn, Pydantic |
+| Python 依赖管理 | uv（`pyproject.toml` + `uv.lock`，`requirements.txt` 由 uv 导出） |
 | 文生图 | ComfyUI, Flux Schnell, Z-Image Turbo, Qwen-Image |
 | 图像处理 | Pillow, OpenCV, scikit-image |
 | 背景移除 | rembg, ONNX Runtime, `isnet-general-use.onnx` |

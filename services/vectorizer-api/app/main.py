@@ -5,6 +5,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -179,3 +180,8 @@ def vectorize(payload: VectorizeRequest) -> VectorizeResponse:
         "metadata": output["metadata"],
     }
     return VectorizeResponse(**response_payload)
+
+
+def run() -> None:
+    """Entry point for the ``vectorizer-api`` console script."""
+    uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)
