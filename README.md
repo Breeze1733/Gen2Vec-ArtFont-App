@@ -64,6 +64,14 @@
 
 ## 快速开始
 
+### 补充依赖
+
+ComfyUI 引擎、AI 模型和 rembg 模型可通过脚本一键补全：
+
+```powershell
+scripts\setup-deps.ps1
+```
+
 ### 环境要求
 
 | 组件 | 要求 | 说明 |
@@ -103,14 +111,6 @@ node apps/cli/bin/gen2vec.mjs env
 ```
 
 预期两个服务均返回 **正常**。
-
-### 补充依赖
-
-ComfyUI 引擎、AI 模型和 rembg 模型可通过脚本一键补全：
-
-```powershell
-scripts\setup-deps.ps1
-```
 
 > 详细安装步骤、环境变量和排错见 [`docs/安装部署说明.md`](docs/安装部署说明.md)。
 
