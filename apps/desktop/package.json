@@ -19,7 +19,8 @@
     },
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "assets/**/*"
     ],
     "extraResources": [
       { "from": "../../services/txt2img-api/dist/txt2img-backend.exe", "to": "backend/txt2img-backend.exe" },

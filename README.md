@@ -1,22 +1,22 @@
 <div align="center">
 
-<img src="apps/desktop/assets/icon.ico" alt="Gen2Vec-ArtFont" width="96" height="96" />
+<img src="apps/desktop/assets/icon.png" alt="Gen2Vec-ArtFont" width="96" height="96" />
 
 # Gen2Vec ArtFont
 
->矢量艺术字生成器。本地优先的 AI 艺术字工具：输入文字与风格描述，生成艺术字位图，并通过计算机视觉流水线转换为可编辑、可缩放的 SVG 矢量图。
+矢量艺术字生成器
 
-</div>
+><div align="left">
+>本地优先的 AI 艺术字工具：输入文字与风格描述，生成艺术字位图，并通过计算机视觉流水线转换为可编辑、可缩放的 SVG 矢量图。
+></div>
 
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#环境要求)
 [![Desktop](https://img.shields.io/badge/desktop-Electron%20%2B%20Vue-42b883.svg)](#技术栈)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688.svg)](#技术栈)
 
-[特性](#特性) |
-[架构](#架构) |
-[快速开始](#快速开始) |
-[使用方式](#使用方式) |
-[构建](#构建)
+[特性](#特性) | [架构](#架构) | [快速开始](#快速开始) | [使用方式](#使用方式) | [构建](#构建)
+
+</div>
 
 ---
 
@@ -28,7 +28,7 @@
 - **多端覆盖**：Electron + Vue 3 桌面端用于日常操作，Node.js CLI 用于批量任务和自动化验收。
 - **批量处理**：支持 TXT / CSV / JSON 批量输入，逐条容错执行并生成汇总 CSV。
 - **标准产物**：每次任务固定输出 `original.png`、`transparent.png`、`result.svg`、`preview.png`、`metadata.json`、`run.log`。
-- **本地优先**：矢量化模型使用本地 ONNX 文件；输出结果默认写入本机目录。
+- **本地优先**：所有模型均使用本地模型，输入输出无需联网，生成的艺术字资产只写入本地。
 
 ---
 

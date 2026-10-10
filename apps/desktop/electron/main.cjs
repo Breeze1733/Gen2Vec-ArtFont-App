@@ -1054,6 +1054,14 @@ ipcMain.on('splash:action', (_event, data) => {
 
 // ── 窗口管理 ──
 
+function getAppIcon() {
+  const iconPng = path.join(__dirname, '..', 'assets', 'icon.png')
+  if (fsSync.existsSync(iconPng)) return iconPng
+  const iconIco = path.join(__dirname, '..', 'assets', 'icon.ico')
+  if (fsSync.existsSync(iconIco)) return iconIco
+  return undefined
+}
+
 function createSplashWindow() {
   const win = new BrowserWindow({
     width: 520,
@@ -1064,6 +1072,7 @@ function createSplashWindow() {
     center: true,
     show: false,
     backgroundColor: '#f7f3ea',
+    icon: getAppIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -1088,6 +1097,7 @@ function createMainWindow() {
     minHeight: 640,
     title: '矢量艺术字生成器',
     show: false,
+    icon: getAppIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
