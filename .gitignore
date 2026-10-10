@@ -1,32 +1,28 @@
 # Local assistant/tooling
 .claude/
 .spec-workflow/
+.workbuddy-ai/
 CLAUDE.md
 
 # Dependencies
 node_modules/
 
-# JavaScript/Electron build outputs
+# Frontend / Electron build outputs
 dist/
 release/
 dist-ssr/
-**/dist/
-**/release/
-**/dist-ssr/
-*.spec
-*.exe
 *.blockmap
 builder-debug.yml
 builder-effective-config.yaml
 
-# Python environments/caches
+# Packaged binaries and PyInstaller specs
+*.exe
+*.spec
+
+# Python environments and caches
 .venv/
-venv/
-services/txt2img-api/.venv/
 __pycache__/
-**/__pycache__/
 .pytest_cache/
-**/.pytest_cache/
 .ruff_cache/
 .mypy_cache/
 *.pyc
@@ -40,7 +36,6 @@ __pycache__/
 *.pt
 *.pth
 *.bin
-!services/vectorizer-api/models/rembg/*.bat
 
 # Runtime outputs
 outputs/
@@ -52,12 +47,9 @@ services/txt2img-api/temp/
 services/txt2img-api/build/
 services/vectorizer-api/build/
 
-# ComfyUI portable/runtime bundles
+# ComfyUI engine and runtime bundles
 services/txt2img-api/ComfyUI_windows_portable_nvidia/
 services/txt2img-api/ComfyUI_windows_portable/
-services/txt2img-api/ComfyUI_windows_portable_nvidia (2)/
-
-# ComfyUI packaging docs (auto-generated, kept as local reference)
 services/txt2img-api/docs/
 
 # Local environment
