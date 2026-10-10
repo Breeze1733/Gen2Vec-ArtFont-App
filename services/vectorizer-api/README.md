@@ -1,115 +1,26 @@
-# Vectorizer API
+# vectorizer-api
 
-`vectorizer-api` 是 Gen2Vec ArtFont 的位图矢量化后端，负责把用户上传或文生图生成的 PNG/JPG 艺术字图像处理为透明 PNG、SVG 矢量图和 SVG 回渲染预览图。
+位图矢量化后端。把用户上传或文生图生成的 PNG / JPG 艺术字图像处理为透明 PNG、SVG 矢量图与 SVG 回渲染预览图。
 
-服务采用 FastAPI，对外提供本地 HTTP 接口；核心流程为：
+**职责边界**：本服务只负责**位图到矢量图的转换与质量评估**；艺术字位图的生成由 [`txt2img-api`](../txt2img-api/README.md) 独立完成。
 
-```text
-输入 PNG/JPG
-  -> 透明背景处理 / alpha 通道保留
-  -> OpenCV 预处理
-  -> vtracer 路径追踪
-  -> SVG 回渲染 PNG
-  -> 元数据与质量指标
-```
+---
 
-## 功能范围
-
-- 对无 alpha 通道的图片，可使用本地 rembg 模型进行背景移除。
-- 对已有 alpha 通道的图片，直接保留原 alpha，不重复做透明化。
-- 输出透明 PNG、SVG 文本、SVG 回渲染 PNG 预览和结构化 metadata。
-- 记录 `PNG 透明度` 与 `SVG 还原度` 两个质量指标。
-
-## 质量指标
-
-### PNG 透明度
-
-`PNG 透明度` 用于描述输出透明 PNG 的整体透明程度。它不是抠图质量分，而是基于 alpha 通道的画布级统计值。
-
-计算位置：
+## 架构
 
 ```text
-services/vectorizer-api/app/image_processing.py
-calculate_png_transparency()
+POST /api/v1/vectorize
+  │
+  ├─ 图片来源解析（上传 / 流水线传入）
+  │
+  ├─ 透明背景处理 ──→ OpenCV 预处理 ──→ 颜色量化
+  │
+  ├─ vtracer 路径追踪 ──→ 语义图层重组 ──→ SVG
+  │
+  └─ SVG 回渲染 PNG ──→ 保真度评估 ──→ 元数据与质量指标
 ```
 
-计算公式：
-
-```text
-png_transparency = (1 - mean(alpha) / 255) * 100
-```
-
-其中：
-
-- `alpha` 是 RGBA 图像的 alpha 通道矩阵，取值范围为 `0..255`。
-- `alpha = 0` 表示完全透明。
-- `alpha = 255` 表示完全不透明。
-- 输出单位为百分数，保留 1 位小数。
-
-示例：
-
-| 图像状态 | 结果 |
-| --- | ---: |
-| 全透明 | `100.0%` |
-| 全不透明 | `0.0%` |
-| 大量透明背景 + 少量主体 | 较高 |
-| 主体占满画布 | 较低 |
-
-注意：该指标会受到画布尺寸和裁剪策略影响。小主体放在大透明画布中会得到更高透明度，但这不等同于更高抠图质量。
-
-### SVG 还原度
-
-`SVG 还原度` 用于描述 SVG 回渲染 PNG 与透明 PNG 输入之间的视觉相似程度。当前实现以 **SSIM（大窗口）** 为核心，辅以**梯度相关性**和**前景色分布**进行加权评分，并以百分数输出。
-
-> **核心设计思路：**
-> - 透明区域天然完美还原，通过 alpha 掩码统一背景后 SSIM 自动贡献满分。
-> - 边缘评分用**梯度相关性**（皮尔逊 r）替代绝对差，容忍矢量化导致的 1~2px 边缘偏移。
-> - 颜色对比只看前景区域 Lab a/b 通道直方图，排除背景灰的干扰。
-> - SSIM 使用 11×11 大窗口 + 高斯预模糊，对局部抗锯齿差异宽容。
-
-计算位置：
-
-```text
-services/vectorizer-api/app/vectorization.py
-_calculate_svg_fidelity()
-```
-
-计算流程：
-
-1. **前景掩码**：`alpha >= 3`，前景占比 < 0.5% 直接返回 100 分。
-2. **背景统一**：非前景区域填中性灰 `#808080`。
-3. **高斯预模糊**：sigma 0.6~1.2（按 `min_dim / 800` 自适应），`sigma=(s, s, 0)` 仅空间维度。
-4. 计算三个子指标：
-
-   | 指标 | 权重 | 方法 |
-   | --- | ---: | --- |
-   | **SSIM** | 0.50 | 11×11 滑动窗口（小图 7×7），`data_range=255` |
-   | **梯度相关性** | 0.30 | Sobel 梯度图的皮尔逊相关系数，容忍边缘微小偏移 |
-   | **前景色分布** | 0.20 | 仅前景像素的 Lab a/b 直方图相关性 |
-
-5. 加权求和 → `0..100` 百分数。
-
-计算公式：
-
-```text
-# 预处理
-fg_mask   = source.alpha >= 3
-bg         = ~fg_mask → (128,128,128)  # 两张图统一
-blur       = GaussianBlur(sigma=(s,s,0), s∈[0.6,1.2])
-
-# 评估
-ssim_val    = SSIM(blur_orig, blur_vec, win=11, data_range=255)
-edge_score  = PearsonR(Sobel(blur_orig), Sobel(blur_vec))
-color_score = PearsonR(hist_Lab_ab(blur_orig[fg_mask]), hist_Lab_ab(blur_vec[fg_mask]))
-
-svg_fidelity = ssim_val*0.50 + edge_score*0.30 + color_score*0.20  → 映射 0..100
-```
-
-注意：
-
-- 梯度相关性使用 `np.corrcoef` 全图梯度向量计算，时间复杂度 O(N)，对 1024² 图像约 2~5ms。
-- Lab 颜色直方图仅在 `fg_mask` 前景像素上统计，避免背景灰（128,128）干扰色度分布。
-- `channel_axis` / `multichannel` 新旧 API 自动适配。
+---
 
 ## 接口
 
@@ -119,62 +30,63 @@ svg_fidelity = ssim_val*0.50 + edge_score*0.30 + color_score*0.20  → 映射 0.
 | `POST` | `/shutdown` | 关闭后端进程 |
 | `POST` | `/api/v1/vectorize` | 位图转透明 PNG + SVG |
 
-桌面端和 CLI 默认调用：
+桌面端与 CLI 默认调用 `http://127.0.0.1:8000/api/v1/vectorize`。
 
-```text
-http://127.0.0.1:8000/api/v1/vectorize
+### `GET /healthz`
+
+```json
+{ "ok": true, "service": "vectorizer-api" }
 ```
 
-## 请求示例
+### `POST /shutdown`
 
-### 用户上传图片
+关闭服务进程，返回确认信息。
+
+### `POST /api/v1/vectorize`
+
+#### 请求体
+
+用户上传图片：
 
 ```json
 {
   "source_type": "upload",
   "image_base64": "data:image/png;base64,...",
   "image_name": "input.png",
-  "vector": {
-    "preset": "balanced",
-    "color_precision": 4,
-    "filter_speckle": 18,
-    "corner_threshold": 70,
-    "length_threshold": 12,
-    "layer_difference": 20,
-    "scale": 2,
-    "evaluate_quality": true,
-    "remove_edge_white_background": true
-  }
+  "vector": { "preset": "balanced" }
 }
 ```
 
-### 文生图流水线图片
+文生图流水线传入：
 
 ```json
 {
   "source_type": "generated",
   "text": "七里香",
-  "prompt": "清新国风，墨绿色金边，植物叶片装饰",
+  "prompt": "清新国风、墨绿色金边",
   "resolution": "1024x1024",
   "seed": 42,
-  "vector": {
-    "preset": "detailed",
-    "color_precision": 6,
-    "filter_speckle": 2,
-    "corner_threshold": 30,
-    "length_threshold": 3,
-    "layer_difference": 4,
-    "scale": 3,
-    "evaluate_quality": true,
-    "remove_edge_white_background": true
-  },
-  "generated_image": {
-    "file_path": "outputs/task_xxx/original.png"
-  }
+  "vector": { "preset": "detailed" },
+  "generated_image": { "file_path": "outputs/task_xxx/original.png" }
 }
 ```
 
-## 响应字段
+| 字段 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `source_type` | enum | `upload` | `upload`（用户上传）/ `generated`（流水线产出） |
+| `text` | string | `""` | 文字内容，写入元数据 |
+| `prompt` | string | `""` | 风格描述，写入元数据 |
+| `negative` | string | `""` | 负面提示词，写入元数据 |
+| `resolution` | string | `1024 x 1024` | 分辨率，格式 `宽x高` |
+| `format` | string | `PNG + SVG` | 输出格式 |
+| `seed` | int / null | `null` | 随机种子 |
+| `vector` | object | `{preset: "balanced"}` | 矢量化参数，见[矢量化参数](#矢量化参数) |
+| `image_base64` | string / null | `null` | 上传图片的 base64 |
+| `image_path` | string / null | `null` | 上传图片的路径 |
+| `image_name` | string / null | `null` | 原文件名，用于命名任务目录 |
+| `generated_image` | object / null | `null` | 流水线图片引用（`artifact_id` / `image_base64` / `file_path`） |
+
+#### 响应
 
 ```json
 {
@@ -185,37 +97,84 @@ http://127.0.0.1:8000/api/v1/vectorize
   "metadata": {
     "engine": "vectorizer-api-split-pipeline",
     "preprocess": {
-      "transparent_size": {
-        "width": 1024,
-        "height": 1024
-      },
+      "transparent_size": { "width": 1024, "height": 1024 },
       "png_transparency": 72.4
     },
-    "quality": {
-      "svg_fidelity": 94.7
-    }
+    "quality": { "svg_fidelity": 94.7 }
   }
 }
 ```
 
-字段说明：
+| 字段 | 说明 |
+| --- | --- |
+| `transparent_png` | 透明背景 PNG，data URL |
+| `preview_png` | SVG 回渲染预览 PNG，data URL |
+| `png` | 处理后的前景位图，data URL |
+| `svg` | SVG 矢量图文本 |
+| `metadata.preprocess.png_transparency` | PNG 透明度（百分数） |
+| `metadata.quality.svg_fidelity` | SVG 还原度（百分数），可用于赛题「矢量还原度」验收 |
 
-- `transparent_png`：透明背景 PNG，data URL 格式。
-- `preview_png` / `png`：SVG 回渲染后的 PNG 预览，data URL 格式。
-- `svg`：格式化后的 SVG 文本。
-- `metadata.preprocess.png_transparency`：PNG 透明度，百分数。
-- `metadata.quality.svg_fidelity`：SVG 还原度，百分数。
+---
 
-## 透明背景处理逻辑
+## 快速开始
 
-入口函数为 `preprocess_image()`，位于 `app/image_processing.py`。
+### 依赖
+
+| 组件 | 要求 |
+| --- | --- |
+| Python | 3.13+ |
+| uv | 推荐（也可用 pip） |
+
+### 安装与启动
+
+```powershell
+cd services\vectorizer-api
+uv sync
+uv run vectorizer-api
+```
+
+服务监听 `127.0.0.1:8000`。
+
+没有 uv 时：
+
+```powershell
+pip install -r requirements.txt
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+> `requirements.txt` 由 `uv export` 从 `uv.lock` 生成，**请勿手改**。调整依赖请编辑 `pyproject.toml` 后执行 `uv lock` 并重新导出。
+
+### 测试
+
+本服务不含独立测试目录，矢量化相关的自动化验收由仓库根目录的 `tests/` 覆盖（含单图矢量化与 SVG 回渲染校验场景）。
+
+---
+
+## 配置
+
+本服务**无独立环境变量**，运行期配置全部通过请求体的 `vector` 对象传入。
+
+模型路径自动解析，无需配置：
+
+| 运行方式 | 模型查找位置 |
+| --- | --- |
+| 开发（源码） | `services/vectorizer-api/models/rembg/` |
+| 打包（EXE） | `<EXE 同级目录>/models/rembg/` |
+
+服务内部会设置 `U2NET_HOME` 指向本地模型目录，确保 rembg 只从本地加载、不联网下载。
+
+---
+
+## 透明背景处理
+
+入口为 `app/image_processing.py` 的 `preprocess_image()`。
 
 处理规则：
 
-1. 如果输入图片已有 alpha 通道，直接转换为 `RGBA` 并保留原图透明信息。
-2. 如果输入图片没有 alpha 通道，并且 `remove_edge_white_background=true`，使用本地 rembg 模型移除背景。
-3. 对 rembg 输出进行边缘保留降噪、抗锯齿保留、主体裁剪和颜色量化。
-4. 无论是否执行背景移除，最终都会计算 `PNG 透明度`。
+1. 输入**已有 alpha 通道** → 直接转 `RGBA`，保留原透明信息，不重复抠图
+2. 输入**无 alpha 通道**且 `remove_edge_white_background=true` → 用本地 rembg 模型移除背景
+3. 对结果做边缘保留降噪、抗锯齿保留、主体裁剪与颜色量化
+4. 无论是否执行背景移除，最终都计算 `PNG 透明度`
 
 已有 alpha 通道的判定：
 
@@ -223,122 +182,183 @@ http://127.0.0.1:8000/api/v1/vectorize
 has_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
 ```
 
-因此，透明 PNG 输入不会被重复抠图，但仍会参与透明度统计。
+### PNG 透明度指标
+
+描述输出透明 PNG 的整体透明程度，是**画布级统计值**，不是抠图质量分：
+
+```text
+png_transparency = (1 - mean(alpha) / 255) * 100
+```
+
+| 图像状态 | 结果 |
+| --- | ---: |
+| 全透明 | `100.0%` |
+| 全不透明 | `0.0%` |
+| 大量透明背景 + 少量主体 | 较高 |
+
+> 该指标受画布尺寸与裁剪策略影响：小主体放在大透明画布中会得到更高透明度，但不等于更高抠图质量。
+
+---
+
+## 矢量化流程
+
+```text
+预处理后的前景位图
+  → 形态学闭开滤波 + 连通域面积滤波
+  → vtracer 路径追踪（三次贝塞尔拟合）
+  → 语义图层解耦与拓扑分类
+  → W3C SVG 组装 + Dublin Core / JSON-LD 元数据
+  → resvg_py 回渲染 PNG
+  → 保真度评估
+```
+
+图层分类结果：
+
+| 图层 | 典型内容 |
+| --- | --- |
+| `layer-shadow` | 投影、暗色底衬 |
+| `layer-stroke` | 描边、外框 |
+| `layer-main-text` | 主体文字 |
+| `layer-decorations` | 外围花瓣、叶片、光芒等装饰 |
+
+分组写入 SVG 的 `<g>`，可在 Inkscape / Illustrator 中按图层单独编辑。算法细节见[算法原理说明](../../docs/算法原理说明.md#三轮廓提取与路径拟合)。
+
+### SVG 还原度指标
+
+将 SVG 用 `resvg_py` 回渲染为 PNG，与透明 PNG 对比，按三个子指标加权：
+
+| 指标 | 权重 | 方法 |
+| --- | ---: | --- |
+| SSIM | 0.50 | 11×11 滑动窗口（小图 7×7），`data_range=255` |
+| 梯度相关性 | 0.30 | Sobel 梯度图的皮尔逊相关系数，容忍 1~2px 边缘偏移 |
+| 前景色分布 | 0.20 | 仅前景像素的 Lab a/b 直方图相关性 |
+
+```text
+svg_fidelity = ssim*0.50 + edge_corr*0.30 + color_corr*0.20   → 0..100
+```
+
+> 透明区域通过 alpha 掩码统一为中性灰后参与比较，因此天然接近满分；颜色对比只看前景，排除背景灰干扰。
+
+---
 
 ## 矢量化参数
 
-服务支持 4 个预设和 6 个底层参数。传入 `preset` 后会加载对应默认值；如果请求中同时传入底层参数，则以请求值覆盖预设值。
+服务支持 **4 个预设 + 6 个底层参数**。传入 `preset` 加载对应默认值；请求中同时传入底层参数时以请求值覆盖。
 
-| 预设 | color_precision | filter_speckle | corner_threshold | length_threshold | layer_difference | scale | 适用场景 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `clean` | 2 | 48 | 120 | 30 | 38 | 2 | 路径更少，文件更小，适合干净图形 |
-| `balanced` | 4 | 18 | 70 | 12 | 20 | 2 | 默认推荐，平衡细节和体积 |
-| `detailed` | 6 | 2 | 30 | 3 | 4 | 3 | 保留更多颜色层次和边缘细节 |
-| `ultra` | 8 | 1 | 20 | 2 | 2 | 3 | 最大细节，文件体积也最大 |
+| 预设 | 名称 | 适用场景 |
+| --- | --- | --- |
+| `clean` | 清爽 | 色块分明、结构简单的图，输出体积最小 |
+| `balanced` | 平衡 | **默认值**，兼顾质量与体积 |
+| `detailed` | 精细 | 细节丰富、需要保留较多层次 |
+| `ultra` | 超清 | 追求最高还原度，输出体积最大 |
 
-参数含义：
+| 参数 | 范围 | 说明 |
+| --- | :---: | --- |
+| `color_precision` | 1–8 | 颜色聚类精度，值越高颜色分层越细 |
+| `filter_speckle` | 0–64 | 小噪点过滤阈值，值越高越倾向删除小区域 |
+| `corner_threshold` | 1–180 | 角点阈值，值越低越容易保留尖角 |
+| `length_threshold` | 1–64 | 路径片段长度阈值，值越低细节越多 |
+| `layer_difference` | 1–64 | 颜色层之间的差异阈值 |
+| `scale` | 1–4 | 矢量化前的上采样倍率 |
 
-- `color_precision`：颜色精度，值越高颜色分层越细。
-- `filter_speckle`：小噪点过滤阈值，值越高越倾向删除小区域。
-- `corner_threshold`：角点阈值，影响路径转角保留。
-- `length_threshold`：路径片段长度阈值。
-- `layer_difference`：颜色层之间的差异阈值。
-- `scale`：矢量化前的上采样倍率。
+另有 4 个开关：`evaluate_quality`、`remove_edge_white_background`、`white_value_threshold`、`white_saturation_threshold`。
+
+各预设的具体数值与全部参数说明见[参数配置说明](../../docs/参数配置说明.md#二矢量化参数)。
+
+---
 
 ## rembg 离线模型
 
-后端固定使用 `isnet-general-use` 模型，并只从本地加载，不会在运行时下载模型。
+固定使用 `isnet-general-use` 模型，**只从本地加载，运行时不下载**。
 
-开发运行时放置路径：
+| 项 | 值 |
+| --- | --- |
+| 文件 | `isnet-general-use.onnx` |
+| 大小 | 约 170 MB |
+| MD5 | `FC16EBD8B0C10D971D3513D564D01E29` |
+| 来源 | [danielgatis/rembg](https://github.com/danielgatis/rembg) release `v0.0.0` |
 
-```text
-services/vectorizer-api/models/rembg/isnet-general-use.onnx
-```
-
-打包运行时放置路径：
-
-```text
-dist/models/rembg/isnet-general-use.onnx
-```
-
-模型 MD5：
+放置位置：
 
 ```text
-fc16ebd8b0c10d971d3513d564d01e29
+开发：services/vectorizer-api/models/rembg/isnet-general-use.onnx
+打包：dist/models/rembg/isnet-general-use.onnx
 ```
 
-如果模型不存在或校验失败，背景移除会返回明确错误。
-
-## 本地运行
-
-本服务是一个 uv 项目（`pyproject.toml` + `uv.lock`），推荐用 uv：
+获取方式：
 
 ```powershell
-cd services/vectorizer-api
-uv sync
-uv run vectorizer-api
+# 单独下载
+.\models\rembg\download-isnet-general-use.ps1
+
+# 或随开发依赖一起
+.\scripts\setup-deps.ps1
 ```
 
-- `uv sync` 会在本目录创建独立的 `.venv`，并按 `uv.lock` 安装全部依赖（含 dev 组的 pyinstaller）。
-- `uv run vectorizer-api` 等价于 `uvicorn app.main:app`，默认监听 `127.0.0.1:8000`。
+模型缺失或 MD5 校验失败时，背景移除会返回明确错误。完整依赖清单见[模型与节点依赖清单](../../docs/模型与节点依赖清单.md)。
 
-没有 uv 时，可用 pip（依赖清单已生成好）：
+---
 
-```powershell
-cd services/vectorizer-api
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+## 项目结构
+
+```text
+services/vectorizer-api/
+├── app/
+│   ├── main.py                FastAPI 应用、路由、图片来源解析、响应组装
+│   ├── models.py              Pydantic 请求 / 响应模型
+│   ├── image_processing.py    图片解码、背景移除、预处理、PNG 透明度
+│   └── vectorization.py       路径追踪、图层分类、SVG 组装、保真度评估
+├── models/rembg/              isnet-general-use.onnx 与下载脚本
+├── scripts/
+│   └── build-backend-exe.ps1  PyInstaller 打包脚本
+├── backend_entry.py           PyInstaller 打包入口
+└── pyproject.toml / uv.lock / requirements.txt
 ```
 
-> `requirements.txt` 由 `uv export` 从 `uv.lock` 自动生成，**请勿手改**。
-> 调整依赖请编辑 `pyproject.toml`，然后执行：
->
-> ```powershell
-> uv lock
-> uv export --format requirements-txt --no-hashes --no-dev --no-emit-project > requirements.txt
-> ```
-
-健康检查：
-
-```powershell
-curl http://127.0.0.1:8000/healthz
-```
+---
 
 ## 打包为 EXE
 
-在 `services/vectorizer-api` 目录执行：
-
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build-backend-exe.ps1
-```
-
-脚本会自动检测工具链：**优先 uv**（`uv sync` 建 `.venv` 后构建），找不到 uv 时回退到系统 Python。也可显式指定：
-
-```powershell
+.\scripts\build-backend-exe.ps1                  # 自动检测：有 uv 用 uv，否则用 python
 .\scripts\build-backend-exe.ps1 -Toolchain uv
 .\scripts\build-backend-exe.ps1 -Toolchain python
 ```
 
-打包产物：
+产物：`services/vectorizer-api/dist/vectorizer-backend.exe`
+
+打包时会把 `models/` 复制到 `dist/models/`。**模型是 EXE 的旁挂文件，不内嵌**，交付时必须与 EXE 一同分发：
 
 ```text
-services/vectorizer-api/dist/vectorizer-backend.exe
+dist/
+├── vectorizer-backend.exe
+└── models/rembg/isnet-general-use.onnx
 ```
 
-启动打包后的后端：
-
-```powershell
-.\vectorizer-backend.exe --host 127.0.0.1 --port 8000
-```
+---
 
 ## 相关源码
 
 | 文件 | 说明 |
 | --- | --- |
-| `app/main.py` | FastAPI 路由、请求来源解析、响应组装 |
-| `app/models.py` | Pydantic 请求/响应模型 |
-| `app/image_processing.py` | 图片解码、透明背景处理、PNG 透明度计算 |
-| `app/vectorization.py` | vtracer 转 SVG、SVG 回渲染、SVG 还原度计算 |
+| `app/main.py` | FastAPI 路由、图片来源解析、响应组装 |
+| `app/models.py` | 请求 / 响应模型与参数约束 |
+| `app/image_processing.py` | 图片解码、背景移除、预处理、PNG 透明度计算 |
+| `app/vectorization.py` | 路径追踪、图层分类、SVG 组装、保真度评估 |
 | `scripts/build-backend-exe.ps1` | PyInstaller 打包脚本 |
+
+---
+
+## 相关文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [算法原理说明](../../docs/算法原理说明.md) | 预处理、轮廓提取、颜色分层、路径拟合、回渲染对比的算法细节 |
+| [参数配置说明](../../docs/参数配置说明.md) | 矢量化参数、请求字段、输出目录规则 |
+| [模型与节点依赖清单](../../docs/模型与节点依赖清单.md) | 模型来源、版本、许可与部署位置 |
+| [安装部署说明](../../docs/安装部署说明.md) | 交付包部署与源码部署两条路径 |
+
+## 与 monorepo 的关联
+
+- 桌面端与 CLI 通过 HTTP 调用本服务 `http://127.0.0.1:8000/api/v1/vectorize`
+- 上游位图来自 [`txt2img-api`](../txt2img-api/README.md)（端口 9001），也可直接接收用户上传图片

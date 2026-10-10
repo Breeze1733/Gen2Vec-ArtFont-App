@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 class VectorConfig(BaseModel):
     # Frontend vectorization controls (6 params + 4 presets).
     preset: Literal["clean", "balanced", "detailed", "ultra"] = "balanced"
-    color_precision: int | None = Field(default=None, ge=1, le=16)
+    color_precision: int | None = Field(default=None, ge=1, le=8)
     filter_speckle: int | None = Field(default=None, ge=0, le=64)
     corner_threshold: int | None = Field(default=None, ge=1, le=180)
     length_threshold: int | None = Field(default=None, ge=1, le=64)

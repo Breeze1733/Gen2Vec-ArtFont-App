@@ -2,7 +2,7 @@
 
 ## 定位
 
-`gen2vec-cli` 是 **随桌面端安装包交付的自动化验收控制台**，不独立分发。
+`gen2vec_cli.exe` 是 **随桌面端安装包交付的自动化验收控制台**，不独立分发。
 
 - **日常使用** → 启动桌面端 GUI，使用图形界面操作。
 - **评审验收 / 批量测试 / 脚本自动化** → 使用 CLI。
@@ -19,7 +19,7 @@ CLI 假设后端（txt2img-api + vectorizer-api）已经由桌面端启动完毕
 
 ```powershell
 cd "C:\Program Files\矢量艺术字生成器"
-.\gen2vec-cli <command> [options]
+.\gen2vec_cli.exe <command> [options]
 ```
 
 **此时桌面端已在后台自动启动后端**，CLI 零等待直接执行。
@@ -34,7 +34,7 @@ node apps/cli/bin/gen2vec.mjs <command> [options]
 # 或通过 npm link
 cd apps/cli
 npm link
-gen2vec-cli <command> [options]
+gen2vec_cli <command> [options]
 ```
 
 ---
@@ -55,9 +55,9 @@ gen2vec-cli <command> [options]
 最常用的验收命令，一条指令走完全流程。
 
 ```powershell
-gen2vec-cli pipeline --text "七里香" --prompt "清新国风、墨绿色金边"
-gen2vec-cli pipeline --text "Hello" --prompt "neon style" --vector-preset ultra
-gen2vec-cli pipeline --text "夏日冰饮 50%" --prompt "清爽蓝白配色" --seed 42
+gen2vec_cli.exe pipeline --text "七里香" --prompt "清新国风、墨绿色金边"
+gen2vec_cli.exe pipeline --text "Hello" --prompt "neon style" --vector-preset ultra
+gen2vec_cli.exe pipeline --text "夏日冰饮 50%" --prompt "清爽蓝白配色" --seed 42
 ```
 
 | 参数 | 简写 | 说明 | 必填 |
@@ -76,7 +76,7 @@ gen2vec-cli pipeline --text "夏日冰饮 50%" --prompt "清爽蓝白配色" --s
 ### `generate` — 生成艺术字位图
 
 ```powershell
-gen2vec-cli generate --text "你好" --prompt "霓虹风格"
+gen2vec_cli.exe generate --text "你好" --prompt "霓虹风格"
 ```
 
 | 参数 | 简写 | 说明 | 必填 |
@@ -94,8 +94,8 @@ gen2vec-cli generate --text "你好" --prompt "霓虹风格"
 ### `vectorize` — 位图矢量化
 
 ```powershell
-gen2vec-cli vectorize --input artwork.png --preset detailed
-gen2vec-cli vectorize -i input.png --preset ultra --preview
+gen2vec_cli.exe vectorize --input artwork.png --preset detailed
+gen2vec_cli.exe vectorize -i input.png --preset ultra --preview
 ```
 
 | 参数 | 简写 | 说明 | 必填 |
@@ -119,9 +119,9 @@ gen2vec-cli vectorize -i input.png --preset ultra --preview
 常用：
 
 ```powershell
-gen2vec-cli batch --input-file tests/acceptance.txt --output-dir ./outputs/cli-batch
-gen2vec-cli batch --text "七里香|清新国风`n夏日冰饮 50%|清爽蓝白" --seed 20260605 --seed-step 1
-gen2vec-cli batch --input-file batch.csv --no-vectorize
+gen2vec_cli.exe batch --input-file tests/acceptance.txt --output-dir ./outputs/cli-batch
+gen2vec_cli.exe batch --text "七里香|清新国风`n夏日冰饮 50%|清爽蓝白" --seed 20260605 --seed-step 1
+gen2vec_cli.exe batch --input-file batch.csv --no-vectorize
 ```
 
 | 参数 | 说明 | 必填 |
@@ -143,7 +143,7 @@ gen2vec-cli batch --input-file batch.csv --no-vectorize
 显示当前 CLI 版本、后端 URL、health 状态、Node.js 运行时和输出目录配置。
 
 ```powershell
-gen2vec-cli env
+gen2vec_cli.exe env
 ```
 
 ---
@@ -151,7 +151,7 @@ gen2vec-cli env
 ### `health` — 后端健康检查
 
 ```powershell
-gen2vec-cli health
+gen2vec_cli.exe health
 # txt2img 服务:    ✓ 正常
 # 矢量化服务:     ✓ 正常
 ```
@@ -161,7 +161,7 @@ gen2vec-cli health
 ### `shutdown` — 关闭后端
 
 ```powershell
-gen2vec-cli shutdown
+gen2vec_cli.exe shutdown
 ```
 
 ---

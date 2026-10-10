@@ -5,13 +5,13 @@
   "type": "module",
   "private": true,
   "bin": {
-    "gen2vec-cli": "./bin/gen2vec.mjs"
+    "gen2vec_cli": "./bin/gen2vec.mjs"
   },
   "scripts": {
     "build": "powershell.exe -ExecutionPolicy Bypass -File ./scripts/build-cli-exe.ps1"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "devDependencies": {
     "postject": "^1.0.0-alpha.6"
